@@ -334,6 +334,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_keywords",
                         @"titleKey": @"KEMO_KEYWORDS_TITLE",
                         @"action": @"openKeywordEditor:"
+                    },
+                    @{
+                        @"key": @"kemo_shake_dump",
+                        @"default": @NO,
+                        @"type": @"toggle"
                     }
                 ]
             },

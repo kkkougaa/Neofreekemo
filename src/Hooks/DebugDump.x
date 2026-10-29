@@ -6,7 +6,7 @@
 #import "HookHelpers.h"
 
 // MARK: - View tree dump (shake)
-// Shaking the device copies a text outline of what's currently on screen to the
+// With "kemo_shake_dump" on, shaking the device copies a text outline of what's currently on screen to the
 // pasteboard: view classes, owning view controllers, label/button text, and the
 // contents of every table or collection view. For working out how an app screen
 // is built when its class names aren't known.
@@ -290,7 +290,7 @@ static void PerformDump(UIWindow* window) {
 
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
     %orig;
-    if (motion != UIEventSubtypeMotionShake) {
+    if (motion != UIEventSubtypeMotionShake || ![BHTSettings boolForKey:@"kemo_shake_dump"]) {
         return;
     }
     PerformDump(self);
@@ -301,7 +301,7 @@ static void PerformDump(UIWindow* window) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
                        UIWindow* window = weakWindow;
-                       if (window) {
+                       if (window && [BHTSettings boolForKey:@"kemo_shake_dump"]) {
                            PerformDump(window);
                        }
                    });

@@ -460,3 +460,4 @@
 "SPOTIFY_COPIED_LABEL" = "Redirect URI copied. Paste it into Redirect URIs on the Spotify dashboard, then press Add and Save.";
 "KEMO_KEYWORDS_TITLE" = "Highlight keywords";
 "KEMO_KEYWORD_ADD_TITLE" = "Add keyword";
+"KEMO_SHAKE_DUMP_TITLE" = "Shake to copy screen outline";

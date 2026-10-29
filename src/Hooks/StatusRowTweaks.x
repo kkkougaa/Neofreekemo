@@ -16,9 +16,6 @@
 // layout: the position it was moved to is remembered, and when the frames still
 // hold that position nothing is moved again.
 
-@interface T1StandardStatusView : UIView
-@end
-
 static NSString* const kMediaOnlyKey = @"kemo_media_only";
 
 static const void* kAliasLabelKey = &kAliasLabelKey;

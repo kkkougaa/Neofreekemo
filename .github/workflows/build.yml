@@ -33,8 +33,8 @@ on:
         required: false
         type: boolean
       resource_pack_url:
-        description: "Override app icons (.ZIP) (IPA builds only)"
-        default: "https://files.catbox.moe/p63f20.zip"
+        description: "Override app icons (.ZIP), empty = bundled resource-pack/ (IPA builds only)"
+        default: ""
         required: false
         type: string
       commit_id:
@@ -135,9 +135,13 @@ jobs:
           IPA_URL: ${{ inputs.decrypted_ipa_url }}
 
       - name: Prepare Image Pack
-        if: inputs.resource_pack_url != '' && (inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore')
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
         run: |
-          wget "$IMAGE_URL" --no-verbose -O main/resource-pack.zip
+          if [ -n "$IMAGE_URL" ]; then
+            wget "$IMAGE_URL" --no-verbose -O main/resource-pack.zip
+          else
+            (cd main/resource-pack && zip -qr ../resource-pack.zip .)
+          fi
         env:
           IMAGE_URL: ${{ inputs.resource_pack_url }}
 
@@ -164,7 +168,7 @@ jobs:
           BUILD_DIR: ${{ github.workspace }}/ffmpeg-build
 
       - name: Rebrand IPA
-        if: (inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore') && (inputs.twitter_branding || inputs.resource_pack_url != '')
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
         run: |
           cd ${{ github.workspace }}/main
           IMAGE_FLAG=""

@@ -490,3 +490,7 @@
 /*Misc*/
 "LOCATION_UNAVAILABLE" = "位置不可用";
 "CONTRIBUTOR_PAGE_SECTION_HEADER_TITLE" = "贡献者";
+"NSFW_AI_BLUR_OVERLAY_TITLE" = "Hidden because it was judged NSFW!";
+"NSFW_AI_BLUR_SHOW" = "View";
+"NSFW_AI_BLUR_TITLE" = "Blur NSFW images (on-device AI)";
+"NSFW_MODE_TITLE" = "NSFW mode";

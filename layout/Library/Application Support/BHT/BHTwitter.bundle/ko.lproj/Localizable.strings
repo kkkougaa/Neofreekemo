@@ -454,3 +454,5 @@
 /* Undo Duration Labels (Added for TweetsSettingsViewController) */
 "GENERIC_OFF_LABEL" = "끔";
 "SUBSCRIPTION_UNDO_SEND_DURATION_LABEL" = "%ld초";
+"NSFW_AI_BLUR_OVERLAY_TITLE" = "NSFW로 판단되어 가렸어요!";
+"NSFW_AI_BLUR_SHOW" = "열어보기";

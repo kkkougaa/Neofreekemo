@@ -305,3 +305,7 @@
 "LEGACY_LOGIN_RATE_LIMITED_TITLE" = "Likely rate limited (243)";
 "LEGACY_LOGIN_RATE_LIMITED_MESSAGE" = "Too many attempts. Wait a while or switch network/VPN, then try again.\n\nDetails:\n%@";
 "LEGACY_LOGIN_UNKNOWN_ERROR" = "Unknown error";
+"NSFW_AI_BLUR_OVERLAY_TITLE" = "Hidden because it was judged NSFW!";
+"NSFW_AI_BLUR_SHOW" = "View";
+"NSFW_AI_BLUR_TITLE" = "Blur NSFW images (on-device AI)";
+"NSFW_MODE_TITLE" = "NSFW mode";

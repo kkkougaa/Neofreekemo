@@ -193,9 +193,6 @@ static void NFBShowOverlay(UIView* mediaView, UIImage* flagged) {
     overlay.layer.cornerRadius = mediaView.layer.cornerRadius;
     overlay.clipsToBounds = YES;
     overlay.backgroundColor = [UIColor systemGrayColor];
-    overlay.isAccessibilityElement = YES;
-    overlay.accessibilityLabel = @"Sensitive image";
-    overlay.accessibilityTraits = UIAccessibilityTraitButton;
 
     static const CGFloat kBadgeSize = 28.0;
     static const CGFloat kBadgeInset = 10.0;
@@ -207,10 +204,43 @@ static void NFBShowOverlay(UIView* mediaView, UIImage* flagged) {
         UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin;
     [overlay addSubview:badge];
 
+    // Centered explanation and the button that opens the image.
+    UILabel* message = [UILabel new];
+    message.text = [[BHTBundle sharedBundle] localizedStringForKey:@"NSFW_AI_BLUR_OVERLAY_TITLE"];
+    message.textColor = [UIColor whiteColor];
+    message.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    message.textAlignment = NSTextAlignmentCenter;
+    message.numberOfLines = 0;
+
+    UIButton* showButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [showButton setTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"NSFW_AI_BLUR_SHOW"]
+                forState:UIControlStateNormal];
+    [showButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    showButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    showButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.22];
+    showButton.contentEdgeInsets = UIEdgeInsetsMake(8, 18, 8, 18);
+    showButton.layer.cornerRadius = 16;
+    [showButton addTarget:overlay
+                   action:@selector(nfb_reveal)
+         forControlEvents:UIControlEventTouchUpInside];
+
+    UIStackView* stack =
+        [[UIStackView alloc] initWithArrangedSubviews:@[ message, showButton ]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.alignment = UIStackViewAlignmentCenter;
+    stack.spacing = 12;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [overlay addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
+        [stack.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
+        [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor
+                                                         constant:16],
+        [stack.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor
+                                                       constant:-16],
+    ]];
+
     __weak UIView* weakMedia = mediaView;
-    UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc]
-        initWithTarget:overlay action:@selector(nfb_reveal)];
-    [overlay addGestureRecognizer:tap];
     objc_setAssociatedObject(overlay, @selector(nfb_reveal), ^{
         UIView* media = weakMedia;
         if (!media) {

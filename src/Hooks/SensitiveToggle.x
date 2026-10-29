@@ -11,9 +11,9 @@
 // page. Off is the gray bird icon; on is the accent-colored eggplant icon with its
 // pink blush kept. Icon layers: badge (tinted), art (white), blush (original colors).
 //
-// The drawer's class names aren't known, so the list is found by its content: a
-// table or collection view whose visible cells carry at least two of the usual
-// row titles. The row copies the font, color and icon position of those cells.
+// The drawer is SwiftUI (TwitterDash.DashHostingController): its menu is a
+// collection view of SwiftUI cells, with no UILabels to copy a style from, so the
+// row uses fixed metrics that match the other rows.
 
 static NSString* const kSensitiveKey = @"disable_sensitive_tweet_warnings";
 static const CGFloat kIconSize = 28.0;
@@ -171,97 +171,50 @@ static UIImage* ToggleImage(NSString* name) {
 
 // MARK: Locating the drawer list
 
-static NSSet<NSString*>* DrawerRowNames(void) {
-    return [NSSet setWithArray:@[
-        @"Profile", @"Lists", @"Communities", @"Bookmarks", @"Spaces", @"Premium",
-        @"프로필", @"리스트", @"커뮤니티", @"북마크", @"스페이스", @"프리미엄"
-    ]];
-}
-
-static void CollectLabels(UIView* view, NSMutableArray<UILabel*>* out) {
-    if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length) {
-        [out addObject:(UILabel*)view];
-    }
-    for (UIView* sub in view.subviews) {
-        CollectLabels(sub, out);
-    }
-}
-
-// Whether this list holds the drawer rows; also returns a cell and label to copy.
-static BOOL MatchDrawerList(UIScrollView* list, UIView** cellOut, UILabel** labelOut) {
-    NSSet<NSString*>* names = DrawerRowNames();
-    NSCharacterSet* trim = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-    NSArray* cells = [(id)list performSelector:@selector(visibleCells)];
-    NSMutableSet<NSString*>* seen = [NSMutableSet new];
-    UIView* templateCell = nil;
-    UILabel* templateLabel = nil;
-
-    for (UIView* cell in cells) {
-        NSMutableArray<UILabel*>* labels = [NSMutableArray new];
-        CollectLabels(cell, labels);
-        for (UILabel* label in labels) {
-            NSString* text = [label.text stringByTrimmingCharactersInSet:trim];
-            if ([names containsObject:text]) {
-                [seen addObject:text];
-                if (!templateCell) {
-                    templateCell = cell;
-                    templateLabel = label;
-                }
-            }
-        }
-    }
-    if (seen.count < 2) {
+static BOOL IsDrawerList(UIScrollView* list) {
+    if (![list isKindOfClass:[UICollectionView class]] ||
+        [[(id)list performSelector:@selector(visibleCells)] count] < 3) {
         return NO;
     }
-    *cellOut = templateCell;
-    *labelOut = templateLabel;
-    return YES;
+    UIView* ancestor = list.superview;
+    for (int depth = 0; ancestor && depth < 12; depth++, ancestor = ancestor.superview) {
+        if ([NSStringFromClass(ancestor.class) containsString:@"TwitterDash"] ||
+            [NSStringFromClass(ancestor.nextResponder.class) containsString:@"DashHostingController"]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static __weak NFBSensitiveRow* gRow;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
 static void InstallRow(UIScrollView* list) {
-    UIView* templateCell = nil;
-    UILabel* templateLabel = nil;
-    if (!list.window || !MatchDrawerList(list, &templateCell, &templateLabel)) {
+    if (!list.window || !IsDrawerList(list)) {
         return;
     }
 
-    CGFloat rowHeight = MAX(CGRectGetHeight(templateCell.bounds), 44.0);
-    CGRect labelRect = [templateLabel convertRect:templateLabel.bounds toView:list];
-
-    // Left edge of the template's icon, if it has one.
-    CGFloat iconX = NAN;
-    NSMutableArray<UIView*>* stack = [NSMutableArray arrayWithObject:templateCell];
-    while (stack.count) {
-        UIView* view = stack.lastObject;
-        [stack removeLastObject];
-        if ([view isKindOfClass:[UIImageView class]] &&
-            CGRectGetWidth(view.bounds) >= 16 && CGRectGetWidth(view.bounds) <= 44) {
-            CGRect rect = [view convertRect:view.bounds toView:list];
-            CGFloat x = rect.origin.x - (kIconSize - rect.size.width) / 2;
-            iconX = isnan(iconX) ? x : MIN(iconX, x);
-        }
-        [stack addObjectsFromArray:view.subviews];
+    // Sit right under the last menu row, as tall as the first one.
+    NSArray<UIView*>* cells = [(id)list performSelector:@selector(visibleCells)];
+    CGFloat bottom = 0;
+    for (UIView* cell in cells) {
+        bottom = MAX(bottom, CGRectGetMaxY(cell.frame));
     }
-    if (isnan(iconX)) {
-        iconX = MAX(CGRectGetMinX(labelRect) - kIconSize - 16, 12);
-    }
-    CGFloat labelX = MAX(CGRectGetMinX(labelRect), iconX + kIconSize + 12);
+    CGFloat rowHeight = 52.0;
+    CGFloat iconX = 32.0;
+    CGFloat labelX = iconX + kIconSize + 16.0;
 
     NFBSensitiveRow* row = gRow;
     if (!row || row.superview != list) {
         [gRow removeFromSuperview];
         row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
         gRow = row;
+        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        row.baseTextColor = [UIColor labelColor];
         [list addSubview:row];
     }
-    row.label.font = templateLabel.font;
-    row.baseTextColor = templateLabel.textColor;
     [row applyLabelColor];
-    row.frame = CGRectMake(0, list.contentSize.height, CGRectGetWidth(list.bounds),
-                           rowHeight);
+    row.frame = CGRectMake(0, bottom, CGRectGetWidth(list.bounds), rowHeight);
     row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
     row.label.frame = CGRectMake(
         labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);

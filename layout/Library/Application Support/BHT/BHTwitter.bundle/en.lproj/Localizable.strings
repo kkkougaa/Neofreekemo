@@ -495,3 +495,5 @@
 /* Undo Duration Labels (Added for TweetsSettingsViewController) */
 "GENERIC_OFF_LABEL" = "Off";
 "SUBSCRIPTION_UNDO_SEND_DURATION_LABEL" = "%ld seconds";
+"NSFW_AI_BLUR_OVERLAY_TITLE" = "Hidden because it was judged NSFW!";
+"NSFW_AI_BLUR_SHOW" = "View";

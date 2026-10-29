@@ -187,67 +187,44 @@ static void CollectLabels(UIView* view, NSMutableArray<UILabel*>* out) {
     }
 }
 
-static void CollectLists(UIView* view, int depth, NSMutableArray<UIScrollView*>* out) {
-    if ([view isKindOfClass:[UITableView class]] ||
-        [view isKindOfClass:[UICollectionView class]]) {
-        [out addObject:(UIScrollView*)view];
-    }
-    if (depth < 8) {
-        for (UIView* sub in view.subviews) {
-            CollectLists(sub, depth + 1, out);
-        }
-    }
-}
-
-// Finds the list holding the drawer rows, plus a cell and label to copy the look of.
-static BOOL FindDrawerList(UIView* root, UIScrollView** listOut, UIView** cellOut,
-                           UILabel** labelOut) {
-    NSMutableArray<UIScrollView*>* lists = [NSMutableArray new];
-    CollectLists(root, 0, lists);
+// Whether this list holds the drawer rows; also returns a cell and label to copy.
+static BOOL MatchDrawerList(UIScrollView* list, UIView** cellOut, UILabel** labelOut) {
     NSSet<NSString*>* names = DrawerRowNames();
     NSCharacterSet* trim = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSArray* cells = [(id)list performSelector:@selector(visibleCells)];
+    NSMutableSet<NSString*>* seen = [NSMutableSet new];
+    UIView* templateCell = nil;
+    UILabel* templateLabel = nil;
 
-    for (UIScrollView* list in lists) {
-        NSArray* cells = [(id)list performSelector:@selector(visibleCells)];
-        NSMutableSet<NSString*>* seen = [NSMutableSet new];
-        UIView* templateCell = nil;
-        UILabel* templateLabel = nil;
-        for (UIView* cell in cells) {
-            NSMutableArray<UILabel*>* labels = [NSMutableArray new];
-            CollectLabels(cell, labels);
-            for (UILabel* label in labels) {
-                NSString* text = [label.text stringByTrimmingCharactersInSet:trim];
-                if ([names containsObject:text]) {
-                    [seen addObject:text];
-                    if (!templateCell) {
-                        templateCell = cell;
-                        templateLabel = label;
-                    }
+    for (UIView* cell in cells) {
+        NSMutableArray<UILabel*>* labels = [NSMutableArray new];
+        CollectLabels(cell, labels);
+        for (UILabel* label in labels) {
+            NSString* text = [label.text stringByTrimmingCharactersInSet:trim];
+            if ([names containsObject:text]) {
+                [seen addObject:text];
+                if (!templateCell) {
+                    templateCell = cell;
+                    templateLabel = label;
                 }
             }
         }
-        if (seen.count >= 2) {
-            *listOut = list;
-            *cellOut = templateCell;
-            *labelOut = templateLabel;
-            return YES;
-        }
     }
-    return NO;
+    if (seen.count < 2) {
+        return NO;
+    }
+    *cellOut = templateCell;
+    *labelOut = templateLabel;
+    return YES;
 }
 
 static __weak NFBSensitiveRow* gRow;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
-static void InstallRow(UIViewController* controller) {
-    if (!controller.isViewLoaded || !controller.view.window) {
-        return;
-    }
-
-    UIScrollView* list = nil;
+static void InstallRow(UIScrollView* list) {
     UIView* templateCell = nil;
     UILabel* templateLabel = nil;
-    if (!FindDrawerList(controller.view, &list, &templateCell, &templateLabel)) {
+    if (!list.window || !MatchDrawerList(list, &templateCell, &templateLabel)) {
         return;
     }
 
@@ -301,22 +278,37 @@ static void InstallRow(UIViewController* controller) {
     }
 }
 
-%hook UIViewController
+static const void* kCheckedAtKey = &kCheckedAtKey;
 
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    if (!self.isViewLoaded) {
+// The drawer may be built long after launch and without any view controller
+// appearance, so watch the lists themselves; throttled per list.
+static void CheckList(UIScrollView* list) {
+    if (!list.window) {
         return;
     }
-    UIViewController* controller = self;
-    // The drawer's cells may not exist yet; retry a few times.
-    for (NSNumber* delay in @[ @0.3, @1.2, @3.0 ]) {
-        dispatch_after(
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
-            dispatch_get_main_queue(), ^{
-                InstallRow(controller);
-            });
+    CFTimeInterval now = CACurrentMediaTime();
+    NSNumber* last = objc_getAssociatedObject(list, kCheckedAtKey);
+    if (last && now - last.doubleValue < 0.5) {
+        return;
     }
+    objc_setAssociatedObject(list, kCheckedAtKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    InstallRow(list);
+}
+
+%hook UITableView
+
+- (void)layoutSubviews {
+    %orig;
+    CheckList(self);
+}
+
+%end
+
+%hook UICollectionView
+
+- (void)layoutSubviews {
+    %orig;
+    CheckList(self);
 }
 
 %end

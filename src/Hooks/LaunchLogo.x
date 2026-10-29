@@ -111,4 +111,39 @@ static void DumpOnce(UIView* root) {
     DumpOnce((UIView*)self);
 }
 
+// Swap earlier than layout so the stock logo never gets a frame on screen.
+- (void)didMoveToWindow {
+    %orig;
+    ReplaceBitmaps((UIView*)self);
+}
+
+- (void)didAddSubview:(UIView*)subview {
+    %orig;
+    ReplaceBitmaps((UIView*)self);
+}
+
+%end
+
+// Logo images set after the view is already in place.
+%hook UIImageView
+
+- (void)setImage:(UIImage*)image {
+    UIImage* art = image ? LaunchArt() : nil;
+    if (art.CGImage && image != art &&
+        ![objc_getAssociatedObject(self, kReplacedKey) boolValue] &&
+        CGRectGetWidth(self.bounds) < 400) {
+        Class launchClass = %c(T1AnimatedLaunchScreenView);
+        UIView* ancestor = self.superview;
+        for (int depth = 0; ancestor && depth < 8; depth++, ancestor = ancestor.superview) {
+            if ([ancestor isKindOfClass:launchClass]) {
+                objc_setAssociatedObject(self, kReplacedKey, @YES,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                image = [art imageWithRenderingMode:image.renderingMode];
+                break;
+            }
+        }
+    }
+    %orig(image);
+}
+
 %end

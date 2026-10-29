@@ -47,7 +47,7 @@ def main():
         model,
         source="tensorflow",
         convert_to="neuralnetwork",
-        inputs=[ct.ImageType(name="image", shape=(1, 224, 224, 3), scale=1 / 255.0,
+        inputs=[ct.ImageType(shape=(1, 224, 224, 3), scale=1 / 255.0,
                              color_layout=ct.colorlayout.RGB)],
         classifier_config=ct.ClassifierConfig(LABELS),
     )

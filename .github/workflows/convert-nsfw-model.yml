@@ -1,0 +1,32 @@
+name: Convert NSFW Model
+
+on:
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install converter
+        run: pip install "tensorflow==2.15.1" "tensorflow-hub==0.16.1" "coremltools==7.2" "numpy<2" pillow
+
+      - name: Download GantMan nsfw_model 1.1.0
+        run: |
+          curl -sL -o model.zip https://github.com/GantMan/nsfw_model/releases/download/1.1.0/nsfw_mobilenet_v2_140_224.zip
+          unzip -q model.zip -d model
+
+      - name: Convert to Core ML
+        run: python tools/convert_nsfw_model.py model/mobilenet_v2_140_224 NSFW.mlmodel
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: NSFW.mlmodel
+          path: NSFW.mlmodel
+          archive: false
+          if-no-files-found: error

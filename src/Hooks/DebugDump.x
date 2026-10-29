@@ -11,7 +11,7 @@
 // contents of every table or collection view. For working out how an app screen
 // is built when its class names aren't known.
 
-static const NSUInteger kMaxLines = 1500;
+static const NSUInteger kMaxLines = 350;
 static const int kMaxDepth = 16;
 
 static NSString* Trim(NSString* text) {
@@ -20,7 +20,8 @@ static NSString* Trim(NSString* text) {
 }
 
 static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* lines) {
-    if (*lines >= kMaxLines || depth > kMaxDepth || view.hidden || view.alpha < 0.01) {
+    if (*lines >= kMaxLines || depth > kMaxDepth || view.hidden || view.alpha < 0.01 ||
+        [NSStringFromClass(view.class) containsString:@"TwitterDash"]) {
         return;
     }
     (*lines)++;
@@ -61,6 +62,76 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
     }
 }
 
+
+// MARK: Media-focused outline
+
+static BOOL IsMediaLike(UIView* view) {
+    NSString* name = NSStringFromClass(view.class);
+    for (NSString* word in @[ @"Media", @"Video", @"Player", @"Poster", @"Thumbnail", @"Playback" ]) {
+        if ([name containsString:word]) {
+            return YES;
+        }
+    }
+    if ([view.layer isKindOfClass:[AVPlayerLayer class]]) {
+        return YES;
+    }
+    for (CALayer* sub in view.layer.sublayers) {
+        if ([sub isKindOfClass:[AVPlayerLayer class]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void DumpLayers(CALayer* layer, int depth, NSMutableString* out) {
+    if (depth > 4) {
+        return;
+    }
+    for (CALayer* sub in layer.sublayers) {
+        [out appendFormat:@"%@  layer %@ %@%@
+",
+                          [@"" stringByPaddingToLength:depth * 2
+                                            withString:@" "
+                                       startingAtIndex:0],
+                          NSStringFromClass(sub.class), NSStringFromCGRect(sub.frame),
+                          sub.contents ? @" contents" : @""];
+        DumpLayers(sub, depth + 1, out);
+    }
+}
+
+static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
+    if (view.hidden || view.alpha < 0.01 || *count >= 12 ||
+        [NSStringFromClass(view.class) containsString:@"TwitterDash"]) {
+        return;
+    }
+    CGRect onScreen = [view convertRect:view.bounds toView:nil];
+    if (!CGRectIntersectsRect(onScreen, view.window.bounds) || CGRectIsEmpty(onScreen)) {
+        return;
+    }
+
+    if (IsMediaLike(view) && CGRectGetWidth(view.bounds) > 80) {
+        (*count)++;
+        [out appendFormat:@"--- MEDIA %@ %@
+  ancestors:", NSStringFromClass(view.class),
+                          NSStringFromCGRect(onScreen)];
+        UIView* ancestor = view.superview;
+        for (int i = 0; ancestor && i < 8; i++, ancestor = ancestor.superview) {
+            [out appendFormat:@" < %@", NSStringFromClass(ancestor.class)];
+        }
+        [out appendString:@"
+"];
+        NSUInteger lines = 0;
+        NSMutableString* tree = [NSMutableString new];
+        DumpView(view, 1, tree, &lines);
+        [out appendString:tree];
+        DumpLayers(view.layer, 1, out);
+        return; // don't repeat nested media views
+    }
+    for (UIView* sub in view.subviews) {
+        FindMedia(sub, out, count);
+    }
+}
+
 %hook UIWindow
 
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
@@ -71,6 +142,16 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
 
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(self.frame)];
+    NSUInteger mediaCount = 0;
+    [out appendString:@"== MEDIA VIEWS ==
+"];
+    FindMedia(self, out, &mediaCount);
+    if (!mediaCount) {
+        [out appendString:@"(none found)
+"];
+    }
+    [out appendString:@"== TREE (no drawer) ==
+"];
     NSUInteger lines = 0;
     DumpView(self, 0, out, &lines);
     [UIPasteboard generalPasteboard].string = out;

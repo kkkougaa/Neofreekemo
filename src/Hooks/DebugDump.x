@@ -88,13 +88,12 @@ static void DumpLayers(CALayer* layer, int depth, NSMutableString* out) {
         return;
     }
     for (CALayer* sub in layer.sublayers) {
-        [out appendFormat:@"%@  layer %@ %@%@
-",
+        [out appendFormat:@"%@  layer %@ %@%@%c",
                           [@"" stringByPaddingToLength:depth * 2
                                             withString:@" "
                                        startingAtIndex:0],
                           NSStringFromClass(sub.class), NSStringFromCGRect(sub.frame),
-                          sub.contents ? @" contents" : @""];
+                          sub.contents ? @" contents" : @"", 10];
         DumpLayers(sub, depth + 1, out);
     }
 }
@@ -111,15 +110,13 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
 
     if (IsMediaLike(view) && CGRectGetWidth(view.bounds) > 80) {
         (*count)++;
-        [out appendFormat:@"--- MEDIA %@ %@
-  ancestors:", NSStringFromClass(view.class),
-                          NSStringFromCGRect(onScreen)];
+        [out appendFormat:@"--- MEDIA %@ %@%c  ancestors:", NSStringFromClass(view.class),
+                          NSStringFromCGRect(onScreen), 10];
         UIView* ancestor = view.superview;
         for (int i = 0; ancestor && i < 8; i++, ancestor = ancestor.superview) {
             [out appendFormat:@" < %@", NSStringFromClass(ancestor.class)];
         }
-        [out appendString:@"
-"];
+        [out appendFormat:@"%c", 10];
         NSUInteger lines = 0;
         NSMutableString* tree = [NSMutableString new];
         DumpView(view, 1, tree, &lines);
@@ -143,15 +140,12 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(self.frame)];
     NSUInteger mediaCount = 0;
-    [out appendString:@"== MEDIA VIEWS ==
-"];
+    [out appendFormat:@"== MEDIA VIEWS ==%c", 10];
     FindMedia(self, out, &mediaCount);
     if (!mediaCount) {
-        [out appendString:@"(none found)
-"];
+        [out appendFormat:@"(none found)%c", 10];
     }
-    [out appendString:@"== TREE (no drawer) ==
-"];
+    [out appendFormat:@"== TREE (no drawer) ==%c", 10];
     NSUInteger lines = 0;
     DumpView(self, 0, out, &lines);
     [UIPasteboard generalPasteboard].string = out;

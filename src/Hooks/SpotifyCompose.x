@@ -30,6 +30,37 @@ static UIImage* SpotifyLogo(void) {
                          : nil;
 }
 
+// Top edge of the compose toolbar (reply setting, undo, media buttons) in the compose
+// view's coordinates. It is found through its reply-setting button; when that isn't
+// there, a fixed clearance above the keyboard stands in.
+static CGFloat ComposeToolbarTop(UIView* host, CGFloat keyboardTop) {
+    __block UIView* button = nil;
+    EnumerateSubviewsRecursively(host, ^(UIView* view) {
+        if (!button &&
+            [NSStringFromClass(view.class) isEqualToString:@"T1TweetComposeConversationControlButton"]) {
+            button = view;
+        }
+    });
+    UIView* toolbar = button.superview.superview;
+    if (toolbar && toolbar.superview) {
+        return CGRectGetMinY([toolbar.superview convertRect:toolbar.frame toView:host]);
+    }
+    CGFloat bottom = keyboardTop > 0 ? keyboardTop
+                                     : CGRectGetHeight(host.bounds) - host.safeAreaInsets.bottom;
+    return bottom - kToolbarClearance;
+}
+
+// The view that is receiving typing, if it belongs to the compose window.
+static UIView<UIKeyInput>* FocusedTextInput(UIView* host) {
+    UIResponder* responder = NFBCurrentFirstResponder();
+    if (![responder isKindOfClass:[UIView class]] ||
+        ![responder conformsToProtocol:@protocol(UIKeyInput)]) {
+        return nil;
+    }
+    UIView* view = (UIView*)responder;
+    return view.window == host.window ? (UIView<UIKeyInput>*)view : nil;
+}
+
 @interface NFBSpotifyBar : UIControl
 @property (nonatomic, copy) NSString* shareURL;
 @property (nonatomic, strong) UILabel* label;

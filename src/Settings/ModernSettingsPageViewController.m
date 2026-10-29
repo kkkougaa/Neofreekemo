@@ -92,6 +92,8 @@
            forCellReuseIdentifier:@"ButtonCell"];
     [self.tableView registerClass:[ModernSettingsCompactButtonCell class]
            forCellReuseIdentifier:@"CompactButtonCell"];
+    [self.tableView registerClass:[ModernSettingsSliderCell class]
+           forCellReuseIdentifier:@"SliderCell"];
     [self.view addSubview:self.tableView];
 }
 
@@ -149,6 +151,21 @@
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
     NSDictionary* toggleData = self.visibleToggles[indexPath.row];
     NSString* type = toggleData[@"type"];
+    if ([type isEqualToString:@"slider"]) {
+        ModernSettingsSliderCell* cell =
+            [tableView dequeueReusableCellWithIdentifier:@"SliderCell" forIndexPath:indexPath];
+        NSString* key = toggleData[@"key"];
+        [cell configureWithTitle:[self localizedTitleForEntry:toggleData]
+                         minimum:[toggleData[@"min"] floatValue]
+                         maximum:[toggleData[@"max"] floatValue]
+                           value:(float)[BHTSettings integerForKey:key]];
+        objc_setAssociatedObject(cell.slider, @"prefKey", key, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [cell.slider removeTarget:self action:NULL forControlEvents:UIControlEventAllEvents];
+        [cell.slider addTarget:self
+                        action:@selector(sliderChanged:)
+              forControlEvents:UIControlEventValueChanged];
+        return cell;
+    }
     if ([type isEqualToString:@"compactButton"]) {
         ModernSettingsCompactButtonCell* cell =
             [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
@@ -253,6 +270,24 @@
 
 - (CGFloat)tableView:(UITableView*)tableView heightForHeaderInSection:(NSInteger)section {
     return UITableViewAutomaticDimension;
+}
+
+#pragma mark - Slider Handling
+
+- (void)sliderChanged:(UISlider*)sender {
+    NSString* key = objc_getAssociatedObject(sender, @"prefKey");
+    if (!key) {
+        return;
+    }
+    // Whole percents only.
+    NSInteger value = lroundf(sender.value);
+    sender.value = value;
+    [[NSUserDefaults standardUserDefaults] setInteger:value forKey:key];
+    UIView* view = sender.superview;
+    while (view && ![view isKindOfClass:[ModernSettingsSliderCell class]]) {
+        view = view.superview;
+    }
+    [(ModernSettingsSliderCell*)view updateValueLabel];
 }
 
 #pragma mark - Switch Handling

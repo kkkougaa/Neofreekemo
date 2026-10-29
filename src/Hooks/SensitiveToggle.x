@@ -4,6 +4,7 @@
 //
 
 #import "HookHelpers.h"
+#import "Settings/ModernSettingsPageViewController.h"
 
 // MARK: - NSFW mode row in the side drawer
 // A row appended to the drawer's menu list (after Profile, Lists, Communities...)
@@ -139,8 +140,53 @@ static UIImage* ToggleImage(NSString* name) {
         [self addTarget:self
                       action:@selector(rowTapped)
             forControlEvents:UIControlEventTouchUpInside];
+
+        UILongPressGestureRecognizer* press =
+            [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                          action:@selector(rowLongPressed:)];
+        press.minimumPressDuration = 0.45;
+        [self addGestureRecognizer:press];
     }
     return self;
+}
+
+// Long press opens the NSFW detail page as a sheet.
+- (void)rowLongPressed:(UILongPressGestureRecognizer*)press {
+    if (press.state != UIGestureRecognizerStateBegan) {
+        return;
+    }
+    [[[UIImpactFeedbackGenerator alloc]
+        initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+
+    UIViewController* top = self.window.rootViewController;
+    while (top.presentedViewController) {
+        top = top.presentedViewController;
+    }
+    if (!top) {
+        return;
+    }
+
+    ModernSettingsPageViewController* page =
+        [[ModernSettingsPageViewController alloc] initWithAccount:nil pageKey:@"kemo_nsfw"];
+    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:page];
+    __weak UINavigationController* weakNav = nav;
+    __weak NFBSensitiveRow* weakRow = self;
+    page.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                      primaryAction:[UIAction actionWithHandler:^(UIAction* action) {
+                          [weakNav dismissViewControllerAnimated:YES
+                                                      completion:^{
+                                                          [weakRow.icon applyState];
+                                                          [weakRow applyLabelColor];
+                                                      }];
+                      }]];
+    if (@available(iOS 15.0, *)) {
+        nav.sheetPresentationController.detents = @[
+            [UISheetPresentationControllerDetent mediumDetent],
+            [UISheetPresentationControllerDetent largeDetent]
+        ];
+    }
+    [top presentViewController:nav animated:YES completion:nil];
 }
 
 // Label follows the icon: accent when on, the menu's own text color when off.

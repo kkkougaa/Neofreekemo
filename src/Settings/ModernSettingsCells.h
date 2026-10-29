@@ -39,3 +39,14 @@
 - (void)configureWithTitle:(NSString*)title subtitle:(NSString*)subtitle;
 - (void)addTarget:(id)target action:(SEL)action forControlEvents:(UIControlEvents)events;
 @end
+
+@interface ModernSettingsSliderCell : UITableViewCell
+@property (nonatomic, strong) UILabel* titleLabel;
+@property (nonatomic, strong) UILabel* valueLabel;
+@property (nonatomic, strong) UISlider* slider;
+- (void)configureWithTitle:(NSString*)title
+                   minimum:(float)minimum
+                   maximum:(float)maximum
+                     value:(float)value;
+- (void)updateValueLabel;
+@end

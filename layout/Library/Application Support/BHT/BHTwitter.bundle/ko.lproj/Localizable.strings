@@ -456,3 +456,12 @@
 "SUBSCRIPTION_UNDO_SEND_DURATION_LABEL" = "%ld초";
 "NSFW_AI_BLUR_OVERLAY_TITLE" = "NSFW로 판단되어 가렸어요!";
 "NSFW_AI_BLUR_SHOW" = "열어보기";
+"KEMO_PAGE_TITLE" = "kemo";
+"KEMO_PAGE_SUBTITLE" = "";
+"NSFW_AI_THRESHOLD_TITLE" = "NSFW 판별 기준";
+"KEMO_MEDIA_ONLY_TITLE" = "미디어 트윗만 보기";
+"SPOTIFY_CLIENT_ID_TITLE" = "Spotify Client ID";
+"SPOTIFY_LOGIN_TITLE" = "Spotify 로그인";
+"SPOTIFY_CONNECTED_LABEL" = "연결됨";
+"SPOTIFY_DISCONNECTED_LABEL" = "연결 안 됨";
+"SPOTIFY_NEED_CLIENT_ID" = "먼저 Spotify Client ID를 입력해 주세요.";

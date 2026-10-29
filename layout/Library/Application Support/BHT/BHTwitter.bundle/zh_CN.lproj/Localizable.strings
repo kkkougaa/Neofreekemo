@@ -494,3 +494,12 @@
 "NSFW_AI_BLUR_SHOW" = "View";
 "NSFW_AI_BLUR_TITLE" = "Blur NSFW images (on-device AI)";
 "NSFW_MODE_TITLE" = "NSFW mode";
+"KEMO_PAGE_TITLE" = "kemo";
+"KEMO_PAGE_SUBTITLE" = "";
+"NSFW_AI_THRESHOLD_TITLE" = "NSFW threshold";
+"KEMO_MEDIA_ONLY_TITLE" = "Media tweets only";
+"SPOTIFY_CLIENT_ID_TITLE" = "Spotify Client ID";
+"SPOTIFY_LOGIN_TITLE" = "Spotify login";
+"SPOTIFY_CONNECTED_LABEL" = "Connected";
+"SPOTIFY_DISCONNECTED_LABEL" = "Not connected";
+"SPOTIFY_NEED_CLIENT_ID" = "Enter your Spotify Client ID first.";

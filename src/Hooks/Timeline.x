@@ -8,6 +8,10 @@
 
 // MARK: - Hide "Discover more", who-to-follow and prompts
 
+// The home feed (For You / Following); the Swift class is looked up by its mangled name
+// first, then by the dotted one.
+static BOOL IsHomeTimeline(UIViewController* viewController);
+
 // Resolves the class by name so mangled Swift names work; NSStringFromClass
 // would only ever produce the demangled dotted form.
 static BOOL IsInHierarchyOfClass(UIViewController* viewController, NSString* className) {
@@ -35,6 +39,15 @@ static BOOL IsInHierarchyOfClass(UIViewController* viewController, NSString* cla
     }
 
     return NO;
+}
+
+static BOOL IsHomeTimeline(UIViewController* viewController) {
+    return IsInHierarchyOfClass(
+               viewController,
+               @"_TtC32TwitterHomeFeatureImplementation35HomeTimelineContainerViewController") ||
+           IsInHierarchyOfClass(
+               viewController,
+               @"TwitterHomeFeatureImplementation.HomeTimelineContainerViewController");
 }
 
 // Need to tag edit history since it reuses a generic class
@@ -359,6 +372,7 @@ static BOOL ItemIsRetweet(id viewModel) {
 @property (nonatomic) BOOL hideQuoteTweets;
 @property (nonatomic) BOOL hideRetweets;
 @property (nonatomic) BOOL hideBlockedRetweets;
+@property (nonatomic) BOOL mediaOnly;
 
 // Surfaces.
 @property (nonatomic) BOOL inConversation;
@@ -434,9 +448,142 @@ static BOOL BHShouldHideVerifiedItem(id viewModel, BHTimelineFilterContext* cont
     return YES;
 }
 
+// MARK: Media-only filter
+// Whether a tweet view model carries photos or video. The view model's API isn't
+// documented, so a few likely selectors are tried in turn; 1 = has media, 0 = none,
+// -1 = no selector answered (the item is then left alone). What each view model
+// answered is kept for the shake dump, so the right selector can be pinned down.
+
+static NSMutableString* gMediaProbeLog;
+
+NSString* BHTMediaProbeSummary(void) {
+    return gMediaProbeLog.length ? [gMediaProbeLog copy] : @"(no timeline items probed)";
+}
+
+// An object answer as a count when it is a collection, else whether it exists.
+static NSInteger ProbeCount(id value) {
+    if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSSet class]]) {
+        return [value count];
+    }
+    return value ? 1 : 0;
+}
+
+// Calls a zero-argument selector and reports its result as a number, or -1 when the
+// object doesn't answer it or returns something that isn't a scalar/object.
+static NSInteger ProbeSelector(id object, NSString* name, id* objectResult) {
+    SEL selector = NSSelectorFromString(name);
+    if (![object respondsToSelector:selector]) {
+        return -1;
+    }
+
+    Method method = class_getInstanceMethod(object_getClass(object), selector);
+    if (!method) {
+        return -1;
+    }
+    char type[16] = {0};
+    method_getReturnType(method, type, sizeof(type));
+
+    switch (type[0]) {
+    case 'B':
+    case 'c':
+        return ((BOOL (*)(id, SEL))objc_msgSend)(object, selector) ? 1 : 0;
+    case 'q':
+    case 'Q':
+    case 'l':
+    case 'i':
+        return ((NSInteger (*)(id, SEL))objc_msgSend)(object, selector) > 0 ? 1 : 0;
+    case '@': {
+        id value = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+        if (objectResult) {
+            *objectResult = value;
+        }
+        return ProbeCount(value) > 0 ? 1 : 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+static NSInteger ItemMediaState(id viewModel) {
+    NSMutableString* log = nil;
+    static NSMutableSet<NSString*>* loggedClasses;
+    NSString* className = NSStringFromClass([viewModel class]);
+    if (!gMediaProbeLog) {
+        gMediaProbeLog = [NSMutableString string];
+        loggedClasses = [NSMutableSet set];
+    }
+    if (![loggedClasses containsObject:className] && loggedClasses.count < 6) {
+        [loggedClasses addObject:className];
+        log = [NSMutableString stringWithFormat:@"%@:", className];
+    }
+
+    NSInteger result = -1;
+
+    // Flags and collections on the view model itself.
+    for (NSString* name in @[
+             @"hasMedia", @"hasInlineMedia", @"hasMediaEntities", @"hasPhoto", @"hasVideo",
+             @"inlineMediaInfos", @"mediaInfos", @"media", @"mediaEntities"
+         ]) {
+        NSInteger answer = ProbeSelector(viewModel, name, nil);
+        if (answer >= 0) {
+            [log appendFormat:@" %@=%ld", name, (long)answer];
+            if (result < 0) {
+                result = answer;
+            }
+        }
+    }
+
+    // The underlying status and its entity set.
+    for (NSString* statusName in @[ @"status", @"displayStatus", @"primaryStatus" ]) {
+        id status = nil;
+        if (ProbeSelector(viewModel, statusName, &status) < 0 || !status) {
+            continue;
+        }
+        [log appendFormat:@" %@:%@", statusName, NSStringFromClass([status class])];
+        for (NSString* name in @[ @"hasMedia", @"hasPhoto", @"hasVideo", @"mediaEntities" ]) {
+            NSInteger answer = ProbeSelector(status, name, nil);
+            if (answer >= 0) {
+                [log appendFormat:@" %@=%ld", name, (long)answer];
+                if (result < 0) {
+                    result = answer;
+                }
+            }
+        }
+        id entities = nil;
+        if (ProbeSelector(status, @"entities", &entities) >= 0 && entities) {
+            id media = nil;
+            NSInteger answer = ProbeSelector(entities, @"media", &media);
+            if (answer >= 0) {
+                [log appendFormat:@" entities.media=%ld", (long)answer];
+                if (result < 0) {
+                    result = answer;
+                }
+            }
+        }
+    }
+
+    if (log) {
+        [log appendFormat:@" => %ld%c", (long)result, 10];
+        [gMediaProbeLog appendString:log];
+    }
+    return result;
+}
+
+// A plain tweet entry (not a prompt, module or cursor) that is known to have no media.
+static BOOL ItemIsTweetWithoutMedia(id viewModel) {
+    if (![ItemEntryID(viewModel) hasPrefix:@"tweet-"]) {
+        return NO;
+    }
+    return ItemMediaState(viewModel) == 0;
+}
+
 static BOOL ShouldHideTimelineItem(id item, BHTimelineFilterContext* context) {
     id viewModel = unwrapDataViewItem(item);
     NSString* className = NSStringFromClass([viewModel classForCoder]);
+
+    if (context.mediaOnly && ItemIsTweetWithoutMedia(viewModel)) {
+        return YES;
+    }
 
     if (context.hideVerified && BHShouldHideVerifiedItem(viewModel, context)) {
         return YES;
@@ -595,6 +742,7 @@ static NSSet<NSNumber*>* ConversationAuthorRepliedToUserIDs(NSArray* sections,
     context.hideVerified = [BHTSettings boolForKey:@"hide_verified_tweets"] &&
                            !context.inProfile && !context.inSearch && !context.inEditHistory;
     context.hideBlockedRetweets = [BHTSettings boolForKey:@"hide_blocked_retweets"];
+    context.mediaOnly = [BHTSettings boolForKey:@"kemo_media_only"] && IsHomeTimeline(dataViewController);
     BOOL inPostInteractions =
         IsInHierarchyOfClass(dataViewController, @"T1PostInteractionsViewController");
     BOOL openedTweetFromProfile = context.inProfile || context.openedFromProfile;
@@ -608,7 +756,8 @@ static NSSet<NSNumber*>* ConversationAuthorRepliedToUserIDs(NSArray* sections,
 
 - (BOOL)shouldFilter {
     return self.hideWhoToFollow || self.hidePrompts || self.hideVerified ||
-           self.hideQuoteTweets || self.hideRetweets || self.hideBlockedRetweets || self.inConversation;
+           self.hideQuoteTweets || self.hideRetweets || self.hideBlockedRetweets || self.mediaOnly ||
+           self.inConversation;
 }
 
 - (void)resolveConversationLookupsInSections:(NSArray*)sections {
@@ -631,6 +780,7 @@ static NSSet<NSNumber*>* ConversationAuthorRepliedToUserIDs(NSArray* sections,
     return self.hideWhoToFollow == other.hideWhoToFollow &&
            self.hidePrompts == other.hidePrompts && self.hideVerified == other.hideVerified &&
            self.hideBlockedRetweets == other.hideBlockedRetweets &&
+           self.mediaOnly == other.mediaOnly &&
            self.inConversation == other.inConversation && self.inProfile == other.inProfile &&
            self.openedFromProfile == other.openedFromProfile &&
            self.inSearch == other.inSearch &&

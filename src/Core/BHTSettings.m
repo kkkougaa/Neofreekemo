@@ -281,10 +281,78 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     }
                 ]
             },
+            @"kemo": @{
+                @"titleKey": @"KEMO_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"nsfw_ai_blur",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"nsfw_ai_threshold",
+                        @"default": @70,
+                        @"type": @"slider",
+                        @"min": @40,
+                        @"max": @95,
+                        @"parentKey": @"nsfw_ai_blur"
+                    },
+                    @{
+                        @"key": @"kemo_media_only",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"spotify_client_id",
+                        @"titleKey": @"SPOTIFY_CLIENT_ID_TITLE",
+                        @"prefKeyForSubtitle": @"spotify_client_id",
+                        @"subtitleDefault": @"",
+                        @"action": @"editSpotifyClientID:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"spotify_login",
+                        @"titleKey": @"SPOTIFY_LOGIN_TITLE",
+                        @"action": @"toggleSpotifyLogin:"
+                    }
+                ]
+            },
+            @"kemo_nsfw": @{
+                @"titleKey": @"NSFW_MODE_TITLE",
+                @"subtitleKey": @"KEMO_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"disable_sensitive_tweet_warnings",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"nsfw_ai_blur",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"nsfw_ai_threshold",
+                        @"default": @70,
+                        @"type": @"slider",
+                        @"min": @40,
+                        @"max": @95,
+                        @"parentKey": @"nsfw_ai_blur"
+                    }
+                ]
+            },
             @"tweets": @{
                 @"titleKey": @"MODERN_SETTINGS_TWEETS_TITLE",
                 @"subtitleKey": @"MODERN_SETTINGS_TWEETS_SUBTITLE",
                 @"settings": @[
+                    @{
+                        @"type": @"button",
+                        @"key": @"kemo_entry",
+                        @"titleKey": @"KEMO_PAGE_TITLE",
+                        @"action": @"openKemoPage:"
+                    },
                     @{
                         @"type": @"compactButton",
                         @"key": @"undo_tweet_timeout",
@@ -334,11 +402,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{
                         @"key": @"disable_sensitive_tweet_warnings",
                         @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"nsfw_ai_blur",
-                        @"default": @NO,
                         @"type": @"toggle"
                     },
                     @{

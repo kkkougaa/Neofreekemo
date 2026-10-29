@@ -10,17 +10,20 @@
 // MARK: - On-device NSFW blur for timeline images
 // Runs GantMan/nsfw_model (MIT, see NSFWModel-LICENSE.txt in the tweak bundle,
 // converted to Core ML by tools/convert_nsfw_model.py) on every image shown inside
-// a tweet's media view. It tells photos and drawings apart, so hentai is caught too. Images scoring above
+// a tweet's media view (photos, and frames of inline videos). It tells photos and drawings
+// apart, so hentai is caught too. Images scoring above
 // the threshold are covered with a blur until tapped. Scores are cached on the
 // UIImage itself, so a reused cell never re-runs the model for a known image.
 
 static NSString* const kBlurSettingKey = @"nsfw_ai_blur";
-static const float kNSFWThreshold = 0.7f;
+static float NFBThreshold(void) {
+    return [BHTSettings integerForKey:@"nsfw_ai_threshold"] / 100.0f;
+}
 static const CGFloat kMinImageEdge = 120.0; // px; skips icons and placeholders
 static const NSInteger kOverlayTag = 0x4e464232;
 
 static const void* kScoreKey = &kScoreKey;        // UIImage -> @(score), or @(-1) while pending
-static const void* kRevealedKey = &kRevealedKey;  // media view -> the UIImage the user opened
+static const void* kRevealedKey = &kRevealedKey;  // media view -> the image or video the user opened
 static const void* kScheduledKey = &kScheduledKey;
 
 static BOOL NFBBlurActive(void) {
@@ -178,7 +181,7 @@ static void NFBRemoveOverlay(UIView* mediaView) {
     [[mediaView viewWithTag:kOverlayTag] removeFromSuperview];
 }
 
-static void NFBShowOverlay(UIView* mediaView, UIImage* flagged) {
+static void NFBShowOverlay(UIView* mediaView, id flagged) {
     UIView* existing = [mediaView viewWithTag:kOverlayTag];
     if (existing) {
         existing.frame = mediaView.bounds;
@@ -261,7 +264,152 @@ static void NFBShowOverlay(UIView* mediaView, UIImage* flagged) {
     [mediaView addSubview:overlay];
 }
 
+// MARK: Videos
+// Timeline videos (T1InlineVideoView) have no thumbnail image view, so a frame is
+// taken from the video itself: a bitmap already sitting in one of its layers if
+// there is one, otherwise a snapshot of the view. A few frames are checked right
+// after it appears, and the worst score wins. State is kept per video URL so a
+// reused cell doesn't inherit another video's verdict.
+
+@interface NFBVideoState : NSObject
+@property (nonatomic, assign) float score;
+@property (nonatomic, assign) NSInteger checks;
+@property (nonatomic, assign) CFTimeInterval lastCheck;
+@property (nonatomic, assign) BOOL pending;
+@property (nonatomic, strong) NSObject* token; // identity for the "opened" state
+@end
+
+@implementation NFBVideoState
+- (instancetype)init {
+    if ((self = [super init])) {
+        _score = -1;
+        _token = [NSObject new];
+    }
+    return self;
+}
+@end
+
+static const void* kVideoStateKey = &kVideoStateKey;
+static const NSInteger kMaxVideoChecks = 4;
+
+static AVPlayerLayer* NFBFindPlayerLayer(CALayer* layer) {
+    if ([layer isKindOfClass:[AVPlayerLayer class]]) {
+        return (AVPlayerLayer*)layer;
+    }
+    for (CALayer* sub in layer.sublayers) {
+        AVPlayerLayer* found = NFBFindPlayerLayer(sub);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static NSString* NFBVideoKey(UIView* video) {
+    AVPlayerLayer* playerLayer = NFBFindPlayerLayer(video.layer);
+    AVAsset* asset = playerLayer.player.currentItem.asset;
+    if ([asset isKindOfClass:[AVURLAsset class]]) {
+        return ((AVURLAsset*)asset).URL.absoluteString;
+    }
+    return nil;
+}
+
+static NFBVideoState* NFBStateForVideo(UIView* video) {
+    static NSCache<NSString*, NFBVideoState*>* byURL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        byURL = [NSCache new];
+        byURL.countLimit = 300;
+    });
+
+    NSString* key = NFBVideoKey(video);
+    NFBVideoState* state = key ? [byURL objectForKey:key]
+                               : objc_getAssociatedObject(video, kVideoStateKey);
+    if (!state) {
+        state = [NFBVideoState new];
+        if (key) {
+            [byURL setObject:state forKey:key];
+        } else {
+            objc_setAssociatedObject(video, kVideoStateKey, state,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    }
+    return state;
+}
+
+static UIView* NFBFindVideo(UIView* root) {
+    static Class videoClass;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        videoClass = NSClassFromString(@"T1InlineVideoView");
+    });
+    if (!videoClass) {
+        return nil;
+    }
+    __block UIView* found = nil;
+    EnumerateSubviewsRecursively(root, ^(UIView* view) {
+        if (!found && [view isKindOfClass:videoClass]) {
+            found = view;
+        }
+    });
+    return found;
+}
+
+static UIImage* NFBBitmapInLayer(CALayer* layer, int depth) {
+    id contents = layer.contents;
+    if (contents && CFGetTypeID((__bridge CFTypeRef)contents) == CGImageGetTypeID()) {
+        CGImageRef image = (__bridge CGImageRef)contents;
+        if (MIN(CGImageGetWidth(image), CGImageGetHeight(image)) >= kMinImageEdge) {
+            return [UIImage imageWithCGImage:image];
+        }
+    }
+    if (depth < 8) {
+        for (CALayer* sub in layer.sublayers) {
+            UIImage* found = NFBBitmapInLayer(sub, depth + 1);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return nil;
+}
+
+static UIImage* NFBVideoFrame(UIView* video) {
+    UIImage* bitmap = NFBBitmapInLayer(video.layer, 0);
+    if (bitmap) {
+        return bitmap;
+    }
+
+    CGSize size = video.bounds.size;
+    if (size.width < 50 || size.height < 50) {
+        return nil;
+    }
+    // Small snapshot; the model only sees 224x224 anyway.
+    UIGraphicsImageRendererFormat* format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = MIN(1.0, 320.0 / MAX(size.width, size.height));
+    format.opaque = YES;
+    UIGraphicsImageRenderer* renderer =
+        [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        [video drawViewHierarchyInRect:CGRectMake(0, 0, size.width, size.height)
+                    afterScreenUpdates:NO];
+    }];
+}
+
 // MARK: Scan
+
+static void NFBScanMediaView(UIView* mediaView);
+
+static void NFBRescanLater(UIView* mediaView, NSTimeInterval delay) {
+    __weak UIView* weakMedia = mediaView;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       UIView* media = weakMedia;
+                       if (media.window) {
+                           NFBScanMediaView(media);
+                       }
+                   });
+}
 
 static void NFBScanMediaView(UIView* mediaView) {
     if (!NFBBlurActive()) {
@@ -269,10 +417,14 @@ static void NFBScanMediaView(UIView* mediaView) {
         return;
     }
 
-    __block UIImage* flagged = nil;
+    float threshold = NFBThreshold();
+    __block id flagged = nil;
+
+    // Photos
+    UIView* existingOverlay = [mediaView viewWithTag:kOverlayTag];
     EnumerateSubviewsRecursively(mediaView, ^(UIView* view) {
         if (![view isKindOfClass:[UIImageView class]] ||
-            [view isDescendantOfView:[mediaView viewWithTag:kOverlayTag]]) {
+            (existingOverlay && [view isDescendantOfView:existingOverlay])) {
             return;
         }
         UIImage* image = ((UIImageView*)view).image;
@@ -294,12 +446,42 @@ static void NFBScanMediaView(UIView* mediaView) {
                     NFBScanMediaView(media);
                 }
             });
-        } else if (score.floatValue >= kNSFWThreshold && !flagged) {
+        } else if (score.floatValue >= threshold && !flagged) {
             flagged = image;
         }
     });
 
-    UIImage* revealed = objc_getAssociatedObject(mediaView, kRevealedKey);
+    // Video
+    UIView* video = NFBFindVideo(mediaView);
+    if (video.window) {
+        NFBVideoState* state = NFBStateForVideo(video);
+        CFTimeInterval now = CACurrentMediaTime();
+        if (!state.pending && state.checks < kMaxVideoChecks && now - state.lastCheck > 0.9) {
+            UIImage* frame = NFBVideoFrame(video);
+            state.lastCheck = now;
+            state.checks += 1;
+            if (frame) {
+                state.pending = YES;
+                __weak UIView* weakMedia = mediaView;
+                NFBScoreImage(frame, ^(float result) {
+                    state.pending = NO;
+                    state.score = MAX(state.score, result);
+                    UIView* media = weakMedia;
+                    if (media) {
+                        NFBScanMediaView(media);
+                    }
+                });
+            }
+        }
+        if (state.checks < kMaxVideoChecks) {
+            NFBRescanLater(mediaView, 1.0);
+        }
+        if (state.score >= threshold && !flagged) {
+            flagged = state.token;
+        }
+    }
+
+    id revealed = objc_getAssociatedObject(mediaView, kRevealedKey);
     if (flagged && flagged != revealed) {
         NFBShowOverlay(mediaView, flagged);
     } else {
@@ -320,7 +502,8 @@ static void NFBScheduleScan(UIView* mediaView) {
     });
 }
 
-%hook _TtC21TweetMediaAttachments14MultiMediaView
+// One container holds a tweet's photos, carousel and inline video alike.
+%hook T1StatusPhotoVideoForwardView
 
 - (void)layoutSubviews {
     %orig;
@@ -347,7 +530,7 @@ static void NFBScheduleScan(UIView* mediaView) {
         return;
     }
 
-    Class mediaClass = %c(_TtC21TweetMediaAttachments14MultiMediaView);
+    Class mediaClass = %c(T1StatusPhotoVideoForwardView);
     UIView* ancestor = self.superview;
     for (int depth = 0; ancestor && depth < 12; depth++, ancestor = ancestor.superview) {
         if ([ancestor isKindOfClass:mediaClass]) {

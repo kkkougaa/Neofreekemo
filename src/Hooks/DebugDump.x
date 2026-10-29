@@ -11,6 +11,9 @@
 // contents of every table or collection view. For working out how an app screen
 // is built when its class names aren't known.
 
+// Defined in Hooks/Timeline.x
+extern NSString* BHTMediaProbeSummary(void);
+
 static const NSUInteger kMaxLines = 350;
 static const int kMaxDepth = 16;
 
@@ -148,6 +151,19 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
     [out appendFormat:@"== TREE (no drawer) ==%c", 10];
     NSUInteger lines = 0;
     DumpView(self, 0, out, &lines);
+
+    // Menus, popovers and sheets can live in windows of their own.
+    for (UIWindow* other in self.windowScene.windows) {
+        if (other == self) {
+            continue;
+        }
+        [out appendFormat:@"== OTHER WINDOW %@ level=%.0f ==%c", NSStringFromClass(other.class),
+                          other.windowLevel, 10];
+        NSUInteger otherLines = 0;
+        DumpView(other, 0, out, &otherLines);
+    }
+
+    [out appendFormat:@"== TIMELINE ITEM PROBE ==%c%@%c", 10, BHTMediaProbeSummary(), 10];
     [UIPasteboard generalPasteboard].string = out;
     [[[UINotificationFeedbackGenerator alloc]
         init] notificationOccurred:UINotificationFeedbackTypeSuccess];

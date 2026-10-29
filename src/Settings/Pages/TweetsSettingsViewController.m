@@ -13,6 +13,7 @@
 #import "Core/BHTSettings.h"
 #import "Headers/TWHeaders.h"
 #import "Settings/ModernSettingsCells.h"
+#import "Settings/Pages/KemoSettingsViewController.h"
 
 static char kTweetSoundPickerPurposeKey;
 static NSString* const kTweetSoundPickerPurpose = @"tweetSound";
@@ -26,6 +27,12 @@ static NSString* const kCustomSendSoundNameKey = @"custom_send_sound_name";
 
 - (NSString*)pageKey {
     return @"tweets";
+}
+
+- (void)openKemoPage:(NSDictionary*)sender {
+    KemoSettingsViewController* page =
+        [[KemoSettingsViewController alloc] initWithAccount:self.account];
+    [self.navigationController pushViewController:page animated:YES];
 }
 
 - (void)showAlertWithTitleKey:(NSString*)titleKey message:(NSString*)message {

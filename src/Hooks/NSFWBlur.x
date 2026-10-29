@@ -7,6 +7,10 @@
 #import <Vision/Vision.h>
 #import "HookHelpers.h"
 
+// The container that holds a timeline tweet's photos, carousel and inline video.
+@interface T1StatusPhotoVideoForwardView : UIView
+@end
+
 // MARK: - On-device NSFW blur for timeline images
 // Runs GantMan/nsfw_model (MIT, see NSFWModel-LICENSE.txt in the tweak bundle,
 // converted to Core ML by tools/convert_nsfw_model.py) on every image shown inside

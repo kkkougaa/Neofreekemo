@@ -8,8 +8,9 @@
 #import "HookHelpers.h"
 
 // MARK: - On-device NSFW blur for timeline images
-// Runs lovoo/NSFWDetector (BSD-3-Clause, see NSFWDetector-LICENSE.txt in the tweak
-// bundle) on every image shown inside a tweet's media view. Images scoring above
+// Runs GantMan/nsfw_model (MIT, see NSFWModel-LICENSE.txt in the tweak bundle,
+// converted to Core ML by tools/convert_nsfw_model.py) on every image shown inside
+// a tweet's media view. It tells photos and drawings apart, so hentai is caught too. Images scoring above
 // the threshold are covered with a blur until tapped. Scores are cached on the
 // UIImage itself, so a reused cell never re-runs the model for a known image.
 
@@ -35,7 +36,7 @@ static VNCoreMLModel* NFBModel(void) {
         NSFileManager* fm = [NSFileManager defaultManager];
         NSURL* caches = [[fm URLsForDirectory:NSCachesDirectory
                                      inDomains:NSUserDomainMask] firstObject];
-        NSURL* compiled = [caches URLByAppendingPathComponent:@"nfb_NSFW.mlmodelc"];
+        NSURL* compiled = [caches URLByAppendingPathComponent:@"nfb_nsfw5.mlmodelc"];
         NSError* error = nil;
 
         if (![fm fileExistsAtPath:compiled.path]) {
@@ -88,16 +89,29 @@ static void NFBScoreImage(UIImage* image, void (^done)(float score)) {
         VNCoreMLModel* model = NFBModel();
         if (model) {
             VNCoreMLRequest* request = [[VNCoreMLRequest alloc] initWithModel:model];
-            request.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
+            request.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill; // trained on whole resized images
             VNImageRequestHandler* handler =
                 [[VNImageRequestHandler alloc] initWithCGImage:cgImage options:@{}];
             if ([handler performRequests:@[request] error:nil]) {
+                // Classes: drawings, hentai, neutral, porn, sexy. "sexy" is only
+                // suggestive, so it counts for half.
+                float porn = 0, hentai = 0, sexy = 0;
+                BOOL found = NO;
                 for (VNClassificationObservation* observation in request.results) {
-                    if ([observation isKindOfClass:[VNClassificationObservation class]] &&
-                        [observation.identifier isEqualToString:@"NSFW"]) {
-                        score = observation.confidence;
-                        break;
+                    if (![observation isKindOfClass:[VNClassificationObservation class]]) {
+                        continue;
                     }
+                    found = YES;
+                    if ([observation.identifier isEqualToString:@"porn"]) {
+                        porn = observation.confidence;
+                    } else if ([observation.identifier isEqualToString:@"hentai"]) {
+                        hentai = observation.confidence;
+                    } else if ([observation.identifier isEqualToString:@"sexy"]) {
+                        sexy = observation.confidence;
+                    }
+                }
+                if (found) {
+                    score = MIN(porn + hentai + sexy * 0.5f, 1.0f);
                 }
             }
         }

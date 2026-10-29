@@ -14,7 +14,7 @@
 #import "Settings/Pages/KemoHashtagListViewController.h"
 
 static NSString* const kClientIDKey = @"spotify_client_id";
-static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1/callback";
+static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 
 @implementation KemoSettingsViewController
 

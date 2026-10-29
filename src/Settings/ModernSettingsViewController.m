@@ -14,6 +14,7 @@
 #import "Settings/Pages/ChatSettingsViewController.h"
 #import "Settings/Pages/DebugSettingsViewController.h"
 #import "Settings/Pages/ExperimentalSettingsViewController.h"
+#import "Settings/Pages/KemoSettingsViewController.h"
 #import "Settings/Pages/PresetsSettingsViewController.h"
 #import "Settings/Pages/ProfilesSettingsViewController.h"
 #import "Settings/Pages/TimelinesSettingsViewController.h"
@@ -166,6 +167,12 @@
 
 - (void)setupSections {
     self.sections = @[
+        @{
+            @"title": [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_PAGE_TITLE"],
+            @"subtitle": @"",
+            @"icon": @"nfb_app_icon",
+            @"action": @"showKemoSettings"
+        },
         @{
             @"title": [[BHTBundle sharedBundle] localizedStringForKey:@"MODERN_SETTINGS_LAYOUT_TITLE"],
             @"subtitle":
@@ -716,6 +723,12 @@
 - (void)showProfilesSettings {
     ProfilesSettingsViewController* vc =
         [[ProfilesSettingsViewController alloc] initWithAccount:self.account];
+    [self.navigationController pushViewController:vc animated:YES];
+}
+
+- (void)showKemoSettings {
+    KemoSettingsViewController* vc =
+        [[KemoSettingsViewController alloc] initWithAccount:self.account];
     [self.navigationController pushViewController:vc animated:YES];
 }
 

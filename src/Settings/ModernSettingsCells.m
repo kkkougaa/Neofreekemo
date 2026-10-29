@@ -17,6 +17,14 @@ static const CGFloat ListRowTextGap = 16;
 static const CGFloat ListRowPadding = 10;
 static const CGFloat ListRowSpacing = 8;
 
+// The icon the app currently wears on the home screen.
+static UIImage* NFBPrimaryAppIcon(void) {
+    NSDictionary* primary =
+        [[NSBundle mainBundle] infoDictionary][@"CFBundleIcons"][@"CFBundlePrimaryIcon"];
+    NSString* name = [primary[@"CFBundleIconFiles"] lastObject] ?: primary[@"CFBundleIconName"];
+    return name ? [UIImage imageNamed:name] : nil;
+}
+
 @interface ModernSettingsTableViewCell ()
 @property (nonatomic, strong) UIStackView* textStack;
 @property (nonatomic, strong) NSLayoutConstraint* textLeadingToIcon;
@@ -134,9 +142,22 @@ static const CGFloat ListRowSpacing = 8;
     CGSize glyphSize = CGSizeMake(ListRowGlyphSize, ListRowGlyphSize);
 
     NSString* iconName = objc_getAssociatedObject(self, @selector(iconName));
-    self.iconImageView.image =
-        iconName ? [UIImage tfn_vectorImageNamed:iconName fitsSize:glyphSize fillColor:glyphColor]
-                 : nil;
+    if ([iconName isEqualToString:@"nfb_app_icon"]) {
+        // The app's own icon, as a rounded square (the kemo entry).
+        UIImage* appIcon = NFBPrimaryAppIcon();
+        self.iconImageView.image =
+            appIcon ?: [UIImage tfn_vectorImageNamed:@"settings_stroke"
+                                            fitsSize:glyphSize
+                                           fillColor:glyphColor];
+        self.iconImageView.layer.cornerRadius = appIcon ? 6 : 0;
+        self.iconImageView.layer.masksToBounds = appIcon != nil;
+    } else {
+        self.iconImageView.layer.cornerRadius = 0;
+        self.iconImageView.layer.masksToBounds = NO;
+        self.iconImageView.image =
+            iconName ? [UIImage tfn_vectorImageNamed:iconName fitsSize:glyphSize fillColor:glyphColor]
+                     : nil;
+    }
     self.chevronImageView.image = [UIImage tfn_vectorImageNamed:@"chevron_right"
                                                        fitsSize:glyphSize
                                                       fillColor:glyphColor];

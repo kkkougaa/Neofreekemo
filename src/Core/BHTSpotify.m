@@ -21,9 +21,10 @@ static NSString* const kErrorDomain = @"com.neofreebird.spotify";
 // The login page sends the user back to a loopback address that this app listens on
 // for the length of the login. Custom URL schemes were not being caught by the web
 // login session, so the redirect is an ordinary http://127.0.0.1:<port>/callback.
-// Spotify matches loopback redirects without the port, so the dashboard entry is
-// http://127.0.0.1/callback.
+// The dashboard refuses a port-less http redirect as "not secure", so the port is
+// fixed and the dashboard entry is http://127.0.0.1:8888/callback.
 static NSString* const kRedirectPath = @"/callback";
+static const uint16_t kLoopbackPort = 8888;
 
 @interface BHTSpotify () <ASWebAuthenticationPresentationContextProviding>
 @property (nonatomic, strong) ASWebAuthenticationSession* session;
@@ -114,7 +115,7 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
     memset(&address, 0, sizeof(address));
     address.sin_len = sizeof(address);
     address.sin_family = AF_INET;
-    address.sin_port = 0;
+    address.sin_port = htons(kLoopbackPort);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0 || listen(fd, 4) != 0) {
         close(fd);

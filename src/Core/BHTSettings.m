@@ -366,12 +366,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                 @"subtitleKey": @"MODERN_SETTINGS_TWEETS_SUBTITLE",
                 @"settings": @[
                     @{
-                        @"type": @"button",
-                        @"key": @"kemo_entry",
-                        @"titleKey": @"KEMO_PAGE_TITLE",
-                        @"action": @"openKemoPage:"
-                    },
-                    @{
                         @"type": @"compactButton",
                         @"key": @"undo_tweet_timeout",
                         @"default": @10,

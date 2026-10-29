@@ -13,8 +13,9 @@
 
 // Defined in Hooks/Timeline.x
 extern NSString* BHTMediaProbeSummary(void);
+#import "Core/NFBFirstResponder.h"
 
-static const NSUInteger kMaxLines = 350;
+static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
 
 static NSString* Trim(NSString* text) {
@@ -137,6 +138,22 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
     }
 }
 
+// The view that belongs to a view controller whose class name contains `name`.
+static UIView* FindViewOfController(UIView* view, NSString* name) {
+    UIResponder* next = view.nextResponder;
+    if ([next isKindOfClass:[UIViewController class]] &&
+        [NSStringFromClass(next.class) containsString:name] && !view.hidden) {
+        return view;
+    }
+    for (UIView* sub in view.subviews) {
+        UIView* found = FindViewOfController(sub, name);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
 // MARK: First visible tweet cell
 
 static UIView* FindStatusCell(UIView* view) {
@@ -144,7 +161,8 @@ static UIView* FindStatusCell(UIView* view) {
         return nil;
     }
     CGRect onScreen = [view convertRect:view.bounds toView:nil];
-    if ([NSStringFromClass(view.class) hasSuffix:@"StatusCell"] &&
+    if (([NSStringFromClass(view.class) hasSuffix:@"StatusCell"] ||
+         [NSStringFromClass(view.class) hasSuffix:@"FocalStatusViewTableViewCell"]) &&
         CGRectIntersectsRect(onScreen, view.window.bounds) && CGRectGetHeight(onScreen) > 60) {
         return view;
     }
@@ -173,15 +191,40 @@ static UIView* FindStatusCell(UIView* view) {
     if (!mediaCount) {
         [out appendFormat:@"(none found)%c", 10];
     }
+    UIResponder* focused = NFBCurrentFirstResponder();
+    [out appendFormat:@"== FIRST RESPONDER ==%c", 10];
+    if (focused) {
+        NSMutableArray<NSString*>* chain = [NSMutableArray array];
+        for (Class cls = focused.class; cls; cls = class_getSuperclass(cls)) {
+            [chain addObject:NSStringFromClass(cls)];
+        }
+        [out appendFormat:@"%@%c", [chain componentsJoinedByString:@" < "], 10];
+        [out appendFormat:@"UITextInput=%d UIKeyInput=%d UITextInputTraits=%d%c",
+                          [focused conformsToProtocol:@protocol(UITextInput)],
+                          [focused conformsToProtocol:@protocol(UIKeyInput)],
+                          [focused conformsToProtocol:@protocol(UITextInputTraits)], 10];
+        if ([focused isKindOfClass:[UIView class]]) {
+            UIView* view = (UIView*)focused;
+            [out appendFormat:@"frame=%@ window=%@%c", NSStringFromCGRect(view.frame),
+                              NSStringFromClass(view.window.class), 10];
+        }
+    } else {
+        [out appendFormat:@"(none)%c", 10];
+    }
+
     UIView* statusCell = FindStatusCell(self);
     [out appendFormat:@"== STATUS CELL %@ ==%c", statusCell ? NSStringFromClass(statusCell.class) : @"(none)", 10];
     if (statusCell) {
         NSUInteger cellLines = 0;
         DumpView(statusCell, 0, out, &cellLines);
     }
-    [out appendFormat:@"== TREE (no drawer) ==%c", 10];
-    NSUInteger lines = 0;
-    DumpView(self, 0, out, &lines);
+    // The profile header (name, @handle, buttons), when a profile is showing.
+    UIView* profileHeader = FindViewOfController(self, @"ProfileHeaderViewController");
+    if (profileHeader) {
+        [out appendFormat:@"== PROFILE HEADER ==%c", 10];
+        NSUInteger headerLines = 0;
+        DumpView(profileHeader, 0, out, &headerLines);
+    }
 
     // Menus, popovers and sheets can live in windows of their own.
     for (UIWindow* other in self.windowScene.windows) {
@@ -195,6 +238,11 @@ static UIView* FindStatusCell(UIView* view) {
     }
 
     [out appendFormat:@"== TIMELINE ITEM PROBE ==%c%@%c", 10, BHTMediaProbeSummary(), 10];
+
+    // Last, because it is the longest and the least specific.
+    [out appendFormat:@"== TREE (no drawer) ==%c", 10];
+    NSUInteger lines = 0;
+    DumpView(self, 0, out, &lines);
     [UIPasteboard generalPasteboard].string = out;
     [[[UINotificationFeedbackGenerator alloc]
         init] notificationOccurred:UINotificationFeedbackTypeSuccess];

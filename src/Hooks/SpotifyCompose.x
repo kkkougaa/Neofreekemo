@@ -5,6 +5,7 @@
 
 #import "HookHelpers.h"
 #import "Core/BHTSpotify.h"
+#import "Core/NFBFirstResponder.h"
 
 // MARK: - Now playing line in the compose screen
 // One line above the keyboard showing the song that's playing on Spotify; tapping it
@@ -40,17 +41,14 @@ static CGFloat ComposeToolbarTop(UIView* host, CGFloat keyboardTop) {
 }
 
 // The view that is receiving typing, whatever kind of text view the editor is.
-static UIView<UIKeyInput>* FocusedTextInput(UIView* root) {
-    if (root.isFirstResponder && [root conformsToProtocol:@protocol(UIKeyInput)]) {
-        return (UIView<UIKeyInput>*)root;
+static UIView<UIKeyInput>* FocusedTextInput(UIView* host) {
+    UIResponder* responder = NFBCurrentFirstResponder();
+    if (![responder isKindOfClass:[UIView class]] ||
+        ![responder conformsToProtocol:@protocol(UIKeyInput)]) {
+        return nil;
     }
-    for (UIView* sub in root.subviews) {
-        UIView<UIKeyInput>* found = FocusedTextInput(sub);
-        if (found) {
-            return found;
-        }
-    }
-    return nil;
+    UIView* view = (UIView*)responder;
+    return view.window == host.window ? (UIView<UIKeyInput>*)view : nil;
 }
 
 @interface NFBSpotifyBar : UIControl

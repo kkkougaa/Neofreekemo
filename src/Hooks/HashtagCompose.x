@@ -6,6 +6,7 @@
 #import "HookHelpers.h"
 #import "Core/BHTHashtags.h"
 #import "Core/BHTSpotify.h"
+#import "Core/NFBFirstResponder.h"
 
 // MARK: - Favorite hashtags in the compose screen
 // While a "#tag" is being typed, a strip above the compose toolbar offers the favorite
@@ -38,17 +39,15 @@ static CGFloat ComposeToolbarTop(UIView* host, CGFloat keyboardTop) {
     return bottom - kToolbarClearance;
 }
 
-static UIView<UITextInput>* FocusedTextInput(UIView* root) {
-    if (root.isFirstResponder && [root conformsToProtocol:@protocol(UITextInput)]) {
-        return (UIView<UITextInput>*)root;
+// The focused text input, if it belongs to the compose window.
+static UIView<UITextInput>* FocusedTextInput(UIView* host) {
+    UIResponder* responder = NFBCurrentFirstResponder();
+    if (![responder isKindOfClass:[UIView class]] ||
+        ![responder conformsToProtocol:@protocol(UITextInput)]) {
+        return nil;
     }
-    for (UIView* sub in root.subviews) {
-        UIView<UITextInput>* found = FocusedTextInput(sub);
-        if (found) {
-            return found;
-        }
-    }
-    return nil;
+    UIView* view = (UIView*)responder;
+    return view.window == host.window ? (UIView<UITextInput>*)view : nil;
 }
 
 // The "#tag" being typed right at the cursor, if there is one.

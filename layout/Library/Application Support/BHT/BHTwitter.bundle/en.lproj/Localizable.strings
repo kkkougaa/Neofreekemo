@@ -506,3 +506,11 @@
 "SPOTIFY_CONNECTED_LABEL" = "Connected";
 "SPOTIFY_DISCONNECTED_LABEL" = "Not connected";
 "SPOTIFY_NEED_CLIENT_ID" = "Enter your Spotify Client ID first.";
+"KEMO_HASHTAGS_TITLE" = "Favorite hashtags";
+"KEMO_HASHTAG_ADD_TITLE" = "Add hashtag";
+"KEMO_ALIASES_TITLE" = "Account aliases";
+"KEMO_ALIAS_ADD_TITLE" = "Add alias";
+"KEMO_ALIAS_HANDLE_PLACEHOLDER" = "@account";
+"KEMO_ALIAS_NAME_PLACEHOLDER" = "Alias";
+"SPOTIFY_REDIRECT_TITLE" = "Spotify Redirect URI";
+"SPOTIFY_COPIED_LABEL" = "Redirect URI copied. Paste it into Redirect URIs on the Spotify dashboard, then press Add and Save.";

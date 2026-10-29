@@ -313,9 +313,27 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
+                        @"key": @"spotify_redirect",
+                        @"titleKey": @"SPOTIFY_REDIRECT_TITLE",
+                        @"action": @"copySpotifyRedirect:"
+                    },
+                    @{
+                        @"type": @"compactButton",
                         @"key": @"spotify_login",
                         @"titleKey": @"SPOTIFY_LOGIN_TITLE",
                         @"action": @"toggleSpotifyLogin:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_hashtags",
+                        @"titleKey": @"KEMO_HASHTAGS_TITLE",
+                        @"action": @"openHashtagEditor:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_aliases",
+                        @"titleKey": @"KEMO_ALIASES_TITLE",
+                        @"action": @"openAliasEditor:"
                     }
                 ]
             },

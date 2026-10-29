@@ -42,7 +42,8 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
         [out appendFormat:@" id=%@", view.accessibilityIdentifier];
     }
     if ([view isKindOfClass:[UILabel class]]) {
-        [out appendFormat:@" \"%@\"", Trim(((UILabel*)view).text ?: @"")];
+        UILabel* label = (UILabel*)view;
+        [out appendFormat:@" \"%@\" font=%.0f", Trim(label.text ?: @""), label.font.pointSize];
     } else if ([view isKindOfClass:[UIButton class]]) {
         NSString* title = [(UIButton*)view titleForState:UIControlStateNormal];
         if (title.length) {
@@ -57,6 +58,10 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
                [view isKindOfClass:[UICollectionView class]]) {
         [out appendFormat:@" visibleCells=%lu",
                           (unsigned long)[[(id)view performSelector:@selector(visibleCells)] count]];
+    }
+    // Custom text views draw their own text; their accessibility label usually has it.
+    if (![view isKindOfClass:[UILabel class]] && view.accessibilityLabel.length) {
+        [out appendFormat:@" ax=\"%@\"", Trim(view.accessibilityLabel)];
     }
     [out appendString:@"\n"];
 
@@ -132,6 +137,26 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
     }
 }
 
+// MARK: First visible tweet cell
+
+static UIView* FindStatusCell(UIView* view) {
+    if (view.hidden || view.alpha < 0.01) {
+        return nil;
+    }
+    CGRect onScreen = [view convertRect:view.bounds toView:nil];
+    if ([NSStringFromClass(view.class) hasSuffix:@"StatusCell"] &&
+        CGRectIntersectsRect(onScreen, view.window.bounds) && CGRectGetHeight(onScreen) > 60) {
+        return view;
+    }
+    for (UIView* sub in view.subviews) {
+        UIView* found = FindStatusCell(sub);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
 %hook UIWindow
 
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
@@ -147,6 +172,12 @@ static void FindMedia(UIView* view, NSMutableString* out, NSUInteger* count) {
     FindMedia(self, out, &mediaCount);
     if (!mediaCount) {
         [out appendFormat:@"(none found)%c", 10];
+    }
+    UIView* statusCell = FindStatusCell(self);
+    [out appendFormat:@"== STATUS CELL %@ ==%c", statusCell ? NSStringFromClass(statusCell.class) : @"(none)", 10];
+    if (statusCell) {
+        NSUInteger cellLines = 0;
+        DumpView(statusCell, 0, out, &cellLines);
     }
     [out appendFormat:@"== TREE (no drawer) ==%c", 10];
     NSUInteger lines = 0;

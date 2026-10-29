@@ -19,6 +19,40 @@ static const NSTimeInterval kRefreshInterval = 8.0;
 
 static const void* kBarKey = &kBarKey;
 
+// Top edge of the compose toolbar (reply setting, undo, media buttons) in the compose
+// view's coordinates. It is found through its reply-setting button; when that isn't
+// there, a fixed clearance above the keyboard stands in.
+static CGFloat ComposeToolbarTop(UIView* host, CGFloat keyboardTop) {
+    __block UIView* button = nil;
+    EnumerateSubviewsRecursively(host, ^(UIView* view) {
+        if (!button &&
+            [NSStringFromClass(view.class) isEqualToString:@"T1TweetComposeConversationControlButton"]) {
+            button = view;
+        }
+    });
+    UIView* toolbar = button.superview.superview;
+    if (toolbar && toolbar.superview) {
+        return CGRectGetMinY([toolbar.superview convertRect:toolbar.frame toView:host]);
+    }
+    CGFloat bottom = keyboardTop > 0 ? keyboardTop
+                                     : CGRectGetHeight(host.bounds) - host.safeAreaInsets.bottom;
+    return bottom - kToolbarClearance;
+}
+
+// The view that is receiving typing, whatever kind of text view the editor is.
+static UIView<UIKeyInput>* FocusedTextInput(UIView* root) {
+    if (root.isFirstResponder && [root conformsToProtocol:@protocol(UIKeyInput)]) {
+        return (UIView<UIKeyInput>*)root;
+    }
+    for (UIView* sub in root.subviews) {
+        UIView<UIKeyInput>* found = FocusedTextInput(sub);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
 @interface NFBSpotifyBar : UIControl
 @property (nonatomic, copy) NSString* shareURL;
 @property (nonatomic, strong) UILabel* label;
@@ -97,10 +131,8 @@ static const void* kBarKey = &kBarKey;
     CGFloat width = MIN(textSize.width + 12 + 14 + 8 + 14, maxWidth);
     self.label.frame = CGRectMake(32, 0, width - 32 - 14, kBarHeight);
 
-    CGFloat bottom = self.keyboardTop > 0 ? self.keyboardTop
-                                          : CGRectGetHeight(host.bounds) -
-                                                host.safeAreaInsets.bottom;
-    self.frame = CGRectMake(16, bottom - kToolbarClearance - kBarHeight, width, kBarHeight);
+    CGFloat top = ComposeToolbarTop(host, self.keyboardTop);
+    self.frame = CGRectMake(16, top - 8 - kBarHeight, width, kBarHeight);
     [host bringSubviewToFront:self];
 }
 
@@ -126,32 +158,27 @@ static const void* kBarKey = &kBarKey;
         }];
 }
 
-static UITextView* LargestTextView(UIView* root) {
-    __block UITextView* best = nil;
-    EnumerateSubviewsRecursively(root, ^(UIView* view) {
-        if (![view isKindOfClass:[UITextView class]] || view.hidden || !((UITextView*)view).isEditable) {
-            return;
-        }
-        if (!best || ((UITextView*)view).isFirstResponder ||
-            CGRectGetHeight(view.bounds) > CGRectGetHeight(best.bounds)) {
-            if (!best || !best.isFirstResponder) {
-                best = (UITextView*)view;
-            }
-        }
-    });
-    return best;
-}
-
 - (void)insertLink {
-    UITextView* textView = LargestTextView(self.composer.view);
-    if (!textView || self.shareURL.length == 0) {
+    UIView<UIKeyInput>* input = FocusedTextInput(self.composer.view);
+    if (!input || self.shareURL.length == 0) {
         return;
     }
-    NSString* existing = textView.text;
-    BOOL needsSpace = existing.length > 0 &&
-                      ![[NSCharacterSet whitespaceAndNewlineCharacterSet]
-                          characterIsMember:[existing characterAtIndex:existing.length - 1]];
-    [textView insertText:[(needsSpace ? @" " : @"") stringByAppendingString:self.shareURL]];
+
+    // A space first unless the cursor already follows whitespace (or the text is empty).
+    BOOL needsSpace = NO;
+    if ([input conformsToProtocol:@protocol(UITextInput)]) {
+        id<UITextInput> textInput = (id<UITextInput>)input;
+        UITextRange* selection = textInput.selectedTextRange;
+        UITextRange* before =
+            selection ? [textInput textRangeFromPosition:textInput.beginningOfDocument
+                                              toPosition:selection.start]
+                      : nil;
+        NSString* text = before ? [textInput textInRange:before] : nil;
+        needsSpace = text.length > 0 &&
+                     ![[NSCharacterSet whitespaceAndNewlineCharacterSet]
+                         characterIsMember:[text characterAtIndex:text.length - 1]];
+    }
+    [input insertText:[(needsSpace ? @" " : @"") stringByAppendingString:self.shareURL]];
     [[[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
 }

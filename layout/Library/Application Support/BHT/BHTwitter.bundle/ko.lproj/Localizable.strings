@@ -465,3 +465,11 @@
 "SPOTIFY_CONNECTED_LABEL" = "연결됨";
 "SPOTIFY_DISCONNECTED_LABEL" = "연결 안 됨";
 "SPOTIFY_NEED_CLIENT_ID" = "먼저 Spotify Client ID를 입력해 주세요.";
+"KEMO_HASHTAGS_TITLE" = "즐겨찾는 해시태그";
+"KEMO_HASHTAG_ADD_TITLE" = "해시태그 추가";
+"KEMO_ALIASES_TITLE" = "계정 별칭";
+"KEMO_ALIAS_ADD_TITLE" = "별칭 추가";
+"KEMO_ALIAS_HANDLE_PLACEHOLDER" = "@계정";
+"KEMO_ALIAS_NAME_PLACEHOLDER" = "별칭";
+"SPOTIFY_REDIRECT_TITLE" = "Spotify Redirect URI";
+"SPOTIFY_COPIED_LABEL" = "Redirect URI를 복사했어요. Spotify 대시보드의 Redirect URIs에 그대로 붙여넣고 Add, Save를 눌러 주세요.";

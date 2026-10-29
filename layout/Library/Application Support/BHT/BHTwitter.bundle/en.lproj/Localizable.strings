@@ -148,6 +148,8 @@
 "HIDE_MADE_ON_X_DETAIL" = "Removes the 'Made on X' label from Tweets.";
 
 "DISABLE_SENSITIVE_TWEET_WARNINGS_TITLE" = "No sensitive content warnings";
+"NSFW_AI_BLUR_TITLE" = "Blur NSFW images (on-device AI)";
+"NSFW_MODE_TITLE" = "NSFW mode";
 
 "BYPASS_AGE_VERIFICATION_TITLE" = "Bypass age verification";
 "BYPASS_AGE_VERIFICATION_DETAIL" = "Skips the age verification flow for sensitive content.";

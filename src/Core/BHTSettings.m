@@ -337,6 +337,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"nsfw_ai_blur",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"show_poll_results",
                         @"default": @NO,
                         @"type": @"toggle"

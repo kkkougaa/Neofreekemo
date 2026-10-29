@@ -132,6 +132,8 @@
 "HIDE_DOWNVOTE_BUTTON_DETAIL" = "트윗에서 다운보트 버튼을 제거합니다.";
 
 "DISABLE_SENSITIVE_TWEET_WARNINGS_TITLE" = "민감한 콘텐츠 경고 비활성화";
+"NSFW_AI_BLUR_TITLE" = "NSFW 이미지 자동 블러 (기기 내 AI)";
+"NSFW_MODE_TITLE" = "NSFW 모드";
 
 "BYPASS_AGE_VERIFICATION_TITLE" = "연령 확인 우회";
 "BYPASS_AGE_VERIFICATION_DETAIL" = "민감한 콘텐츠에 대한 연령 확인 절차를 건너뜁니다.";

@@ -182,19 +182,41 @@ static UIView* FindStatusCell(UIView* view) {
     return nil;
 }
 
-%hook UIWindow
-
-- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
-    %orig;
-    if (motion != UIEventSubtypeMotionShake) {
+// Compact outline: only views that carry text (label, button title, accessibility
+// label), with their class, frame and hidden state. Short enough to survive a paste.
+static void DumpTexts(UIView* view, int depth, NSMutableString* out) {
+    if (depth > 14) {
         return;
     }
+    NSString* text = nil;
+    if ([view isKindOfClass:[UILabel class]]) {
+        text = ((UILabel*)view).text;
+    } else if ([view isKindOfClass:[UIButton class]]) {
+        text = [(UIButton*)view titleForState:UIControlStateNormal];
+    }
+    if (text.length == 0) {
+        text = view.accessibilityLabel;
+    }
+    if (text.length > 0 || view.accessibilityIdentifier.length > 0) {
+        [out appendFormat:@"%@%@ %@%@%@%@%c",
+                          [@"" stringByPaddingToLength:MIN(depth, 8) withString:@" " startingAtIndex:0],
+                          NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+                          view.accessibilityIdentifier.length ? [@" id=" stringByAppendingString:view.accessibilityIdentifier] : @"",
+                          (view.hidden || view.alpha < 0.01) ? @" [hidden]" : @"",
+                          text.length ? [NSString stringWithFormat:@" \"%@\"", Trim(text)] : @"", 10];
+    }
+    for (UIView* sub in view.subviews) {
+        DumpTexts(sub, depth + 1, out);
+    }
+}
 
+// Builds the outline of what's on screen and puts it on the pasteboard.
+static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
-        stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(self.frame)];
+        stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(window.frame)];
     NSUInteger mediaCount = 0;
     [out appendFormat:@"== MEDIA VIEWS ==%c", 10];
-    FindMedia(self, out, &mediaCount);
+    FindMedia(window, out, &mediaCount);
     if (!mediaCount) {
         [out appendFormat:@"(none found)%c", 10];
     }
@@ -221,8 +243,8 @@ static UIView* FindStatusCell(UIView* view) {
 
     // Menus, popovers and sheets can live in windows of their own; listed first so a
     // clipped paste still has them.
-    for (UIWindow* other in self.windowScene.windows) {
-        if (other == self) {
+    for (UIWindow* other in window.windowScene.windows) {
+        if (other == window) {
             continue;
         }
         [out appendFormat:@"== OTHER WINDOW %@ level=%.0f ==%c", NSStringFromClass(other.class),
@@ -231,7 +253,7 @@ static UIView* FindStatusCell(UIView* view) {
         DumpView(other, 0, out, &otherLines);
     }
 
-    UIView* statusCell = FindStatusCell(self);
+    UIView* statusCell = FindStatusCell(window);
     [out appendFormat:@"== STATUS CELL %@ ==%c", statusCell ? NSStringFromClass(statusCell.class) : @"(none)", 10];
     if (statusCell) {
         NSUInteger cellLines = 0;
@@ -239,13 +261,18 @@ static UIView* FindStatusCell(UIView* view) {
     }
 
     // The profile header (name, @handle, buttons), hidden pieces included.
-    UIView* profileHeader = FindViewOfController(self, @"ProfileHeaderViewController");
+    UIView* profileHeader = FindViewOfController(window, @"ProfileHeaderViewController");
     if (profileHeader) {
         [out appendFormat:@"== PROFILE HEADER ==%c", 10];
         NSUInteger headerLines = 0;
-        gIncludeHidden = YES;
-        DumpView(profileHeader, 0, out, &headerLines);
-        gIncludeHidden = NO;
+        (void)headerLines;
+        DumpTexts(profileHeader, 0, out);
+    }
+    // The whole profile page's text, in case the name and @handle live outside the header.
+    UIView* profilePage = FindViewOfController(window, @"T1ProfileViewController");
+    if (profilePage) {
+        [out appendFormat:@"== PROFILE PAGE TEXTS ==%c", 10];
+        DumpTexts(profilePage, 0, out);
     }
 
     [out appendFormat:@"== TIMELINE ITEM PROBE ==%c%@%c", 10, BHTMediaProbeSummary(), 10];
@@ -253,10 +280,31 @@ static UIView* FindStatusCell(UIView* view) {
     // Last, because it is the longest and the least specific.
     [out appendFormat:@"== TREE (no drawer) ==%c", 10];
     NSUInteger lines = 0;
-    DumpView(self, 0, out, &lines);
+    DumpView(window, 0, out, &lines);
     [UIPasteboard generalPasteboard].string = out;
     [[[UINotificationFeedbackGenerator alloc]
         init] notificationOccurred:UINotificationFeedbackTypeSuccess];
+}
+
+%hook UIWindow
+
+- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
+    %orig;
+    if (motion != UIEventSubtypeMotionShake) {
+        return;
+    }
+    PerformDump(self);
+
+    // Menus and sheets can't be open while shaking, so a second dump follows a few
+    // seconds later (a second haptic marks it): shake, open the menu, wait for it.
+    __weak UIWindow* weakWindow = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       UIWindow* window = weakWindow;
+                       if (window) {
+                           PerformDump(window);
+                       }
+                   });
 }
 
 %end

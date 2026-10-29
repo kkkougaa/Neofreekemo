@@ -328,6 +328,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_aliases",
                         @"titleKey": @"KEMO_ALIASES_TITLE",
                         @"action": @"openAliasEditor:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_keywords",
+                        @"titleKey": @"KEMO_KEYWORDS_TITLE",
+                        @"action": @"openKeywordEditor:"
                     }
                 ]
             },

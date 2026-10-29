@@ -498,3 +498,5 @@
 "KEMO_ALIAS_NAME_PLACEHOLDER" = "Alias";
 "SPOTIFY_REDIRECT_TITLE" = "Spotify Redirect URI";
 "SPOTIFY_COPIED_LABEL" = "Redirect URI copied. Paste it into Redirect URIs on the Spotify dashboard, then press Add and Save.";
+"KEMO_KEYWORDS_TITLE" = "Highlight keywords";
+"KEMO_KEYWORD_ADD_TITLE" = "Add keyword";

@@ -14,6 +14,7 @@
 
 static const void* kAliasLabelKey = &kAliasLabelKey;
 static const void* kAppliedKey = &kAppliedKey;
+static const void* kDeltaKey = &kDeltaKey;
 
 // MARK: Helpers
 
@@ -71,6 +72,15 @@ static void ApplyAlias(UIView* author) {
     NSString* aliasText = [BHTAliases aliasForHandle:CleanHandle(username.text)];
     if (aliasText.length == 0) {
         alias.hidden = YES;
+        // The alias was just removed: give back the room it took.
+        NSNumber* moved = objc_getAssociatedObject(author, kAppliedKey);
+        if (moved && fabs(CGRectGetMinX(username.frame) - moved.doubleValue) < 0.01) {
+            CGFloat previous = [objc_getAssociatedObject(author, kDeltaKey) doubleValue];
+            MoveX(username, -previous);
+            MoveX(dot, -previous);
+            MoveX(timestamp, -previous);
+            objc_setAssociatedObject(author, kAppliedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         return;
     }
 
@@ -79,6 +89,14 @@ static void ApplyAlias(UIView* author) {
     if (appliedX && fabs(CGRectGetMinX(username.frame) - appliedX.doubleValue) < 0.01 &&
         [alias.text isEqualToString:aliasText]) {
         return;
+    }
+
+    // The alias changed but X didn't re-lay the row out: take the old shift back first.
+    if (appliedX && fabs(CGRectGetMinX(username.frame) - appliedX.doubleValue) < 0.01) {
+        CGFloat previous = [objc_getAssociatedObject(author, kDeltaKey) doubleValue];
+        MoveX(username, -previous);
+        MoveX(dot, -previous);
+        MoveX(timestamp, -previous);
     }
 
     if (!alias) {
@@ -120,6 +138,7 @@ static void ApplyAlias(UIView* author) {
     MoveX(timestamp, delta);
     objc_setAssociatedObject(author, kAppliedKey, @(CGRectGetMinX(username.frame)),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(author, kDeltaKey, @(delta), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 %hook TTAStatusAuthorView

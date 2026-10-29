@@ -23,8 +23,12 @@ static NSString* Trim(NSString* text) {
     return flat.length > 40 ? [[flat substringToIndex:40] stringByAppendingString:@"…"] : flat;
 }
 
+// While set, hidden and transparent views are listed too (and marked).
+static BOOL gIncludeHidden = NO;
+
 static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* lines) {
-    if (*lines >= kMaxLines || depth > kMaxDepth || view.hidden || view.alpha < 0.01 ||
+    BOOL invisible = view.hidden || view.alpha < 0.01;
+    if (*lines >= kMaxLines || depth > kMaxDepth || (invisible && !gIncludeHidden) ||
         [NSStringFromClass(view.class) containsString:@"TwitterDash"]) {
         return;
     }
@@ -38,6 +42,9 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
     UIResponder* next = view.nextResponder;
     if ([next isKindOfClass:[UIViewController class]]) {
         [out appendFormat:@" VC=%@", NSStringFromClass(next.class)];
+    }
+    if (invisible) {
+        [out appendFormat:@" [hidden=%d alpha=%.2f]", view.hidden, view.alpha];
     }
     if (view.accessibilityIdentifier.length) {
         [out appendFormat:@" id=%@", view.accessibilityIdentifier];
@@ -212,21 +219,8 @@ static UIView* FindStatusCell(UIView* view) {
         [out appendFormat:@"(none)%c", 10];
     }
 
-    UIView* statusCell = FindStatusCell(self);
-    [out appendFormat:@"== STATUS CELL %@ ==%c", statusCell ? NSStringFromClass(statusCell.class) : @"(none)", 10];
-    if (statusCell) {
-        NSUInteger cellLines = 0;
-        DumpView(statusCell, 0, out, &cellLines);
-    }
-    // The profile header (name, @handle, buttons), when a profile is showing.
-    UIView* profileHeader = FindViewOfController(self, @"ProfileHeaderViewController");
-    if (profileHeader) {
-        [out appendFormat:@"== PROFILE HEADER ==%c", 10];
-        NSUInteger headerLines = 0;
-        DumpView(profileHeader, 0, out, &headerLines);
-    }
-
-    // Menus, popovers and sheets can live in windows of their own.
+    // Menus, popovers and sheets can live in windows of their own; listed first so a
+    // clipped paste still has them.
     for (UIWindow* other in self.windowScene.windows) {
         if (other == self) {
             continue;
@@ -235,6 +229,23 @@ static UIView* FindStatusCell(UIView* view) {
                           other.windowLevel, 10];
         NSUInteger otherLines = 0;
         DumpView(other, 0, out, &otherLines);
+    }
+
+    UIView* statusCell = FindStatusCell(self);
+    [out appendFormat:@"== STATUS CELL %@ ==%c", statusCell ? NSStringFromClass(statusCell.class) : @"(none)", 10];
+    if (statusCell) {
+        NSUInteger cellLines = 0;
+        DumpView(statusCell, 0, out, &cellLines);
+    }
+
+    // The profile header (name, @handle, buttons), hidden pieces included.
+    UIView* profileHeader = FindViewOfController(self, @"ProfileHeaderViewController");
+    if (profileHeader) {
+        [out appendFormat:@"== PROFILE HEADER ==%c", 10];
+        NSUInteger headerLines = 0;
+        gIncludeHidden = YES;
+        DumpView(profileHeader, 0, out, &headerLines);
+        gIncludeHidden = NO;
     }
 
     [out appendFormat:@"== TIMELINE ITEM PROBE ==%c%@%c", 10, BHTMediaProbeSummary(), 10];

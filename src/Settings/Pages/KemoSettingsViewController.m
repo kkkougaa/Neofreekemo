@@ -6,12 +6,10 @@
 #import "Settings/Pages/KemoSettingsViewController.h"
 #import "Core/BHTBundle.h"
 #import "Core/BHTAliases.h"
-#import "Core/BHTHashtags.h"
 #import "Core/BHTSettings.h"
 #import "Core/BHTSpotify.h"
 #import "Settings/ModernSettingsCells.h"
 #import "Settings/Pages/KemoAliasListViewController.h"
-#import "Settings/Pages/KemoHashtagListViewController.h"
 
 static NSString* const kClientIDKey = @"spotify_client_id";
 static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
@@ -50,14 +48,6 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                                            : kSpotifyRedirectURI];
         return cell;
     }
-    if ([data[@"key"] isEqualToString:@"kemo_hashtags"]) {
-        ModernSettingsCompactButtonCell* cell =
-            [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
-                                            forIndexPath:indexPath];
-        [cell configureWithTitle:[self localized:data[@"titleKey"]]
-                        subtitle:[[BHTHashtags favorites] componentsJoinedByString:@" "]];
-        return cell;
-    }
     return [super tableView:tableView cellForRowAtIndexPath:indexPath];
 }
 
@@ -68,10 +58,6 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 - (void)copySpotifyRedirect:(NSDictionary*)sender {
     [UIPasteboard generalPasteboard].string = kSpotifyRedirectURI;
     [self showMessage:[self localized:@"SPOTIFY_COPIED_LABEL"]];
-}
-
-- (void)openHashtagEditor:(NSDictionary*)sender {
-    [self.navigationController pushViewController:[KemoHashtagListViewController new] animated:YES];
 }
 
 - (void)showMessage:(NSString*)message {

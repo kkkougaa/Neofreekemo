@@ -325,12 +325,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
-                        @"key": @"kemo_hashtags",
-                        @"titleKey": @"KEMO_HASHTAGS_TITLE",
-                        @"action": @"openHashtagEditor:"
-                    },
-                    @{
-                        @"type": @"compactButton",
                         @"key": @"kemo_aliases",
                         @"titleKey": @"KEMO_ALIASES_TITLE",
                         @"action": @"openAliasEditor:"

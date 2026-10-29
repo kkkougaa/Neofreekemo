@@ -20,35 +20,14 @@ static const NSTimeInterval kRefreshInterval = 8.0;
 
 static const void* kBarKey = &kBarKey;
 
-// Top edge of the compose toolbar (reply setting, undo, media buttons) in the compose
-// view's coordinates. It is found through its reply-setting button; when that isn't
-// there, a fixed clearance above the keyboard stands in.
-static CGFloat ComposeToolbarTop(UIView* host, CGFloat keyboardTop) {
-    __block UIView* button = nil;
-    EnumerateSubviewsRecursively(host, ^(UIView* view) {
-        if (!button &&
-            [NSStringFromClass(view.class) isEqualToString:@"T1TweetComposeConversationControlButton"]) {
-            button = view;
-        }
-    });
-    UIView* toolbar = button.superview.superview;
-    if (toolbar && toolbar.superview) {
-        return CGRectGetMinY([toolbar.superview convertRect:toolbar.frame toView:host]);
-    }
-    CGFloat bottom = keyboardTop > 0 ? keyboardTop
-                                     : CGRectGetHeight(host.bounds) - host.safeAreaInsets.bottom;
-    return bottom - kToolbarClearance;
-}
-
-// The view that is receiving typing, whatever kind of text view the editor is.
-static UIView<UIKeyInput>* FocusedTextInput(UIView* host) {
-    UIResponder* responder = NFBCurrentFirstResponder();
-    if (![responder isKindOfClass:[UIView class]] ||
-        ![responder conformsToProtocol:@protocol(UIKeyInput)]) {
-        return nil;
-    }
-    UIView* view = (UIView*)responder;
-    return view.window == host.window ? (UIView<UIKeyInput>*)view : nil;
+// The official Spotify mark, shipped as nfb_spotify_logo.png in the tweak bundle.
+static UIImage* SpotifyLogo(void) {
+    NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"nfb_spotify_logo.png"];
+    UIImage* image = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+    return image.CGImage ? [UIImage imageWithCGImage:image.CGImage
+                                               scale:6.0
+                                         orientation:UIImageOrientationUp]
+                         : nil;
 }
 
 @interface NFBSpotifyBar : UIControl
@@ -71,12 +50,9 @@ static UIView<UIKeyInput>* FocusedTextInput(UIView* host) {
         self.layer.cornerRadius = kBarHeight / 2;
         self.clipsToBounds = YES;
 
-        UILabel* note = [UILabel new];
-        note.text = @"♪";
-        note.textColor = [UIColor colorWithRed:0.12 green:0.84 blue:0.38 alpha:1];
-        note.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
-        note.frame = CGRectMake(12, 0, 14, kBarHeight);
-        [self addSubview:note];
+        UIImageView* logo = [[UIImageView alloc] initWithImage:SpotifyLogo()];
+        logo.frame = CGRectMake(10, (kBarHeight - 18) / 2, 18, 18);
+        [self addSubview:logo];
 
         _label = [UILabel new];
         _label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];

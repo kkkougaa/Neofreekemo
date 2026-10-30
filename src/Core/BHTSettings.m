@@ -391,6 +391,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_history_tabs",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"type": @"compactButton",
                         @"key": @"kemo_recent_list",
                         @"titleKey": @"KEMO_RECENT_LIST_TITLE",

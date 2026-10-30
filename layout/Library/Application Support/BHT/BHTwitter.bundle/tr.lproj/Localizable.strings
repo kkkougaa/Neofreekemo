@@ -622,3 +622,4 @@
 "KEMO_RECENT_EMPTY" = "Nothing here yet";
 "NSFW_ANIME_THRESHOLD_TITLE" = "Anime illustration threshold";
 "KEMO_RECENT_LIST_TITLE" = "Recently viewed tweets";
+"KEMO_HISTORY_TABS_TITLE" = "Tidy the history tabs (recent, likes, bookmarks)";

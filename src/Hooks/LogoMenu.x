@@ -226,6 +226,12 @@ static void WatchTimeline(void) {
                       }]];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    self.items = RecentTweets();
+    [self.tableView reloadData];
+}
+
 - (NSInteger)tableView:(UITableView*)tableView numberOfRowsInSection:(NSInteger)section {
     return MAX(self.items.count, 1);
 }

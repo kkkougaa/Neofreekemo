@@ -207,6 +207,29 @@ static NSAttributedString* RestoreTwitterAttributed(NSAttributedString* input) {
     return result;
 }
 
+// Debug aid for the shake dump: which localization keys come back as "...시간 전" (hours
+// ago), with the table and bundle they came from. Only collected while the dump is on.
+static NSMutableArray<NSString*>* gTimeStringProbe;
+
+NSString* NFBStringProbeText(void) {
+    return [gTimeStringProbe componentsJoinedByString:[NSString stringWithFormat:@"%c", 10]] ?: @"(nothing collected yet)";
+}
+
+static void ProbeTimeString(NSBundle* bundle, NSString* key, NSString* table, NSString* result) {
+    if (result.length == 0 || result.length > 40 || ![result containsString:@"시간 전"] ||
+        ![[NSUserDefaults standardUserDefaults] boolForKey:@"kemo_shake_dump"]) {
+        return;
+    }
+    if (!gTimeStringProbe) {
+        gTimeStringProbe = [NSMutableArray array];
+    }
+    NSString* line = [NSString stringWithFormat:@"key=%@ table=%@ bundle=%@ value=%@", key, table,
+                                                bundle.bundlePath.lastPathComponent, result];
+    if (![gTimeStringProbe containsObject:line] && gTimeStringProbe.count < 30) {
+        [gTimeStringProbe addObject:line];
+    }
+}
+
 // MARK: - Rename localized strings
 // Every UI string routes through this Foundation method in 12.3, so the rename
 // applies broadly. Skip our own bundle so the tweak's strings aren't
@@ -216,6 +239,7 @@ static NSAttributedString* RestoreTwitterAttributed(NSAttributedString* input) {
                              value:(NSString*)value
                              table:(NSString*)tableName {
     NSString* result = %orig;
+    ProbeTimeString(self, key, tableName, result);
     if (![BHTSettings boolForKey:@"restore_twitter_names"] ||
         self == [BHTBundle sharedBundle].mainBundle) {
         return result;

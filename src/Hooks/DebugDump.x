@@ -16,6 +16,7 @@ extern NSString* BHTMediaProbeSummary(void);
 #import "Core/NFBFirstResponder.h"
 
 extern NSString* NFBBubbleDebugText(void);
+extern NSString* NFBStringProbeText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -277,6 +278,7 @@ static void PerformDump(UIWindow* window) {
 
     // What the speech bubble has seen and decided.
     [out appendFormat:@"== BUBBLE STATE ==%c%@%c", 10, NFBBubbleDebugText(), 10];
+    [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
 
     // The drawer's controller: which methods it has (to see who rebuilds the menu list).
     for (NSString* name in @[ @"T1DashContentController", @"T1TabbedAppNavigationViewController" ]) {

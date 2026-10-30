@@ -216,16 +216,29 @@ NSString* NFBStringProbeText(void) {
 }
 
 static void ProbeTimeString(NSBundle* bundle, NSString* key, NSString* table, NSString* result) {
-    if (result.length == 0 || result.length > 16 || !([result containsString:@" 전"] || [result hasSuffix:@"표"] || [result containsString:@"표 "]) ||
-        ![[NSUserDefaults standardUserDefaults] boolForKey:@"kemo_shake_dump"]) {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"kemo_shake_dump"]) {
+        return;
+    }
+    // Poll duration and "time ago" keys, whatever they return; plus any short "... 전" or
+    // vote ("표") string.
+    NSString* lower = key.lowercaseString;
+    BOOL keyHit = ([lower containsString:@"poll"] &&
+                   ([lower containsString:@"day"] || [lower containsString:@"hour"] ||
+                    [lower containsString:@"minute"] || [lower containsString:@"duration"])) ||
+                  [lower containsString:@"_ago"] || [lower containsString:@"relative"] ||
+                  [lower containsString:@"minute"] || [lower containsString:@"second"] ||
+                  [lower containsString:@"remaining"] || [lower containsString:@"time_left"] ||
+                  [lower containsString:@"_left"] || [lower containsString:@"vote"];
+    BOOL valueHit = result.length > 0 && result.length <= 16 &&
+                    ([result containsString:@" 전"] || [result hasSuffix:@"표"]);
+    if ((!keyHit && !valueHit) || result.length > 80) {
         return;
     }
     if (!gTimeStringProbe) {
         gTimeStringProbe = [NSMutableArray array];
     }
-    NSString* line = [NSString stringWithFormat:@"key=%@ table=%@ bundle=%@ value=%@", key, table,
-                                                bundle.bundlePath.lastPathComponent, result];
-    if (![gTimeStringProbe containsObject:line] && gTimeStringProbe.count < 30) {
+    NSString* line = [NSString stringWithFormat:@"key=%@ table=%@ value=%@", key, table, result];
+    if (![gTimeStringProbe containsObject:line] && gTimeStringProbe.count < 70) {
         [gTimeStringProbe addObject:line];
     }
 }

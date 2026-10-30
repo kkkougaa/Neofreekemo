@@ -946,13 +946,42 @@ static void ApplyLogoShift(UIView* control) {
             reference = reference.superview;
         }
         reference = reference ?: window;
-        // Where the logo is right now, and where it should be: its centre mirrors the
-        // centre of the 44pt profile button that sits 20pt from the left edge. The shift is
-        // corrected by the difference, so it does not matter how UIKit has placed or sized
-        // the title; each pass only closes the remaining gap.
-        CGPoint logoCenter = [reference convertPoint:CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds))
-                                            fromView:logo];
+        // Where the logo should be: its centre mirrors the centre of the 44pt profile button
+        // that sits 20pt from the left edge.
         CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
+        CGPoint middle = CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds));
+
+        // While UIKit is animating the title (it slides the title around when a refresh
+        // starts) the logo is not chased: it is hidden if it is out flying, left alone if it
+        // is near, and put in its place once the animation has ended.
+        BOOL animating = NO;
+        for (UIView* view = control; view && view != reference; view = view.superview) {
+            if (view.layer.animationKeys.count > 0) {
+                animating = YES;
+                break;
+            }
+        }
+        if (animating) {
+            CALayer* shown = logo.layer.presentationLayer ?: logo.layer;
+            CALayer* base = reference.layer.presentationLayer ?: reference.layer;
+            CGPoint at = [shown convertPoint:middle toLayer:base];
+            BOOL flying = fabs(at.x - target) > 40 || at.x < 0 || at.x > CGRectGetWidth(reference.bounds);
+            [UIView performWithoutAnimation:^{
+                control.layer.opacity = flying ? 0 : 1;
+            }];
+            __weak UIView* weakControl = control;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                               if (weakControl) {
+                                   ApplyLogoShift(weakControl);
+                               }
+                           });
+            return;
+        }
+
+        // At rest: the shift is corrected by the remaining gap, so it does not matter how
+        // UIKit has placed or sized the title.
+        CGPoint logoCenter = [reference convertPoint:middle fromView:logo];
         CGFloat gap = target - logoCenter.x;
         shift = fabs(gap) > 0.5 ? control.transform.tx + gap : control.transform.tx;
         gLogoShiftDebug = [NSString stringWithFormat:@"ref=%@ refWidth=%.0f logoX=%.1f target=%.1f gap=%.1f tx=%.1f logo=%.1f control=%@",
@@ -960,19 +989,36 @@ static void ApplyLogoShift(UIView* control) {
                                                      CGRectGetWidth(reference.bounds), logoCenter.x, target, gap,
                                                      shift, CGRectGetWidth(logo.bounds),
                                                      NSStringFromCGRect(control.frame)];
-    }
-
-    // Only the shift goes on the control. UIKit lays out what is inside a scaled control
-    // smaller (the logo shrank after a refresh), so the size is set on the image itself,
-    // from however big it was laid out. Both are compared with the live values, since
-    // UIKit resets them now and then.
-    // Never animated: UIKit often lays the bar out inside an animation block, and a
-    // transform set there would slide from the old value to the new one.
-    if (fabs(control.transform.tx - shift) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
+        if (control.layer.opacity < 1) {
+            [UIView performWithoutAnimation:^{
+                control.layer.opacity = 1;
+            }];
+        }
+        // A small correction (a few points, like the drawer opening and closing) is eased
+        // in; a big one is made at once.
+        if (fabs(control.transform.tx - shift) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
+            CGAffineTransform wanted = CGAffineTransformMakeTranslation(shift, 0);
+            if (fabs(gap) < 30) {
+                [UIView animateWithDuration:0.18
+                                      delay:0
+                                    options:UIViewAnimationOptionBeginFromCurrentState |
+                                            UIViewAnimationOptionAllowUserInteraction
+                                 animations:^{
+                                     control.transform = wanted;
+                                 }
+                                 completion:nil];
+            } else {
+                [UIView performWithoutAnimation:^{
+                    control.transform = wanted;
+                }];
+            }
+        }
+    } else if (fabs(control.transform.tx) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
         [UIView performWithoutAnimation:^{
-            control.transform = CGAffineTransformMakeTranslation(shift, 0);
+            control.transform = CGAffineTransformIdentity;
         }];
     }
+
     CGFloat scale = enabled ? kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1) : 1;
     if (fabs(logo.transform.a - scale) > 0.01 && logo.layer.animationKeys.count == 0) {
         [UIView performWithoutAnimation:^{

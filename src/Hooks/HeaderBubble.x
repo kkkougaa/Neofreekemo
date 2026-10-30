@@ -732,6 +732,7 @@ static NSMutableDictionary<NSString*, NSNumber*>* gBadgeLast;
 static NSString* gAccountKey;
 static NSString* gLastScanText;
 static NSString* gLogoShiftDebug;
+static NSString* gSpotifyLog;
 static NSMutableArray<NSString*>* gNewTweetsLog;
 
 // What the new-tweets counter decided on its last runs (shown in the shake dump).
@@ -754,6 +755,7 @@ NSString* NFBBubbleDebugText(void) {
                       [BHTSettings boolForKey:@"kemo_bubble_spotify"],
                       (long)[BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 10];
     [out appendFormat:@"logoShift: %@%c", gLogoShiftDebug, 10];
+    [out appendFormat:@"spotify: connected=%d last=%@%c", [BHTSpotify shared].isConnected, gSpotifyLog, 10];
     [out appendFormat:@"keepPosition=%d mediaOnly=%d%c", [BHTSettings boolForKey:@"kemo_keep_position"], [BHTSettings boolForKey:@"kemo_media_only"], 10];
     [out appendFormat:@"account=%@ badgeLast=%@ lastScan=%@%c", gAccountKey, gBadgeLast, gLastScanText, 10];
     [out appendFormat:@"newCount=%lu shown=%lu persistent=%@%c", (unsigned long)gNewCount,
@@ -854,22 +856,46 @@ static NSDate* gSpotifyAt;
 
 static void CheckSpotify(void) {
     NSInteger interval = MAX([BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 5);
-    if (![BHTSettings boolForKey:@"kemo_bubble_spotify"] || ![BHTSpotify shared].isConnected ||
-        (gSpotifyAt && -[gSpotifyAt timeIntervalSinceNow] < interval)) {
+    if (![BHTSettings boolForKey:@"kemo_bubble_spotify"]) {
+        return;
+    }
+    if (![BHTSpotify shared].isConnected) {
+        gSpotifyLog = @"not connected (no login)";
+        return;
+    }
+    if (gSpotifyAt && -[gSpotifyAt timeIntervalSinceNow] < interval) {
         return;
     }
     UIWindow* window = NFBKeyWindow();
     if (!window || !HeaderLogoInWindow(window)) {
+        gSpotifyLog = @"waiting: the home logo is not on screen";
         return;
     }
     gSpotifyAt = [NSDate date];
     [[BHTSpotify shared]
         fetchCurrentlyPlaying:^(NSString* title, NSString* artist, NSString* shareURL, NSError* error) {
-            if (error || title.length == 0) {
+            NSString* when = [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                                            dateStyle:NSDateFormatterNoStyle
+                                                            timeStyle:NSDateFormatterMediumStyle];
+            if (error) {
+                gSpotifyLog = [NSString stringWithFormat:@"%@ error: %@", when, error.localizedDescription];
+                // Too many requests: wait as long as Spotify says before asking again.
+                NSNumber* retry = error.userInfo[@"retryAfter"];
+                if (error.code == 429) {
+                    gSpotifyAt = [NSDate dateWithTimeIntervalSinceNow:MAX(retry.doubleValue, 30) - interval];
+                }
+                return;
+            }
+            if (title.length == 0) {
+                // Nothing is playing. The next song after this counts as a change.
+                gLastTrack = @"";
+                gSpotifyLog = [NSString stringWithFormat:@"%@ nothing playing", when];
                 return;
             }
             NSString* track = [NSString stringWithFormat:@"%@|%@", title, artist ?: @""];
             BOOL changed = gLastTrack && ![gLastTrack isEqualToString:track];
+            gSpotifyLog = [NSString stringWithFormat:@"%@ playing: %@ (%@)", when, track,
+                                                     changed ? @"changed, showing" : @"same or first"];
             gLastTrack = track;
             if (changed) {
                 NFBShowBubbleWithIcon(title, @"spotify");

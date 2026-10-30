@@ -473,7 +473,7 @@
 "SPOTIFY_COPIED_LABEL" = "Redirect URI를 복사했어요. Spotify 대시보드의 Redirect URIs에 그대로 붙여넣고 Add, Save를 눌러 주세요.";
 "KEMO_KEYWORDS_TITLE" = "강조할 키워드";
 "KEMO_KEYWORD_ADD_TITLE" = "키워드 추가";
-"KEMO_SHAKE_DUMP_TITLE" = "흔들어서 화면 구조 복사";
+"KEMO_SHAKE_DUMP_TITLE" = "볼륨을 내려서 화면 구조 복사";
 "KEMO_EVENTS_TITLE" = "행사 일정 (D-day)";
 "KEMO_EVENT_ADD_TITLE" = "일정 추가";
 "KEMO_EVENT_NAME_PLACEHOLDER" = "행사 이름";

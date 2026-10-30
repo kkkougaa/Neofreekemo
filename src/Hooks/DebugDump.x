@@ -5,8 +5,8 @@
 
 #import "HookHelpers.h"
 
-// MARK: - View tree dump (shake)
-// With "kemo_shake_dump" on, shaking the device copies a text outline of what's currently on screen to the
+// MARK: - View tree dump (volume down)
+// With "kemo_shake_dump" on, pressing volume down copies a text outline of what's currently on screen to the
 // pasteboard: view classes, owning view controllers, label/button text, and the
 // contents of every table or collection view. For working out how an app screen
 // is built when its class names aren't known.
@@ -369,25 +369,50 @@ static void PerformDump(UIWindow* window) {
         init] notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 
-%hook UIWindow
+extern UIWindow* NFBKeyWindow(void);
 
-- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent*)event {
-    %orig;
-    if (motion != UIEventSubtypeMotionShake || ![BHTSettings boolForKey:@"kemo_shake_dump"]) {
+// Pressing volume down starts the dump (instead of shaking). The system announces every
+// volume change with a notification; one caused by the buttons that goes down is the
+// trigger. At the lowest volume nothing changes, so there is nothing to announce.
+static float gLastVolume = -1;
+
+static void DumpFromVolumeButton(void) {
+    UIWindow* window = NFBKeyWindow();
+    if (!window || ![BHTSettings boolForKey:@"kemo_shake_dump"]) {
         return;
     }
-    PerformDump(self);
+    PerformDump(window);
 
-    // Menus and sheets can't be open while shaking, so a second dump follows a few
-    // seconds later (a second haptic marks it): shake, open the menu, wait for it.
-    __weak UIWindow* weakWindow = self;
+    // Menus and sheets can't be open while the first dump is made, so a second one follows
+    // a few seconds later (a second haptic marks it): press, open the menu, wait for it.
+    __weak UIWindow* weakWindow = window;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-                       UIWindow* window = weakWindow;
-                       if (window && [BHTSettings boolForKey:@"kemo_shake_dump"]) {
-                           PerformDump(window);
+                       UIWindow* later = weakWindow;
+                       if (later && [BHTSettings boolForKey:@"kemo_shake_dump"]) {
+                           PerformDump(later);
                        }
                    });
 }
 
-%end
+%ctor {
+    gLastVolume = [AVAudioSession sharedInstance].outputVolume;
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* note) {
+                    NSNumber* volume = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
+                    NSString* reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
+                    if (!volume) {
+                        return;
+                    }
+                    float now = volume.floatValue;
+                    BOOL pressedDown = gLastVolume >= 0 && now < gLastVolume &&
+                                       (!reason || [reason isEqualToString:@"ExplicitVolumeChange"]);
+                    gLastVolume = now;
+                    if (pressedDown) {
+                        DumpFromVolumeButton();
+                    }
+                }];
+}

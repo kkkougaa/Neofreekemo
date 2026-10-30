@@ -412,8 +412,22 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                           url = item[@"external_urls"][@"spotify"];
                       }
                   }
+                  // A refusal (expired login, rate limit, app restrictions) is an error, not
+                  // "nothing is playing": 204 is the only answer that means that.
+                  NSError* result = error;
+                  if (!error && status >= 400) {
+                      NSString* retry = [(NSHTTPURLResponse*)response allHeaderFields][@"Retry-After"];
+                      NSString* message = [NSString stringWithFormat:@"HTTP %ld%@", (long)status,
+                                                                     retry ? [@", retry after " stringByAppendingString:retry] : @""];
+                      NSMutableDictionary* info = [NSMutableDictionary dictionaryWithObject:message
+                                                                                    forKey:NSLocalizedDescriptionKey];
+                      if (retry.integerValue > 0) {
+                          info[@"retryAfter"] = @(retry.integerValue);
+                      }
+                      result = [NSError errorWithDomain:kErrorDomain code:status userInfo:info];
+                  }
                   dispatch_async(dispatch_get_main_queue(), ^{
-                      completion(title, artist, url, error);
+                      completion(title, artist, url, result);
                   });
               }] resume];
     }];

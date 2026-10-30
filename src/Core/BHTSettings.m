@@ -391,6 +391,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_recent_list",
+                        @"titleKey": @"KEMO_RECENT_LIST_TITLE",
+                        @"action": @"openRecentTweets:"
+                    },
+                    @{
                         @"key": @"kemo_recent_tweets",
                         @"default": @YES,
                         @"type": @"toggle"
@@ -442,11 +448,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"titleKey": @"KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE",
                         @"action": @"pickSpotifyInterval:",
                         @"parentKey": @"kemo_bubble_spotify"
-                    },
-                    @{
-                        @"key": @"kemo_logo_menu",
-                        @"default": @YES,
-                        @"type": @"toggle"
                     },
                     @{
                         @"key": @"kemo_logo_loading",

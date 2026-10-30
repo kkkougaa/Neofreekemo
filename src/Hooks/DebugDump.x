@@ -235,6 +235,33 @@ static void DumpTexts(UIView* view, int depth, NSMutableString* out) {
     }
 }
 
+// The screen's view controllers, parents to children: shows how a screen with tabs is put
+// together (which controller is the pager, which are the pages).
+static void DumpControllers(UIViewController* controller, int depth, NSMutableString* out, NSUInteger* lines) {
+    if (!controller || depth > 12 || *lines > 160) {
+        return;
+    }
+    (*lines)++;
+    [out appendFormat:@"%@%@%@%c", [@"" stringByPaddingToLength:(NSUInteger)depth withString:@" " startingAtIndex:0],
+                      NSStringFromClass(controller.class),
+                      controller.isViewLoaded && controller.view.window ? @" (on screen)" : @"", 10];
+    NSMutableArray<UIViewController*>* kids = [NSMutableArray array];
+    if ([controller isKindOfClass:[UINavigationController class]]) {
+        [kids addObjectsFromArray:((UINavigationController*)controller).viewControllers];
+    }
+    for (UIViewController* child in controller.childViewControllers) {
+        if (![kids containsObject:child]) {
+            [kids addObject:child];
+        }
+    }
+    if (controller.presentedViewController) {
+        [kids addObject:controller.presentedViewController];
+    }
+    for (UIViewController* kid in kids) {
+        DumpControllers(kid, depth + 1, out, lines);
+    }
+}
+
 // Builds the outline of what's on screen and puts it on the pasteboard.
 static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
@@ -300,6 +327,39 @@ static void PerformDump(UIWindow* window) {
             }
         }
         free(methods);
+    }
+
+    // How the screen is put together: view controllers, and everything in the top part of the
+    // screen (where a row of tabs lives) with its text.
+    {
+        [out appendFormat:@"== CONTROLLERS ==%c", 10];
+        NSUInteger controllerLines = 0;
+        DumpControllers(window.rootViewController, 0, out, &controllerLines);
+
+        [out appendFormat:@"== TOP REGION ==%c", 10];
+        NSMutableArray<UIView*>* topQueue = [NSMutableArray arrayWithObject:window];
+        NSUInteger topVisited = 0;
+        NSUInteger topLines = 0;
+        while (topQueue.count > 0 && topVisited < 6000 && topLines < 120) {
+            UIView* view = topQueue.firstObject;
+            [topQueue removeObjectAtIndex:0];
+            topVisited++;
+            CGRect inWindow = [window convertRect:view.bounds fromView:view];
+            NSString* text = nil;
+            if ([view isKindOfClass:[UILabel class]]) {
+                text = ((UILabel*)view).text;
+            } else if ([view isKindOfClass:[UIButton class]]) {
+                text = [(UIButton*)view titleForState:UIControlStateNormal];
+            }
+            if (!view.hidden && CGRectGetMinY(inWindow) > 100 && CGRectGetMinY(inWindow) < 230 &&
+                CGRectGetHeight(inWindow) < 80 && CGRectGetWidth(inWindow) > 0 &&
+                (text.length > 0 || view.accessibilityLabel.length > 0)) {
+                topLines++;
+                [out appendFormat:@"%@ %@ text=%@ label=%@%c", NSStringFromClass(view.class),
+                                  NSStringFromCGRect(inWindow), text, view.accessibilityLabel, 10];
+            }
+            [topQueue addObjectsFromArray:view.subviews];
+        }
     }
 
     // Tab bar: the accessibility label and value of every element along the bottom edge

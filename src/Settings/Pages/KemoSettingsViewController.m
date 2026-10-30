@@ -16,6 +16,9 @@
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
+extern UIViewController* NFBMakeRecentViewController(void);
+extern NSUInteger NFBRecentCount(void);
+
 static NSString* const kClientIDKey = @"spotify_client_id";
 static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 
@@ -43,6 +46,14 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                         subtitle:status.length > 0
                                      ? [NSString stringWithFormat:@"%@ · %@", [self localized:state], status]
                                      : [self localized:state]];
+        return cell;
+    }
+    if ([data[@"key"] isEqualToString:@"kemo_recent_list"]) {
+        ModernSettingsCompactButtonCell* cell =
+            [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
+                                            forIndexPath:indexPath];
+        [cell configureWithTitle:[self localized:data[@"titleKey"]]
+                        subtitle:[NSString stringWithFormat:@"%lu", (unsigned long)NFBRecentCount()]];
         return cell;
     }
     if ([data[@"key"] isEqualToString:@"kemo_events"]) {
@@ -86,6 +97,10 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
             [weakSelf.tableView reloadData];
         }];
     }
+}
+
+- (void)openRecentTweets:(NSDictionary*)sender {
+    [self.navigationController pushViewController:NFBMakeRecentViewController() animated:YES];
 }
 
 - (void)openBubbleSettings:(NSDictionary*)sender {

@@ -451,6 +451,10 @@ static void Tick(void) {
 // MARK: Logo at the right end
 
 static const void* kLogoShiftKey = &kLogoShiftKey;
+// The logo is drawn a little larger than the 32pt it is laid out at, to sit with the 44pt
+// profile button on the left.
+static const CGFloat kLogoSize = 40.0;
+static const CGFloat kLogoLaidOut = 32.0;
 
 static void ApplyLogoShift(UIView* control) {
     UIWindow* window = control.window;
@@ -476,20 +480,25 @@ static void ApplyLogoShift(UIView* control) {
         return;
     }
 
+    BOOL enabled = BubbleEnabled();
     CGFloat shift = 0;
-    if (BubbleEnabled()) {
+    CGFloat scale = 1;
+    if (enabled) {
         // Centre of the control with no transform, in window coordinates.
         CGPoint center = [parent convertPoint:control.center toView:window];
         // Mirrors the 44pt profile button that sits 20pt from the left edge.
         CGFloat target = CGRectGetWidth(window.bounds) - kEdgeMargin - 22;
         shift = target - center.x;
+        scale = kLogoSize / kLogoLaidOut;
     }
-    NSNumber* applied = objc_getAssociatedObject(control, kLogoShiftKey);
-    if (fabs(shift - applied.doubleValue) < 0.5 && (applied || shift == 0)) {
+
+    NSString* state = [NSString stringWithFormat:@"%.1f|%.2f", shift, scale];
+    NSString* applied = objc_getAssociatedObject(control, kLogoShiftKey);
+    if ([state isEqualToString:applied] || (!applied && shift == 0 && scale == 1)) {
         return;
     }
-    control.transform = CGAffineTransformMakeTranslation(shift, 0);
-    objc_setAssociatedObject(control, kLogoShiftKey, @(shift), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    control.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(shift, 0), scale, scale);
+    objc_setAssociatedObject(control, kLogoShiftKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 %hook _UINavigationBarTitleControl

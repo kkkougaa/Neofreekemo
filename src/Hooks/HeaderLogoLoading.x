@@ -19,8 +19,8 @@ extern void NFBNoteRefreshStarted(void);
 
 static const NSInteger kLogoDotsTag = 0x4E464C44;
 static const CGFloat kLogoViewBox = 1024.0;
-// Where the bird sat inside the bubble, in logo coordinates.
-static const CGPoint kBubbleCenter = {261.0, 241.0};
+// Middle of the bubble hole (x 53-445, y 66-401 in the 1024 logo units).
+static const CGPoint kBubbleCenter = {249.0, 232.0};
 
 UIImageView* HeaderLogoInWindow(UIWindow* window) {
     NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
@@ -156,10 +156,10 @@ static void StartLogoLoading(void) {
 
     CGFloat width = CGRectGetWidth(logo.bounds);
     CGFloat unit = width / kLogoViewBox;
-    // The bubble hole is about 392 of the 1024 logo units wide; the dots take ~60% of it.
+    // The bubble hole is about 392 of the 1024 logo units wide; the dots take about two thirds of it.
     CGFloat bubbleWidth = 392.0 * unit;
-    CGFloat diameter = bubbleWidth * 0.15;
-    CGFloat gap = bubbleWidth * 0.24;
+    CGFloat diameter = bubbleWidth * 0.16;
+    CGFloat gap = bubbleWidth * 0.26;
     CGPoint center = CGPointMake(kBubbleCenter.x * unit, kBubbleCenter.y * unit);
 
     NFBLogoDots* holder = [[NFBLogoDots alloc] initWithFrame:logo.bounds];

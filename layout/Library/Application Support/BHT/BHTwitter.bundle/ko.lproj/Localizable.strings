@@ -504,3 +504,4 @@
 "KEMO_MENU_RECENT" = "방금 본 트윗";
 "KEMO_MENU_SETTINGS" = "설정";
 "KEMO_RECENT_EMPTY" = "아직 기록이 없어요";
+"NSFW_ANIME_THRESHOLD_TITLE" = "애니 그림 판별 기준";

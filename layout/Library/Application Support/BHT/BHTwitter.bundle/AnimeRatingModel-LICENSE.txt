@@ -1,0 +1,5 @@
+AnimeRating.mlmodel is deepghs/anime_dbrating, mobilenetv3_large_100_v0_ls0.2
+(https://huggingface.co/deepghs/anime_dbrating), converted from the published ONNX file to
+Core ML with its weights stored as float16. It rates an illustration as general, sensitive,
+questionable or explicit. The model is released under the OpenRAIL license; its use
+restrictions apply to any use of this file.

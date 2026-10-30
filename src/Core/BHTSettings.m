@@ -299,6 +299,14 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"nsfw_ai_blur"
                     },
                     @{
+                        @"key": @"nsfw_anime_threshold",
+                        @"default": @50,
+                        @"type": @"slider",
+                        @"min": @30,
+                        @"max": @90,
+                        @"parentKey": @"nsfw_ai_blur"
+                    },
+                    @{
                         @"key": @"kemo_media_only",
                         @"default": @NO,
                         @"type": @"toggle"
@@ -467,6 +475,14 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"slider",
                         @"min": @40,
                         @"max": @95,
+                        @"parentKey": @"nsfw_ai_blur"
+                    },
+                    @{
+                        @"key": @"nsfw_anime_threshold",
+                        @"default": @50,
+                        @"type": @"slider",
+                        @"min": @30,
+                        @"max": @90,
                         @"parentKey": @"nsfw_ai_blur"
                     }
                 ]

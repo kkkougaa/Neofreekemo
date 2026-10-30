@@ -12,12 +12,13 @@
 @end
 
 // MARK: - On-device NSFW blur for timeline images
-// Runs GantMan/nsfw_model (MIT, see NSFWModel-LICENSE.txt in the tweak bundle,
-// converted to Core ML by tools/convert_nsfw_model.py) on every image shown inside
-// a tweet's media view (photos, and frames of inline videos). It tells photos and drawings
-// apart, so hentai is caught too. Images scoring above
-// the threshold are covered with a blur until tapped. Scores are cached on the
-// UIImage itself, so a reused cell never re-runs the model for a known image.
+// Runs two models on every image shown inside a tweet's media view (photos, and frames of
+// inline videos): GantMan/nsfw_model (MIT, NSFWModel-LICENSE.txt, converted by
+// tools/convert_nsfw_model.py) for photos, and deepghs/anime_dbrating (OpenRAIL,
+// AnimeRatingModel-LICENSE.txt) for anime-style illustrations. An image either model
+// scores above its threshold is covered until tapped; when it was the anime model, the
+// cover carries an "R15" or "R18" chip. Answers are cached on the UIImage itself, so a
+// reused cell never re-runs the models for a known image.
 
 static NSString* const kBlurSettingKey = @"nsfw_ai_blur";
 static float NFBThreshold(void) {
@@ -26,7 +27,7 @@ static float NFBThreshold(void) {
 static const CGFloat kMinImageEdge = 120.0; // px; skips icons and placeholders
 static const NSInteger kOverlayTag = 0x4e464232;
 
-static const void* kScoreKey = &kScoreKey;        // UIImage -> @(score), or @(-1) while pending
+static const void* kScoreKey = &kScoreKey;        // UIImage -> the models' answer, or @{pending} while it runs
 static const void* kRevealedKey = &kRevealedKey;  // media view -> the image or video the user opened
 static const void* kScheduledKey = &kScheduledKey;
 
@@ -36,42 +37,58 @@ static BOOL NFBBlurActive(void) {
            ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
 }
 
-// MARK: Model
+// MARK: Models
 
+// Compiles a bundled .mlmodel once (the result is kept in Caches) and loads it for Vision.
+static VNCoreMLModel* NFBLoadModel(NSString* resource, NSString* cacheName) {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSURL* caches = [[fm URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
+    NSURL* compiled = [caches URLByAppendingPathComponent:cacheName];
+    NSError* error = nil;
+
+    if (![fm fileExistsAtPath:compiled.path]) {
+        NSURL* source = [[BHTBundle sharedBundle] pathForFile:resource];
+        if (!source) {
+            return nil;
+        }
+        NSURL* temp = [MLModel compileModelAtURL:source error:&error];
+        if (!temp) {
+            return nil;
+        }
+        [fm removeItemAtURL:compiled error:nil];
+        if (![fm moveItemAtURL:temp toURL:compiled error:&error]) {
+            compiled = temp;
+        }
+    }
+
+    MLModelConfiguration* config = [MLModelConfiguration new];
+    MLModel* ml = [MLModel modelWithContentsOfURL:compiled configuration:config error:&error];
+    return ml ? [VNCoreMLModel modelForMLModel:ml error:&error] : nil;
+}
+
+// Photos and drawings, five classes (GantMan/nsfw_model).
 static VNCoreMLModel* NFBModel(void) {
     static VNCoreMLModel* model = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSFileManager* fm = [NSFileManager defaultManager];
-        NSURL* caches = [[fm URLsForDirectory:NSCachesDirectory
-                                     inDomains:NSUserDomainMask] firstObject];
-        NSURL* compiled = [caches URLByAppendingPathComponent:@"nfb_nsfw5.mlmodelc"];
-        NSError* error = nil;
-
-        if (![fm fileExistsAtPath:compiled.path]) {
-            NSURL* source = [[BHTBundle sharedBundle] pathForFile:@"NSFW.mlmodel"];
-            if (!source) {
-                return;
-            }
-            NSURL* temp = [MLModel compileModelAtURL:source error:&error];
-            if (!temp) {
-                return;
-            }
-            [fm removeItemAtURL:compiled error:nil];
-            if (![fm moveItemAtURL:temp toURL:compiled error:&error]) {
-                compiled = temp;
-            }
-        }
-
-        MLModelConfiguration* config = [MLModelConfiguration new];
-        MLModel* ml = [MLModel modelWithContentsOfURL:compiled
-                                        configuration:config
-                                                error:&error];
-        if (ml) {
-            model = [VNCoreMLModel modelForMLModel:ml error:&error];
-        }
+        model = NFBLoadModel(@"NSFW.mlmodel", @"nfb_nsfw5.mlmodelc");
     });
     return model;
+}
+
+// Anime-style illustrations, four ratings (deepghs/anime_dbrating): general, sensitive,
+// questionable, explicit. "questionable" and "explicit" are what gets the R15 / R18 chip.
+static VNCoreMLModel* NFBAnimeModel(void) {
+    static VNCoreMLModel* model = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        model = NFBLoadModel(@"AnimeRating.mlmodel", @"nfb_anime1.mlmodelc");
+    });
+    return model;
+}
+
+static float NFBAnimeThreshold(void) {
+    return [BHTSettings integerForKey:@"nsfw_anime_threshold"] / 100.0f;
 }
 
 static dispatch_queue_t NFBQueue(void) {
@@ -85,16 +102,47 @@ static dispatch_queue_t NFBQueue(void) {
     return queue;
 }
 
-// Calls back on the main queue with the NSFW confidence, or -2 on failure.
-static void NFBScoreImage(UIImage* image, void (^done)(float score)) {
+// What the two models said about one picture: "nsfw" (the photo model's score), "anime"
+// (questionable + explicit from the anime model) and "r18" (explicit is the stronger of the
+// two). A value of -1 means that model gave no answer.
+static NSDictionary* NFBNoAnswer(void) {
+    return @{@"nsfw" : @(-1.0f), @"anime" : @(-1.0f), @"r18" : @NO};
+}
+
+static NSDictionary* NFBMergeAnswers(NSDictionary* a, NSDictionary* b) {
+    return @{
+        @"nsfw" : @(MAX([a[@"nsfw"] floatValue], [b[@"nsfw"] floatValue])),
+        @"anime" : @(MAX([a[@"anime"] floatValue], [b[@"anime"] floatValue])),
+        @"r18" : @([a[@"r18"] boolValue] || [b[@"r18"] boolValue]),
+    };
+}
+
+static BOOL NFBIsFlagged(NSDictionary* answer) {
+    return [answer[@"nsfw"] floatValue] >= NFBThreshold() ||
+           [answer[@"anime"] floatValue] >= NFBAnimeThreshold();
+}
+
+// The chip on the cover: only the anime model rates by age, so only its verdict gets one.
+static NSString* NFBChipFor(NSDictionary* answer) {
+    if ([answer[@"anime"] floatValue] < NFBAnimeThreshold()) {
+        return nil;
+    }
+    return [answer[@"r18"] boolValue] ? @"R18" : @"R15";
+}
+
+// Calls back on the main queue with both models' answers (see above).
+static void NFBScoreImage(UIImage* image, void (^done)(NSDictionary* answer)) {
     CGImageRef cgImage = image.CGImage;
     if (!cgImage) {
-        done(-2);
+        done(NFBNoAnswer());
         return;
     }
     CGImageRetain(cgImage);
     dispatch_async(NFBQueue(), ^{
-        float score = -2;
+        float score = -1;
+        float anime = -1;
+        BOOL r18 = NO;
+
         VNCoreMLModel* model = NFBModel();
         if (model) {
             VNCoreMLRequest* request = [[VNCoreMLRequest alloc] initWithModel:model];
@@ -124,9 +172,46 @@ static void NFBScoreImage(UIImage* image, void (^done)(float score)) {
                 }
             }
         }
+
+        VNCoreMLModel* animeModel = NFBAnimeModel();
+        if (animeModel) {
+            VNCoreMLRequest* request = [[VNCoreMLRequest alloc] initWithModel:animeModel];
+            request.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
+            VNImageRequestHandler* handler =
+                [[VNImageRequestHandler alloc] initWithCGImage:cgImage options:@{}];
+            if ([handler performRequests:@[request] error:nil]) {
+                for (VNObservation* observation in request.results) {
+                    if (![observation isKindOfClass:[VNCoreMLFeatureValueObservation class]]) {
+                        continue;
+                    }
+                    MLMultiArray* logits = ((VNCoreMLFeatureValueObservation*)observation).featureValue.multiArrayValue;
+                    if (logits.count < 4) {
+                        continue;
+                    }
+                    // Logits for general, sensitive, questionable, explicit -> probabilities.
+                    float values[4];
+                    float peak = -1e30f;
+                    for (NSInteger i = 0; i < 4; i++) {
+                        values[i] = logits[(NSUInteger)i].floatValue;
+                        peak = MAX(peak, values[i]);
+                    }
+                    float sum = 0;
+                    for (NSInteger i = 0; i < 4; i++) {
+                        values[i] = expf(values[i] - peak);
+                        sum += values[i];
+                    }
+                    float questionable = values[2] / sum;
+                    float explicitness = values[3] / sum;
+                    anime = MIN(questionable + explicitness, 1.0f);
+                    r18 = explicitness > questionable;
+                    break;
+                }
+            }
+        }
         CGImageRelease(cgImage);
+        NSDictionary* answer = @{@"nsfw" : @(score), @"anime" : @(anime), @"r18" : @(r18)};
         dispatch_async(dispatch_get_main_queue(), ^{
-            done(score);
+            done(answer);
         });
     });
 }
@@ -187,12 +272,18 @@ static void NFBRemoveOverlay(UIView* mediaView) {
     [[mediaView viewWithTag:kOverlayTag] removeFromSuperview];
 }
 
-static void NFBShowOverlay(UIView* mediaView, id flagged) {
+static const void* kChipKey = &kChipKey;
+
+static void NFBShowOverlay(UIView* mediaView, id flagged, NSString* chip) {
     UIView* existing = [mediaView viewWithTag:kOverlayTag];
     if (existing) {
-        existing.frame = mediaView.bounds;
-        [mediaView bringSubviewToFront:existing];
-        return;
+        NSString* shown = objc_getAssociatedObject(existing, kChipKey);
+        if ([(shown ?: @"") isEqualToString:(chip ?: @"")]) {
+            existing.frame = mediaView.bounds;
+            [mediaView bringSubviewToFront:existing];
+            return;
+        }
+        [existing removeFromSuperview];
     }
 
     NFBBlurOverlay* overlay = [[NFBBlurOverlay alloc] initWithFrame:mediaView.bounds];
@@ -202,6 +293,23 @@ static void NFBShowOverlay(UIView* mediaView, id flagged) {
     overlay.layer.cornerRadius = mediaView.layer.cornerRadius;
     overlay.clipsToBounds = YES;
     overlay.backgroundColor = [UIColor systemGrayColor];
+    objc_setAssociatedObject(overlay, kChipKey, chip, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    // "R15" / "R18" in the top-left corner when the anime model made the call.
+    if (chip.length > 0) {
+        UILabel* chipLabel = [UILabel new];
+        chipLabel.text = chip;
+        chipLabel.textColor = [UIColor whiteColor];
+        chipLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightHeavy];
+        chipLabel.textAlignment = NSTextAlignmentCenter;
+        chipLabel.backgroundColor = [chip isEqualToString:@"R18"] ? [UIColor systemRedColor]
+                                                                   : [UIColor systemOrangeColor];
+        chipLabel.layer.cornerRadius = 9;
+        chipLabel.clipsToBounds = YES;
+        [chipLabel sizeToFit];
+        chipLabel.frame = CGRectMake(10, 10, CGRectGetWidth(chipLabel.bounds) + 16, 22);
+        [overlay addSubview:chipLabel];
+    }
 
     static const CGFloat kBadgeSize = 28.0;
     static const CGFloat kBadgeInset = 10.0;
@@ -278,7 +386,7 @@ static void NFBShowOverlay(UIView* mediaView, id flagged) {
 // reused cell doesn't inherit another video's verdict.
 
 @interface NFBVideoState : NSObject
-@property (nonatomic, assign) float score;
+@property (nonatomic, strong) NSDictionary* answer; // the worst answer over the frames checked
 @property (nonatomic, assign) NSInteger checks;
 @property (nonatomic, assign) CFTimeInterval lastCheck;
 @property (nonatomic, assign) BOOL pending;
@@ -288,7 +396,7 @@ static void NFBShowOverlay(UIView* mediaView, id flagged) {
 @implementation NFBVideoState
 - (instancetype)init {
     if ((self = [super init])) {
-        _score = -1;
+        _answer = NFBNoAnswer();
         _token = [NSObject new];
     }
     return self;
@@ -423,8 +531,8 @@ static void NFBScanMediaView(UIView* mediaView) {
         return;
     }
 
-    float threshold = NFBThreshold();
     __block id flagged = nil;
+    __block NSDictionary* flaggedAnswer = nil;
 
     // Photos
     UIView* existingOverlay = [mediaView viewWithTag:kOverlayTag];
@@ -439,21 +547,22 @@ static void NFBScanMediaView(UIView* mediaView) {
             return;
         }
 
-        NSNumber* score = objc_getAssociatedObject(image, kScoreKey);
-        if (!score) {
-            objc_setAssociatedObject(image, kScoreKey, @(-1),
+        NSDictionary* answer = objc_getAssociatedObject(image, kScoreKey);
+        if (!answer) {
+            objc_setAssociatedObject(image, kScoreKey, @{@"pending" : @YES},
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             __weak UIView* weakMedia = mediaView;
-            NFBScoreImage(image, ^(float result) {
-                objc_setAssociatedObject(image, kScoreKey, @(result),
+            NFBScoreImage(image, ^(NSDictionary* result) {
+                objc_setAssociatedObject(image, kScoreKey, result,
                                          OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 UIView* media = weakMedia;
                 if (media) {
                     NFBScanMediaView(media);
                 }
             });
-        } else if (score.floatValue >= threshold && !flagged) {
+        } else if (!answer[@"pending"] && NFBIsFlagged(answer) && !flagged) {
             flagged = image;
+            flaggedAnswer = answer;
         }
     });
 
@@ -469,9 +578,9 @@ static void NFBScanMediaView(UIView* mediaView) {
             if (frame) {
                 state.pending = YES;
                 __weak UIView* weakMedia = mediaView;
-                NFBScoreImage(frame, ^(float result) {
+                NFBScoreImage(frame, ^(NSDictionary* result) {
                     state.pending = NO;
-                    state.score = MAX(state.score, result);
+                    state.answer = NFBMergeAnswers(state.answer, result);
                     UIView* media = weakMedia;
                     if (media) {
                         NFBScanMediaView(media);
@@ -482,14 +591,15 @@ static void NFBScanMediaView(UIView* mediaView) {
         if (state.checks < kMaxVideoChecks) {
             NFBRescanLater(mediaView, 1.0);
         }
-        if (state.score >= threshold && !flagged) {
+        if (NFBIsFlagged(state.answer) && !flagged) {
             flagged = state.token;
+            flaggedAnswer = state.answer;
         }
     }
 
     id revealed = objc_getAssociatedObject(mediaView, kRevealedKey);
     if (flagged && flagged != revealed) {
-        NFBShowOverlay(mediaView, flagged);
+        NFBShowOverlay(mediaView, flagged, NFBChipFor(flaggedAnswer));
     } else {
         NFBRemoveOverlay(mediaView);
     }

@@ -213,19 +213,19 @@ static void StopLogoLoading(void) {
     logo.image = holder.originalImage;
     [holder stop];
 
-    // The pop is relative to the size the logo has now (it is drawn larger than laid out),
-    // so it ends where it started instead of at the plain size.
+    // A small, soft swell relative to the size the logo has now (it is drawn larger than
+    // laid out), without the springy overshoot.
     CGAffineTransform base = logo.transform;
-    [UIView animateWithDuration:0.18
+    [UIView animateWithDuration:0.28
+        delay:0
+        options:UIViewAnimationOptionCurveEaseInOut
         animations:^{
-            logo.transform = CGAffineTransformScale(base, 1.25, 1.25);
+            logo.transform = CGAffineTransformScale(base, 1.07, 1.07);
         }
         completion:^(BOOL finished) {
-            [UIView animateWithDuration:0.3
+            [UIView animateWithDuration:0.28
                                   delay:0
-                 usingSpringWithDamping:0.5
-                  initialSpringVelocity:0
-                                options:0
+                                options:UIViewAnimationOptionCurveEaseInOut
                              animations:^{
                                  logo.transform = base;
                              }

@@ -731,6 +731,7 @@ static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
 static NSMutableDictionary<NSString*, NSNumber*>* gBadgeLast;
 static NSString* gAccountKey;
 static NSString* gLastScanText;
+static NSString* gLogoShiftDebug;
 static NSMutableArray<NSString*>* gNewTweetsLog;
 
 // What the new-tweets counter decided on its last runs (shown in the shake dump).
@@ -752,6 +753,7 @@ NSString* NFBBubbleDebugText(void) {
                       [BHTSettings boolForKey:@"kemo_bubble_dday"],
                       [BHTSettings boolForKey:@"kemo_bubble_spotify"],
                       (long)[BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 10];
+    [out appendFormat:@"logoShift: %@%c", gLogoShiftDebug, 10];
     [out appendFormat:@"keepPosition=%d mediaOnly=%d%c", [BHTSettings boolForKey:@"kemo_keep_position"], [BHTSettings boolForKey:@"kemo_media_only"], 10];
     [out appendFormat:@"account=%@ badgeLast=%@ lastScan=%@%c", gAccountKey, gBadgeLast, gLastScanText, 10];
     [out appendFormat:@"newCount=%lu shown=%lu persistent=%@%c", (unsigned long)gNewCount,
@@ -944,17 +946,20 @@ static void ApplyLogoShift(UIView* control) {
             reference = reference.superview;
         }
         reference = reference ?: window;
-        // Mirrors the 44pt profile button that sits 20pt from the left edge.
+        // Where the logo is right now, and where it should be: its centre mirrors the
+        // centre of the 44pt profile button that sits 20pt from the left edge. The shift is
+        // corrected by the difference, so it does not matter how UIKit has placed or sized
+        // the title; each pass only closes the remaining gap.
+        CGPoint logoCenter = [reference convertPoint:CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds))
+                                            fromView:logo];
         CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
-        if ([reference isKindOfClass:[UINavigationBar class]]) {
-            // UIKit keeps the title in the middle of the bar, so the shift is a constant.
-            // Not read from the control's position: that moves around while the bar is
-            // re-laid out (during a refresh) and made the logo fly about.
-            shift = target - CGRectGetWidth(reference.bounds) / 2;
-        } else {
-            CGPoint center = [parent convertPoint:control.center toView:reference];
-            shift = target - center.x;
-        }
+        CGFloat gap = target - logoCenter.x;
+        shift = fabs(gap) > 0.5 ? control.transform.tx + gap : control.transform.tx;
+        gLogoShiftDebug = [NSString stringWithFormat:@"ref=%@ refWidth=%.0f logoX=%.1f target=%.1f gap=%.1f tx=%.1f logo=%.1f control=%@",
+                                                     NSStringFromClass(reference.class),
+                                                     CGRectGetWidth(reference.bounds), logoCenter.x, target, gap,
+                                                     shift, CGRectGetWidth(logo.bounds),
+                                                     NSStringFromCGRect(control.frame)];
     }
 
     // Only the shift goes on the control. UIKit lays out what is inside a scaled control
@@ -969,7 +974,7 @@ static void ApplyLogoShift(UIView* control) {
         }];
     }
     CGFloat scale = enabled ? kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1) : 1;
-    if (fabs(logo.transform.a - scale) > 0.01 && ![logo.layer animationForKey:@"nfbPop"]) {
+    if (fabs(logo.transform.a - scale) > 0.01 && logo.layer.animationKeys.count == 0) {
         [UIView performWithoutAnimation:^{
             logo.transform = CGAffineTransformMakeScale(scale, scale);
         }];

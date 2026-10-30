@@ -905,14 +905,23 @@ static id RemoveVideoCarouselEntries(id node, BOOL* removed) {
 
 %end
 
-// "New tweets N" for the header bubble: on the home timeline, how many tweets arrived
-// that this list had not shown before.
-extern void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSUInteger count);
+// "New tweets N" for the header bubble: on the home timeline, which tweets are in this
+// list that it had not shown before.
+extern void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSArray<NSNumber*>* positions);
 extern BOOL NFBRefreshWasRecent(void);
+extern NSUInteger NFBRefreshGeneration(void);
 
+static NSString* gKeepAnchorID;
 static const void* kSeenTweetsKey = &kSeenTweetsKey;
+static const void* kBaselineKey = &kBaselineKey;
+static const void* kBaselineGenKey = &kBaselineGenKey;
 
 static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* sections) {
+    // Only the tab on screen: the other home tab refreshes in the background too.
+    if (!controller.isViewLoaded || !controller.view.window) {
+        return;
+    }
+
     NSMutableArray<NSString*>* ids = [NSMutableArray array];
     for (id section in sections) {
         if (![section isKindOfClass:[NSArray class]]) {
@@ -936,94 +945,243 @@ static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* secti
         return;
     }
 
-    NSUInteger fresh = 0;
+    NSMutableArray<NSNumber*>* positions = [NSMutableArray array];
     if (NFBRefreshWasRecent()) {
-        for (NSString* entryID in ids) {
-            if (![seen containsObject:entryID]) {
-                fresh++;
+        // A pull can deliver its tweets in several updates. What counts as new is judged
+        // against what had been seen before the pull, not against the earlier updates.
+        NSUInteger generation = NFBRefreshGeneration();
+        NSSet<NSString*>* baseline = objc_getAssociatedObject(controller, kBaselineKey);
+        NSNumber* baselineGeneration = objc_getAssociatedObject(controller, kBaselineGenKey);
+        if (!baseline || baselineGeneration.unsignedIntegerValue != generation) {
+            baseline = seen;
+            objc_setAssociatedObject(controller, kBaselineKey, baseline, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(controller, kBaselineGenKey, @(generation),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        // New = above the tweet that was on top when the pull started, and not seen before.
+        // Without that tweet in the new list (a reshuffled For You) there is nothing sensible
+        // to count, so nothing is announced.
+        NSUInteger anchorIndex = NSNotFound;
+        if (gKeepAnchorID.length > 0) {
+            for (NSUInteger i = 0; i < ids.count; i++) {
+                if ([ids[i] hasSuffix:gKeepAnchorID]) {
+                    anchorIndex = i;
+                    break;
+                }
+            }
+        }
+        if (anchorIndex == NSNotFound) {
+            return;
+        }
+        for (NSUInteger i = 0; i < anchorIndex; i++) {
+            if (![baseline containsObject:ids[i]]) {
+                [positions addObject:@(i)];
             }
         }
     } else {
-        // Not a pull: only count what arrived above the tweets already shown.
+        // Not a pull: only what arrived above the tweets already shown.
         BOOL overlap = NO;
-        for (NSString* entryID in ids) {
-            if ([seen containsObject:entryID]) {
+        for (NSUInteger i = 0; i < ids.count; i++) {
+            if ([seen containsObject:ids[i]]) {
                 overlap = YES;
                 break;
             }
-            fresh++;
+            [positions addObject:@(i)];
         }
         if (!overlap) {
             return;
         }
     }
-    if (fresh > 0) {
-        NFBSetNewTweets(controller, ids, fresh);
+    if (positions.count > 0) {
+        NFBSetNewTweets(controller, ids, positions);
     }
 }
 
-// For You refreshes ignore the restore flag, so the first status in view is remembered by
-// its id and put back where it was once the new sections have been laid out.
-static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* sections,
-                               void (^apply)(void)) {
-    UITableView* table = (UITableView*)controller.tableView;
-    NSString* anchorID = nil;
-    CGFloat anchorOffset = 0;
-    CGFloat topEdge = table.contentOffset.y + table.adjustedContentInset.top;
-    if (table.window && topEdge > 40) {
-        for (UITableViewCell* cell in table.visibleCells) {
-            NSString* cellID = cell.accessibilityIdentifier;
-            if (cellID.length > 8 && CGRectGetMaxY(cell.frame) > topEdge &&
-                (!anchorID || CGRectGetMinY(cell.frame) < anchorOffset + topEdge)) {
-                anchorID = cellID;
-                anchorOffset = CGRectGetMinY(cell.frame) - topEdge;
-            }
+// MARK: - Keep my place when refreshing
+
+// A pull to refresh puts the new tweets above the one that was at the top, and the list
+// should stay on that tweet instead of jumping up to the newest. The tweet that was first
+// in view is remembered by its id when the pull starts, put back after every update of the
+// list, and while the refresh is settling the list is not allowed to scroll itself back up.
+
+static const void* gKeepTablePtr;      // compared by address only (this is on the scroll hot path)
+static __weak UITableView* gKeepTable;
+static CGFloat gKeepAnchorOffset;
+static NSArray* gKeepSections;
+static BOOL gKeepRefreshing;
+static NSDate* gKeepUntil;
+
+static BOOL KeepArmed(void) {
+    return gKeepRefreshing || (gKeepUntil && [gKeepUntil timeIntervalSinceNow] > 0);
+}
+
+static BOOL KeepCaptureAnchor(UITableView* table, NSString** anchorID, CGFloat* anchorOffset) {
+    CGFloat topEdge = MAX(table.contentOffset.y + table.adjustedContentInset.top, 0);
+    CGFloat best = CGFLOAT_MAX;
+    for (UITableViewCell* cell in table.visibleCells) {
+        NSString* cellID = cell.accessibilityIdentifier;
+        if (cellID.length > 8 && CGRectGetMaxY(cell.frame) > topEdge && CGRectGetMinY(cell.frame) < best) {
+            best = CGRectGetMinY(cell.frame);
+            *anchorID = cellID;
+            *anchorOffset = best - topEdge;
         }
     }
-    apply();
-    if (!anchorID) {
+    return *anchorID != nil;
+}
+
+static void KeepRestore(UITableView* table, NSString* anchorID, CGFloat anchorOffset, NSArray* sections) {
+    if (!table || !table.window || !anchorID || table.isTracking || table.isDragging ||
+        table.isDecelerating) {
         return;
     }
-
-    __weak UITableView* weakTable = table;
-    void (^restore)(void) = ^{
-        UITableView* current = weakTable;
-        if (!current) {
+    [table layoutIfNeeded];
+    CGFloat top = table.contentOffset.y + table.adjustedContentInset.top;
+    for (UITableViewCell* cell in table.visibleCells) {
+        if ([cell.accessibilityIdentifier isEqualToString:anchorID]) {
+            CGFloat delta = (CGRectGetMinY(cell.frame) - top) - anchorOffset;
+            if (fabs(delta) > 1.0) {
+                // Straight to the table, bypassing the block below.
+                BOOL armed = gKeepRefreshing;
+                gKeepRefreshing = NO;
+                NSDate* until = gKeepUntil;
+                gKeepUntil = nil;
+                table.contentOffset = CGPointMake(table.contentOffset.x, table.contentOffset.y + delta);
+                gKeepRefreshing = armed;
+                gKeepUntil = until;
+            }
             return;
         }
-        [current layoutIfNeeded];
-        CGFloat top = current.contentOffset.y + current.adjustedContentInset.top;
-        for (UITableViewCell* cell in current.visibleCells) {
-            if ([cell.accessibilityIdentifier isEqualToString:anchorID]) {
-                CGFloat delta = (CGRectGetMinY(cell.frame) - top) - anchorOffset;
-                if (fabs(delta) > 1.0) {
-                    current.contentOffset = CGPointMake(current.contentOffset.x,
-                                                        current.contentOffset.y + delta);
-                }
+    }
+    // Not on screen any more: find it in the new data and scroll there.
+    for (NSUInteger section = 0; section < sections.count; section++) {
+        id items = sections[section];
+        if (![items isKindOfClass:[NSArray class]]) {
+            continue;
+        }
+        for (NSUInteger row = 0; row < [items count]; row++) {
+            if ([[items[row] description] containsString:anchorID] &&
+                section < (NSUInteger)table.numberOfSections &&
+                row < (NSUInteger)[table numberOfRowsInSection:section]) {
+                BOOL armed = gKeepRefreshing;
+                gKeepRefreshing = NO;
+                NSDate* until = gKeepUntil;
+                gKeepUntil = nil;
+                [table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:section]
+                             atScrollPosition:UITableViewScrollPositionTop
+                                     animated:NO];
+                gKeepRefreshing = armed;
+                gKeepUntil = until;
                 return;
             }
         }
-        // Not on screen any more: find it in the new data and scroll there.
-        for (NSUInteger section = 0; section < sections.count; section++) {
-            id items = sections[section];
-            if (![items isKindOfClass:[NSArray class]]) {
-                continue;
-            }
-            for (NSUInteger row = 0; row < [items count]; row++) {
-                if ([[items[row] description] containsString:anchorID] &&
-                    section < (NSUInteger)current.numberOfSections &&
-                    row < (NSUInteger)[current numberOfRowsInSection:section]) {
-                    [current scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:section]
-                                   atScrollPosition:UITableViewScrollPositionTop
-                                           animated:NO];
-                    return;
-                }
-            }
+    }
+}
+
+static void KeepRestoreSoon(NSTimeInterval delay) {
+    __weak UITableView* table = gKeepTable;
+    NSString* anchorID = gKeepAnchorID;
+    CGFloat anchorOffset = gKeepAnchorOffset;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       if (table && table == gKeepTable && KeepArmed()) {
+                           KeepRestore(table, anchorID, anchorOffset, gKeepSections);
+                       }
+                   });
+}
+
+// The pull-to-refresh control calls these when a refresh starts and ends.
+void NFBKeepPositionBegin(UIView* control) {
+    if (![BHTSettings boolForKey:@"kemo_keep_position"]) {
+        return;
+    }
+    UIView* view = control;
+    while (view && ![view isKindOfClass:[UITableView class]]) {
+        view = view.superview;
+    }
+    UITableView* table = (UITableView*)view;
+    UIResponder* responder = table;
+    while (responder && ![responder isKindOfClass:[UIViewController class]]) {
+        responder = responder.nextResponder;
+    }
+    if (!table || !responder || !IsHomeTimeline((UIViewController*)responder)) {
+        return;
+    }
+
+    NSString* anchorID = nil;
+    CGFloat anchorOffset = 0;
+    if (!KeepCaptureAnchor(table, &anchorID, &anchorOffset)) {
+        return;
+    }
+    gKeepTable = table;
+    gKeepTablePtr = (__bridge const void*)table;
+    gKeepAnchorID = anchorID;
+    gKeepAnchorOffset = anchorOffset;
+    gKeepRefreshing = YES;
+    gKeepUntil = nil;
+}
+
+void NFBKeepPositionEnd(void) {
+    if (!gKeepRefreshing) {
+        return;
+    }
+    gKeepRefreshing = NO;
+    gKeepUntil = [NSDate dateWithTimeIntervalSinceNow:3.0];
+    KeepRestoreSoon(0.05);
+    KeepRestoreSoon(0.4);
+    KeepRestoreSoon(1.0);
+}
+
+static BOOL KeepShouldBlock(UIScrollView* scrollView, CGPoint offset) {
+    if ((const void*)scrollView != gKeepTablePtr || !KeepArmed()) {
+        return NO;
+    }
+    if (scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating) {
+        return NO;
+    }
+    CGFloat topY = -scrollView.adjustedContentInset.top;
+    return offset.y <= topY + 4 && scrollView.contentOffset.y > topY + 40;
+}
+
+%hook UIScrollView
+
+- (void)setContentOffset:(CGPoint)offset {
+    if (KeepShouldBlock(self, offset)) {
+        return;
+    }
+    %orig;
+}
+
+- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated {
+    if (KeepShouldBlock(self, offset)) {
+        return;
+    }
+    %orig;
+}
+
+%end
+
+static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* sections,
+                               void (^apply)(void)) {
+    UITableView* table = (UITableView*)controller.tableView;
+    BOOL pulling = KeepArmed() && table == gKeepTable;
+    if (!pulling) {
+        // Not a pull (a background update): remember where we are from here.
+        NSString* anchorID = nil;
+        CGFloat anchorOffset = 0;
+        CGFloat topEdge = table.contentOffset.y + table.adjustedContentInset.top;
+        if (table.window && topEdge > 40 && KeepCaptureAnchor(table, &anchorID, &anchorOffset)) {
+            gKeepTable = table;
+            gKeepAnchorID = anchorID;
+            gKeepAnchorOffset = anchorOffset;
+        } else {
+            apply();
+            return;
         }
-    };
-    dispatch_async(dispatch_get_main_queue(), restore);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), restore);
+    }
+    gKeepSections = sections;
+    apply();
+    KeepRestoreSoon(0.0);
+    KeepRestoreSoon(0.35);
 }
 
 %hook TFNItemsDataViewController

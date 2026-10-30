@@ -18,6 +18,7 @@ extern UIImageView* HeaderLogoInWindow(UIWindow* window);
 extern UIWindow* NFBKeyWindow(void);
 
 static const NSInteger kBubbleTag = 0x4E464C42;
+static const NSInteger kBubbleHostTag = 0x4E464C48;
 static const CGFloat kBubbleHeight = 30.0;
 static const CGFloat kBubbleTail = 8.0;
 static const CGFloat kEdgeMargin = 20.0;
@@ -58,21 +59,150 @@ static UIBezierPath* BubblePath(CGFloat width, CGFloat height) {
 static NSString* gTransientText;
 static NSString* gPersistentText;
 static NSString* gShownText;
+static BOOL gTransientSpotify; // the notice is a song change: Spotify mark and floating notes
+
+// The official Spotify mark, shipped as nfb_spotify_logo.png in the tweak bundle.
+static UIImage* SpotifyMark(void) {
+    NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"nfb_spotify_logo.png"];
+    UIImage* image = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+    return image.CGImage ? [UIImage imageWithCGImage:image.CGImage
+                                               scale:6.0
+                                         orientation:UIImageOrientationUp]
+                         : nil;
+}
+
+// One or two notes pop out to the left of the bubble and drift up, now and then.
+static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second) {
+    UILabel* note = [UILabel new];
+    note.text = second ? @"♫" : @"♪";
+    note.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    note.textColor = CurrentAccentColor();
+    [note sizeToFit];
+    CGFloat sideways = MAX(0, MIN(18, left - 70));
+    note.center = CGPointMake(left - 2, midY + (second ? 4 : -2));
+    note.alpha = 0;
+    note.transform = CGAffineTransformMakeScale(0.3, 0.3);
+    [window addSubview:note];
+
+    [UIView animateWithDuration:0.3
+                          delay:0
+         usingSpringWithDamping:0.5
+          initialSpringVelocity:0
+                        options:0
+                     animations:^{
+                         note.alpha = 1;
+                         note.transform = CGAffineTransformMakeRotation(second ? 0.3 : -0.3);
+                     }
+                     completion:nil];
+    [UIView animateWithDuration:0.9
+        delay:0.25
+        options:UIViewAnimationOptionCurveEaseOut
+        animations:^{
+            note.center = CGPointMake(left - 2 - sideways * (second ? 0.6 : 1.0),
+                                      midY - (second ? 20 : 15));
+            note.alpha = 0;
+            note.transform = CGAffineTransformMakeRotation(second ? -0.2 : 0.2);
+        }
+        completion:^(BOOL finished) {
+            [note removeFromSuperview];
+        }];
+}
+
+static void StartNoteEffect(UIWindow* window, CGFloat left, CGFloat midY) {
+    static const double times[] = {0.25, 0.95, 1.65, 2.35, 3.05, 3.75};
+    for (int i = 0; i < 6; i++) {
+        BOOL second = i % 2 == 1;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(times[i] * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           if (gTransientSpotify && [window viewWithTag:kBubbleTag]) {
+                               FloatNote(window, left, midY, second);
+                           }
+                       });
+    }
+}
+
+// The bubble lives inside a host strip that follows the logo: when the top bar slides away
+// or fades while scrolling, the host moves and fades with it.
+@interface NFBBubbleFollow : NSObject
+@property (nonatomic, strong) CADisplayLink* link;
+@property (nonatomic, weak) UIView* host;
+@property (nonatomic, weak) UIView* logo;
+@property (nonatomic, assign) CGFloat baseLogoX;
+@property (nonatomic, assign) CGFloat baseHostX;
+@end
+
+@implementation NFBBubbleFollow
+
+- (void)step:(CADisplayLink*)link {
+    UIView* host = self.host;
+    UIView* logo = self.logo;
+    UIWindow* window = host.window;
+    if (!host || !logo || !logo.window || !window) {
+        [self stop];
+        [host removeFromSuperview];
+        return;
+    }
+    CGFloat alpha = 1;
+    for (UIView* view = logo; view; view = view.superview) {
+        if (view.hidden) {
+            alpha = 0;
+            break;
+        }
+        alpha *= view.alpha;
+    }
+    CGRect logoFrame = [window convertRect:logo.bounds fromView:logo];
+    host.alpha = alpha;
+    host.center = CGPointMake(self.baseHostX + (CGRectGetMidX(logoFrame) - self.baseLogoX),
+                              CGRectGetMidY(logoFrame));
+}
+
+- (void)attachHost:(UIView*)host logo:(UIView*)logo {
+    self.host = host;
+    self.logo = logo;
+    UIWindow* window = host.window;
+    self.baseLogoX = window ? CGRectGetMidX([window convertRect:logo.bounds fromView:logo]) : 0;
+    self.baseHostX = host.center.x;
+    if (!self.link) {
+        self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(step:)];
+        [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void)stop {
+    [self.link invalidate];
+    self.link = nil;
+}
+
+@end
+
+static NFBBubbleFollow* gFollow;
+
+static void RemoveHostOf(UIView* bubble) {
+    UIView* host = bubble.superview;
+    [(host.tag == kBubbleHostTag ? host : bubble) removeFromSuperview];
+}
 
 static void RemoveBubble(UIView* bubble) {
     bubble.tag = 0;
-    [UIView animateWithDuration:0.25
+    UIWindow* window = bubble.window;
+    [UIView animateWithDuration:0.375
         animations:^{
             bubble.alpha = 0;
             bubble.transform = CGAffineTransformMakeScale(0.85, 0.85);
         }
         completion:^(BOOL finished) {
-            [bubble removeFromSuperview];
+            RemoveHostOf(bubble);
+            if (![window viewWithTag:kBubbleHostTag]) {
+                [gFollow stop];
+            }
         }];
 }
 
 static void RenderBubble(void) {
-    NSString* text = gTransientText ?: gPersistentText;
+    // A notice and the new-tweets count at the same time share one bubble.
+    NSString* text = (gTransientText && gPersistentText)
+                         ? [NSString stringWithFormat:@"%@ · %@", gPersistentText, gTransientText]
+                         : (gTransientText ?: gPersistentText);
     UIWindow* window = NFBKeyWindow();
     UIImageView* logo = window ? HeaderLogoInWindow(window) : nil;
     UIView* existing = [window viewWithTag:kBubbleTag];
@@ -84,7 +214,9 @@ static void RenderBubble(void) {
         gShownText = nil;
         return;
     }
-    if (existing && [gShownText isEqualToString:text]) {
+    BOOL withMark = gTransientText && gTransientSpotify;
+    NSString* shownKey = [NSString stringWithFormat:@"%@|%d", text, withMark];
+    if (existing && [gShownText isEqualToString:shownKey]) {
         return;
     }
 
@@ -101,11 +233,12 @@ static void RenderBubble(void) {
     label.textColor = [UIColor whiteColor];
     label.lineBreakMode = NSLineBreakByTruncatingTail;
     CGFloat textWidth = ceil([label sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
-    CGFloat width = MIN(textWidth + 24 + kBubbleTail, available);
+    // The Spotify mark takes the place of the music note in front of the title.
+    CGFloat markSpace = withMark ? 24 : 0;
+    CGFloat width = MIN(textWidth + 24 + markSpace + kBubbleTail, available);
 
     NFBBubbleView* bubble = [[NFBBubbleView alloc]
-        initWithFrame:CGRectMake(right - width, CGRectGetMidY(logoFrame) - kBubbleHeight / 2, width,
-                                 kBubbleHeight)];
+        initWithFrame:CGRectMake(right - width, 0, width, kBubbleHeight)];
     bubble.tag = kBubbleTag;
     bubble.userInteractionEnabled = NO;
 
@@ -114,17 +247,34 @@ static void RenderBubble(void) {
     shape.fillColor = CurrentAccentColor().CGColor;
     [bubble.layer addSublayer:shape];
 
-    label.frame = CGRectMake(12, 0, width - 24 - kBubbleTail, kBubbleHeight);
+    label.frame = CGRectMake(12 + markSpace, 0, width - 24 - markSpace - kBubbleTail, kBubbleHeight);
     [bubble addSubview:label];
+    if (withMark) {
+        UIImageView* mark = [[UIImageView alloc] initWithImage:SpotifyMark()];
+        mark.frame = CGRectMake(10, (kBubbleHeight - 18) / 2, 18, 18);
+        [bubble addSubview:mark];
+    }
 
     // Opens out of the logo: scales from the tail side.
     bubble.layer.anchorPoint = CGPointMake(1, 0.5);
-    bubble.layer.position = CGPointMake(right, CGRectGetMidY(logoFrame));
-    [window addSubview:bubble];
+    bubble.layer.position = CGPointMake(right, kBubbleHeight / 2);
+
+    // A strip across the screen at the logo's height that carries the bubble.
+    UIView* host = [[UIView alloc]
+        initWithFrame:CGRectMake(0, CGRectGetMidY(logoFrame) - kBubbleHeight / 2,
+                                 CGRectGetWidth(window.bounds), kBubbleHeight)];
+    host.tag = kBubbleHostTag;
+    host.userInteractionEnabled = NO;
+    [host addSubview:bubble];
+    [window addSubview:host];
+    if (!gFollow) {
+        gFollow = [NFBBubbleFollow new];
+    }
+    [gFollow attachHost:host logo:logo];
 
     if (existing) {
         // Just a change of words (or of the count): swapped in place.
-        [existing removeFromSuperview];
+        RemoveHostOf(existing);
     } else {
         bubble.alpha = 0;
         bubble.transform = CGAffineTransformMakeScale(0.6, 0.6);
@@ -139,7 +289,10 @@ static void RenderBubble(void) {
                          }
                          completion:nil];
     }
-    gShownText = text;
+    gShownText = shownKey;
+    if (withMark && !existing) {
+        StartNoteEffect(window, right - width, CGRectGetMidY(logoFrame));
+    }
 }
 
 // MARK: Queue
@@ -151,19 +304,27 @@ static void PumpQueue(void) {
     if (gShowing || gQueue.count == 0) {
         return;
     }
-    NSDictionary* next = gQueue.firstObject;
-    [gQueue removeObjectAtIndex:0];
-    // Notices that waited too long are stale.
-    if (-[next[@"at"] timeIntervalSinceNow] > 20) {
-        PumpQueue();
+    // Everything waiting is said in one go ("새 DM 2건 · 새 알림 3건"); stale notices drop.
+    NSMutableArray<NSString*>* parts = [NSMutableArray array];
+    BOOL spotify = NO;
+    for (NSDictionary* queued in gQueue) {
+        if (-[queued[@"at"] timeIntervalSinceNow] <= 20 && parts.count < 3) {
+            [parts addObject:queued[@"text"]];
+            spotify = spotify || [queued[@"icon"] isEqualToString:@"spotify"];
+        }
+    }
+    [gQueue removeAllObjects];
+    if (parts.count == 0) {
         return;
     }
     gShowing = YES;
-    gTransientText = next[@"text"];
+    gTransientText = [parts componentsJoinedByString:@" · "];
+    gTransientSpotify = spotify;
     RenderBubble();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
                        gTransientText = nil;
+                       gTransientSpotify = NO;
                        RenderBubble();
                        gShowing = NO;
                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
@@ -173,11 +334,21 @@ static void PumpQueue(void) {
                    });
 }
 
-void NFBShowBubble(NSString* text) {
+void NFBShowBubbleWithIcon(NSString* text, NSString* icon) {
     if (!BubbleEnabled() || text.length == 0) {
         return;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
+        // The same words are not repeated within two minutes.
+        static NSMutableDictionary<NSString*, NSDate*>* recent;
+        if (!recent) {
+            recent = [NSMutableDictionary dictionary];
+        }
+        NSDate* said = recent[text];
+        if (said && -[said timeIntervalSinceNow] < 120) {
+            return;
+        }
+        recent[text] = [NSDate date];
         if (!gQueue) {
             gQueue = [NSMutableArray array];
         }
@@ -186,15 +357,29 @@ void NFBShowBubble(NSString* text) {
                 return;
             }
         }
-        [gQueue addObject:@{@"text" : text, @"at" : [NSDate date]}];
-        PumpQueue();
+        [gQueue addObject:@{@"text" : text, @"at" : [NSDate date], @"icon" : icon ?: @""}];
+        // A short wait so notices that arrive together are shown together.
+        static BOOL pumpScheduled;
+        if (!pumpScheduled) {
+            pumpScheduled = YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                               pumpScheduled = NO;
+                               PumpQueue();
+                           });
+        }
     });
+}
+
+void NFBShowBubble(NSString* text) {
+    NFBShowBubbleWithIcon(text, nil);
 }
 
 // MARK: New tweets (stays until they have been scrolled past)
 
 static __weak id gNewController;
 static NSDictionary<NSString*, NSNumber*>* gNewIndex; // tweet id -> position in the list
+static NSArray<NSNumber*>* gNewPositions;               // positions of the new tweets
 static NSUInteger gNewCount;
 static NSUInteger gNewShown;
 static NSDate* gNewAt;
@@ -208,11 +393,13 @@ static void ClearNewTweets(void) {
     gNewShown = 0;
     gNewController = nil;
     gNewIndex = nil;
+    gNewPositions = nil;
     gPersistentText = nil;
     RenderBubble();
 }
 
-void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSUInteger count) {
+void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSArray<NSNumber*>* positions) {
+    NSUInteger count = positions.count;
     if (!BubbleEnabled() || ![BHTSettings boolForKey:@"kemo_bubble_new_tweets"] || count == 0) {
         return;
     }
@@ -224,6 +411,7 @@ void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSUInteger cou
     dispatch_async(dispatch_get_main_queue(), ^{
         gNewController = controller;
         gNewIndex = index;
+        gNewPositions = positions;
         gNewCount = count;
         gNewShown = count;
         gNewAt = [NSDate date];
@@ -262,7 +450,13 @@ static void UpdateNewTweets(void) {
             }
         }
         if (position) {
-            remaining = MIN(gNewCount, position.unsignedIntegerValue);
+            // New tweets above the first one in view (they need not be all at the top).
+            remaining = 0;
+            for (NSNumber* newPosition in gNewPositions) {
+                if (newPosition.unsignedIntegerValue < position.unsignedIntegerValue) {
+                    remaining++;
+                }
+            }
         }
     }
 
@@ -281,9 +475,16 @@ static void UpdateNewTweets(void) {
 // MARK: Refresh marker
 
 static NSDate* gRefreshAt;
+static NSUInteger gRefreshGeneration;
 
 void NFBNoteRefreshStarted(void) {
     gRefreshAt = [NSDate date];
+    gRefreshGeneration++;
+}
+
+// Which pull the current refresh belongs to (every pull gets its own number).
+NSUInteger NFBRefreshGeneration(void) {
+    return gRefreshGeneration;
 }
 
 BOOL NFBRefreshWasRecent(void) {
@@ -344,9 +545,42 @@ static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
 }
 
 static NSMutableDictionary<NSString*, NSNumber*>* gBadgeLast;
+static NSString* gAccountKey;
+
+// Identity of the account in use, to notice a switch.
+static NSString* CurrentAccountKey(void) {
+    Class hostClass = NSClassFromString(@"T1HostViewController");
+    if (![hostClass respondsToSelector:@selector(sharedHostViewController)]) {
+        return nil;
+    }
+    id host = [hostClass performSelector:@selector(sharedHostViewController)];
+    if (![host respondsToSelector:@selector(currentAccount)]) {
+        return nil;
+    }
+    id account = [host performSelector:@selector(currentAccount)];
+    // Something that stays the same for the same account; the object's address does not
+    // (it can be a fresh object every call), so without a real id there is no switch check.
+    for (NSString* key in @[ @"userID", @"accountID", @"userIdentifier", @"screenName", @"username" ]) {
+        if (![account respondsToSelector:NSSelectorFromString(key)]) {
+            continue;
+        }
+        id value = [account valueForKey:key];
+        if (value && [[value description] length] > 0 && ![[value description] isEqualToString:@"0"]) {
+            return [value description];
+        }
+    }
+    return nil;
+}
 
 static void CheckBadges(UIWindow* window) {
     NSDictionary<NSString*, NSNumber*>* now = ScanBadges(window);
+    NSString* accountKey = CurrentAccountKey();
+    BOOL switched = gAccountKey && accountKey && ![gAccountKey isEqualToString:accountKey];
+    gAccountKey = accountKey ?: gAccountKey;
+    if (switched) {
+        // The other account's unread counts are all news: count them from zero.
+        gBadgeLast = [@{@"dm" : @0, @"notifications" : @0} mutableCopy];
+    }
     if (!gBadgeLast) {
         gBadgeLast = [now mutableCopy];
         return;
@@ -420,10 +654,12 @@ static void CheckSpotify(void) {
             BOOL changed = gLastTrack && ![gLastTrack isEqualToString:track];
             gLastTrack = track;
             if (changed) {
-                NFBShowBubble([@"♪ " stringByAppendingString:title]);
+                NFBShowBubbleWithIcon(title, @"spotify");
             }
         }];
 }
+
+static void ApplyLogoShift(UIView* control);
 
 // MARK: Tick
 
@@ -440,6 +676,10 @@ static void Tick(void) {
         return;
     }
     gTicks++;
+    UIImageView* headerLogo = HeaderLogoInWindow(window);
+    if (headerLogo) {
+        ApplyLogoShift(headerLogo.superview.superview);
+    }
     UpdateNewTweets();
     CheckSpotify();
     if (gTicks % 8 == 0) {
@@ -450,7 +690,6 @@ static void Tick(void) {
 
 // MARK: Logo at the right end
 
-static const void* kLogoShiftKey = &kLogoShiftKey;
 // The logo is drawn a little larger than the 32pt it is laid out at, to sit with the 44pt
 // profile button on the left.
 static const CGFloat kLogoSize = 40.0;
@@ -484,26 +723,48 @@ static void ApplyLogoShift(UIView* control) {
     CGFloat shift = 0;
     CGFloat scale = 1;
     if (enabled) {
-        // Centre of the control with no transform, in window coordinates.
-        CGPoint center = [parent convertPoint:control.center toView:window];
+        // Measured inside the navigation bar, not the window: while the side drawer slides
+        // the whole screen sideways, but the bar's own coordinates stay put.
+        UIView* reference = parent;
+        while (reference && ![reference isKindOfClass:[UINavigationBar class]]) {
+            reference = reference.superview;
+        }
+        reference = reference ?: window;
+        // Centre of the control with no transform.
+        CGPoint center = [parent convertPoint:control.center toView:reference];
         // Mirrors the 44pt profile button that sits 20pt from the left edge.
-        CGFloat target = CGRectGetWidth(window.bounds) - kEdgeMargin - 22;
+        CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
         shift = target - center.x;
         scale = kLogoSize / kLogoLaidOut;
     }
 
-    NSString* state = [NSString stringWithFormat:@"%.1f|%.2f", shift, scale];
-    NSString* applied = objc_getAssociatedObject(control, kLogoShiftKey);
-    if ([state isEqualToString:applied] || (!applied && shift == 0 && scale == 1)) {
-        return;
+    // Compared against the live transform: UIKit resets it on its own now and then.
+    CGAffineTransform wanted =
+        CGAffineTransformScale(CGAffineTransformMakeTranslation(shift, 0), scale, scale);
+    if (!CGAffineTransformEqualToTransform(control.transform, wanted) &&
+        !(fabs(control.transform.tx - shift) < 0.5 && fabs(control.transform.a - scale) < 0.01)) {
+        control.transform = wanted;
     }
-    control.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(shift, 0), scale, scale);
-    objc_setAssociatedObject(control, kLogoShiftKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 %hook _UINavigationBarTitleControl
 
 - (void)layoutSubviews {
+    %orig;
+    ApplyLogoShift(self);
+}
+
+- (void)setCenter:(CGPoint)center {
+    %orig;
+    ApplyLogoShift(self);
+}
+
+- (void)setFrame:(CGRect)frame {
+    %orig;
+    ApplyLogoShift(self);
+}
+
+- (void)didMoveToWindow {
     %orig;
     ApplyLogoShift(self);
 }

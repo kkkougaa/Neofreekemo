@@ -273,6 +273,28 @@ static void PerformDump(UIWindow* window) {
         gIncludeHidden = NO;
     }
 
+    // The drawer's controller: which methods it has (to see who rebuilds the menu list).
+    for (NSString* name in @[ @"T1DashContentController", @"T1TabbedAppNavigationViewController" ]) {
+        Class dashClass = NSClassFromString(name);
+        if (!dashClass) {
+            continue;
+        }
+        [out appendFormat:@"== METHODS %@ ==%c", name, 10];
+        unsigned int count = 0;
+        Method* methods = class_copyMethodList(dashClass, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            NSString* selector = NSStringFromSelector(method_getName(methods[i]));
+            if ([selector localizedCaseInsensitiveContainsString:@"panel"] ||
+                [selector localizedCaseInsensitiveContainsString:@"update"] ||
+                [selector localizedCaseInsensitiveContainsString:@"reload"] ||
+                [selector localizedCaseInsensitiveContainsString:@"snapshot"] ||
+                [selector localizedCaseInsensitiveContainsString:@"visible"]) {
+                [out appendFormat:@"%@%c", selector, 10];
+            }
+        }
+        free(methods);
+    }
+
     // Tab bar: the accessibility label and value of every element along the bottom edge
     // (the unread badge counts live there).
     {

@@ -16,6 +16,8 @@
 @end
 
 extern void NFBNoteRefreshStarted(void);
+extern void NFBKeepPositionBegin(UIView* control);
+extern void NFBKeepPositionEnd(void);
 
 static const NSInteger kLogoDotsTag = 0x4E464C44;
 static const CGFloat kLogoViewBox = 1024.0;
@@ -219,8 +221,10 @@ static void StopLogoLoading(void) {
 
     if (status == 1 && !wasActive) {
         NFBNoteRefreshStarted();
+        NFBKeepPositionBegin(self);
         StartLogoLoading();
     } else if (status == 0 && wasActive) {
+        NFBKeepPositionEnd();
         StopLogoLoading();
     }
 }

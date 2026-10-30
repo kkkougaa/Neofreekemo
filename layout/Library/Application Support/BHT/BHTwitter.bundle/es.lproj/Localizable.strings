@@ -510,3 +510,12 @@
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
 "KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
+"KEMO_HEADER_BUBBLE_TITLE" = "Logo speech bubble";
+"KEMO_BUBBLE_SPOTIFY_TITLE" = "Bubble when the Spotify song changes";
+"KEMO_BUBBLE_MENU_TITLE" = "Speech bubble";
+"KEMO_BUBBLE_PAGE_TITLE" = "Speech bubble";
+"KEMO_BUBBLE_NEW_TWEETS_TITLE" = "New tweet count";
+"KEMO_BUBBLE_NOTIFICATIONS_TITLE" = "New DMs and notifications";
+"KEMO_BUBBLE_DDAY_TITLE" = "D-day (from D-1, once a day)";
+"KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE" = "Song check interval";
+"KEMO_BUBBLE_SECONDS" = "%ld s";

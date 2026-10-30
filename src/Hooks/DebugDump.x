@@ -273,6 +273,28 @@ static void PerformDump(UIWindow* window) {
         gIncludeHidden = NO;
     }
 
+    // Tab bar: the accessibility label and value of every element along the bottom edge
+    // (the unread badge counts live there).
+    {
+        [out appendFormat:@"== TAB BAR ==%c", 10];
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
+        NSUInteger visited = 0;
+        while (queue.count > 0 && visited < 6000) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            visited++;
+            CGRect inWindow = [window convertRect:view.bounds fromView:view];
+            NSString* label = view.accessibilityLabel;
+            NSString* value = view.accessibilityValue;
+            if ((label.length > 0 || value.length > 0) &&
+                CGRectGetMinY(inWindow) > CGRectGetHeight(window.bounds) - 160) {
+                [out appendFormat:@"%@ %@ label=%@ value=%@%c", NSStringFromClass(view.class),
+                                  NSStringFromCGRect(inWindow), label, value, 10];
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
+    }
+
     // Menus, popovers and sheets can live in windows of their own; listed first so a
     // clipped paste still has them.
     for (UIWindow* other in window.windowScene.windows) {

@@ -352,13 +352,62 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_logo_loading",
-                        @"default": @YES,
-                        @"type": @"toggle"
+                        @"type": @"compactButton",
+                        @"key": @"kemo_bubble",
+                        @"titleKey": @"KEMO_BUBBLE_MENU_TITLE",
+                        @"action": @"openBubbleSettings:"
                     },
                     @{
                         @"key": @"kemo_shake_dump",
                         @"default": @NO,
+                        @"type": @"toggle"
+                    }
+                ]
+            },
+            @"kemo_bubble": @{
+                @"titleKey": @"KEMO_BUBBLE_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"kemo_header_bubble",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_bubble_new_tweets",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_header_bubble"
+                    },
+                    @{
+                        @"key": @"kemo_bubble_notifications",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_header_bubble"
+                    },
+                    @{
+                        @"key": @"kemo_bubble_dday",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_header_bubble"
+                    },
+                    @{
+                        @"key": @"kemo_bubble_spotify",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_header_bubble"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_bubble_spotify_interval",
+                        @"default": @15,
+                        @"titleKey": @"KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE",
+                        @"action": @"pickSpotifyInterval:",
+                        @"parentKey": @"kemo_bubble_spotify"
+                    },
+                    @{
+                        @"key": @"kemo_logo_loading",
+                        @"default": @YES,
                         @"type": @"toggle"
                     }
                 ]

@@ -12,6 +12,7 @@
 #import "Core/BHTSpotify.h"
 #import "Settings/ModernSettingsCells.h"
 #import "Settings/Pages/KemoAliasListViewController.h"
+#import "Settings/Pages/KemoBubbleSettingsViewController.h"
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
@@ -71,6 +72,11 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
         return cell;
     }
     return [super tableView:tableView cellForRowAtIndexPath:indexPath];
+}
+
+- (void)openBubbleSettings:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[[KemoBubbleSettingsViewController alloc] initWithAccount:self.account]
+                                         animated:YES];
 }
 
 - (void)openEventEditor:(NSDictionary*)sender {

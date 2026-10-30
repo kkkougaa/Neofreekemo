@@ -15,12 +15,14 @@
 - (BOOL)loading;
 @end
 
+extern void NFBNoteRefreshStarted(void);
+
 static const NSInteger kLogoDotsTag = 0x4E464C44;
 static const CGFloat kLogoViewBox = 1024.0;
 // Where the bird sat inside the bubble, in logo coordinates.
 static const CGPoint kBubbleCenter = {261.0, 241.0};
 
-static UIImageView* HeaderLogoInWindow(UIWindow* window) {
+UIImageView* HeaderLogoInWindow(UIWindow* window) {
     NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
     while (queue.count > 0) {
         UIView* view = queue.firstObject;
@@ -35,7 +37,7 @@ static UIImageView* HeaderLogoInWindow(UIWindow* window) {
     return nil;
 }
 
-static UIWindow* KeyWindow(void) {
+UIWindow* NFBKeyWindow(void) {
     for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) {
             continue;
@@ -140,7 +142,7 @@ static void StartLogoLoading(void) {
     if (![BHTSettings boolForKey:@"kemo_logo_loading"]) {
         return;
     }
-    UIWindow* window = KeyWindow();
+    UIWindow* window = NFBKeyWindow();
     UIImageView* logo = window ? HeaderLogoInWindow(window) : nil;
     if (!logo || !logo.image || [logo viewWithTag:kLogoDotsTag]) {
         return;
@@ -154,8 +156,10 @@ static void StartLogoLoading(void) {
 
     CGFloat width = CGRectGetWidth(logo.bounds);
     CGFloat unit = width / kLogoViewBox;
-    CGFloat diameter = MAX(width * 0.07, 3.0);
-    CGFloat gap = diameter * 1.7;
+    // The bubble hole is about 392 of the 1024 logo units wide; the dots take ~60% of it.
+    CGFloat bubbleWidth = 392.0 * unit;
+    CGFloat diameter = bubbleWidth * 0.15;
+    CGFloat gap = bubbleWidth * 0.24;
     CGPoint center = CGPointMake(kBubbleCenter.x * unit, kBubbleCenter.y * unit);
 
     NFBLogoDots* holder = [[NFBLogoDots alloc] initWithFrame:logo.bounds];
@@ -180,7 +184,7 @@ static void StartLogoLoading(void) {
 }
 
 static void StopLogoLoading(void) {
-    UIWindow* window = KeyWindow();
+    UIWindow* window = NFBKeyWindow();
     UIImageView* logo = window ? HeaderLogoInWindow(window) : nil;
     NFBLogoDots* holder = (NFBLogoDots*)[logo viewWithTag:kLogoDotsTag];
     if (![holder isKindOfClass:[NFBLogoDots class]]) {
@@ -214,6 +218,7 @@ static void StopLogoLoading(void) {
     %orig;
 
     if (status == 1 && !wasActive) {
+        NFBNoteRefreshStarted();
         StartLogoLoading();
     } else if (status == 0 && wasActive) {
         StopLogoLoading();

@@ -905,6 +905,63 @@ static id RemoveVideoCarouselEntries(id node, BOOL* removed) {
 
 %end
 
+// "New tweets N" for the header bubble: on the home timeline, how many tweets arrived
+// that this list had not shown before.
+extern void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSUInteger count);
+extern BOOL NFBRefreshWasRecent(void);
+
+static const void* kSeenTweetsKey = &kSeenTweetsKey;
+
+static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* sections) {
+    NSMutableArray<NSString*>* ids = [NSMutableArray array];
+    for (id section in sections) {
+        if (![section isKindOfClass:[NSArray class]]) {
+            continue;
+        }
+        for (id item in (NSArray*)section) {
+            NSString* entryID = ItemEntryID(unwrapDataViewItem(item));
+            if ([entryID hasPrefix:@"tweet-"]) {
+                [ids addObject:entryID];
+            }
+        }
+    }
+
+    NSSet<NSString*>* seen = objc_getAssociatedObject(controller, kSeenTweetsKey);
+    NSMutableSet<NSString*>* all = [NSMutableSet setWithArray:ids];
+    if (seen && seen.count < 3000) {
+        [all unionSet:seen];
+    }
+    objc_setAssociatedObject(controller, kSeenTweetsKey, all, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (seen.count == 0 || ids.count == 0) {
+        return;
+    }
+
+    NSUInteger fresh = 0;
+    if (NFBRefreshWasRecent()) {
+        for (NSString* entryID in ids) {
+            if (![seen containsObject:entryID]) {
+                fresh++;
+            }
+        }
+    } else {
+        // Not a pull: only count what arrived above the tweets already shown.
+        BOOL overlap = NO;
+        for (NSString* entryID in ids) {
+            if ([seen containsObject:entryID]) {
+                overlap = YES;
+                break;
+            }
+            fresh++;
+        }
+        if (!overlap) {
+            return;
+        }
+    }
+    if (fresh > 0) {
+        NFBSetNewTweets(controller, ids, fresh);
+    }
+}
+
 // For You refreshes ignore the restore flag, so the first status in view is remembered by
 // its id and put back where it was once the new sections have been laid out.
 static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* sections,
@@ -975,6 +1032,10 @@ static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* 
     // Home timeline only: ask for the scroll position to be restored, so a refresh
     // leaves you where you were instead of jumping to the newest tweets.
     NSArray* filtered = FilteredTimelineSections(self, sections);
+    if (IsHomeTimeline(self) && [BHTSettings boolForKey:@"kemo_header_bubble"] &&
+        [BHTSettings boolForKey:@"kemo_bubble_new_tweets"]) {
+        NoteNewTweets(self, filtered);
+    }
     if ([BHTSettings boolForKey:@"kemo_keep_position"] && IsHomeTimeline(self)) {
         KeepPositionAround(self, filtered, ^{
             %orig(filtered, YES);

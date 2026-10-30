@@ -936,94 +936,105 @@ static void ApplyLogoShift(UIView* control) {
         return;
     }
 
-    BOOL enabled = BubbleEnabled();
-    CGFloat shift = 0;
-    if (enabled) {
-        // Measured inside the navigation bar, not the window: while the side drawer slides
-        // the whole screen sideways, but the bar's own coordinates stay put.
-        UIView* reference = parent;
-        while (reference && ![reference isKindOfClass:[UINavigationBar class]]) {
-            reference = reference.superview;
-        }
-        reference = reference ?: window;
-        // Where the logo should be: its centre mirrors the centre of the 44pt profile button
-        // that sits 20pt from the left edge.
-        CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
-        CGPoint middle = CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds));
-
-        // While UIKit is animating the title (it slides the title around when a refresh
-        // starts) the logo is not chased: it is hidden if it is out flying, left alone if it
-        // is near, and put in its place once the animation has ended.
-        BOOL animating = NO;
-        for (UIView* view = control; view && view != reference; view = view.superview) {
-            if (view.layer.animationKeys.count > 0) {
-                animating = YES;
-                break;
-            }
-        }
-        if (animating) {
-            CALayer* shown = logo.layer.presentationLayer ?: logo.layer;
-            CALayer* base = reference.layer.presentationLayer ?: reference.layer;
-            CGPoint at = [shown convertPoint:middle toLayer:base];
-            BOOL flying = fabs(at.x - target) > 40 || at.x < 0 || at.x > CGRectGetWidth(reference.bounds);
-            [UIView performWithoutAnimation:^{
-                control.layer.opacity = flying ? 0 : 1;
-            }];
-            __weak UIView* weakControl = control;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                               if (weakControl) {
-                                   ApplyLogoShift(weakControl);
-                               }
-                           });
-            return;
-        }
-
-        // At rest: the shift is corrected by the remaining gap, so it does not matter how
-        // UIKit has placed or sized the title.
-        CGPoint logoCenter = [reference convertPoint:middle fromView:logo];
-        CGFloat gap = target - logoCenter.x;
-        shift = fabs(gap) > 0.5 ? control.transform.tx + gap : control.transform.tx;
-        gLogoShiftDebug = [NSString stringWithFormat:@"ref=%@ refWidth=%.0f logoX=%.1f target=%.1f gap=%.1f tx=%.1f logo=%.1f control=%@",
-                                                     NSStringFromClass(reference.class),
-                                                     CGRectGetWidth(reference.bounds), logoCenter.x, target, gap,
-                                                     shift, CGRectGetWidth(logo.bounds),
-                                                     NSStringFromCGRect(control.frame)];
-        if (control.layer.opacity < 1) {
-            [UIView performWithoutAnimation:^{
-                control.layer.opacity = 1;
-            }];
-        }
-        // A small correction (a few points, like the drawer opening and closing) is eased
-        // in; a big one is made at once.
-        if (fabs(control.transform.tx - shift) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
-            CGAffineTransform wanted = CGAffineTransformMakeTranslation(shift, 0);
-            if (fabs(gap) < 30) {
-                [UIView animateWithDuration:0.18
-                                      delay:0
-                                    options:UIViewAnimationOptionBeginFromCurrentState |
-                                            UIViewAnimationOptionAllowUserInteraction
-                                 animations:^{
-                                     control.transform = wanted;
-                                 }
-                                 completion:nil];
-            } else {
-                [UIView performWithoutAnimation:^{
-                    control.transform = wanted;
-                }];
-            }
-        }
-    } else if (fabs(control.transform.tx) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
+    // Why a layer transform on the children and not a view transform on the control: UIKit
+    // sets the title's frame again on every layout, and for a view with a transform that
+    // moves its centre to cancel the transform. The shift was cancelled, the next pass added
+    // it again, and the logo ran off the screen. A sublayer transform is not part of the
+    // frame, so UIKit never sees it and never cancels it.
+    if (!CGAffineTransformIsIdentity(control.transform)) {
         [UIView performWithoutAnimation:^{
             control.transform = CGAffineTransformIdentity;
         }];
     }
-
-    CGFloat scale = enabled ? kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1) : 1;
-    if (fabs(logo.transform.a - scale) > 0.01 && logo.layer.animationKeys.count == 0) {
+    if (!CGAffineTransformIsIdentity(logo.transform)) {
         [UIView performWithoutAnimation:^{
-            logo.transform = CGAffineTransformMakeScale(scale, scale);
+            logo.transform = CGAffineTransformIdentity;
         }];
+    }
+
+    BOOL enabled = BubbleEnabled();
+    CATransform3D current = control.layer.sublayerTransform;
+    if (!enabled) {
+        if (!CATransform3DIsIdentity(current)) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            control.layer.sublayerTransform = CATransform3DIdentity;
+            [CATransaction commit];
+        }
+        return;
+    }
+
+    // Measured inside the navigation bar, not the window: while the side drawer slides
+    // the whole screen sideways, but the bar's own coordinates stay put.
+    UIView* reference = parent;
+    while (reference && ![reference isKindOfClass:[UINavigationBar class]]) {
+        reference = reference.superview;
+    }
+    reference = reference ?: window;
+    // Where the logo should be: its centre mirrors the centre of the 44pt profile button
+    // that sits 20pt from the left edge.
+    CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
+    CGPoint middle = CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds));
+
+    // While UIKit is animating the title (it slides the title around when a refresh
+    // starts) the logo is not chased: it is hidden if it is out flying, left alone if it
+    // is near, and put in its place once the animation has ended.
+    BOOL animating = NO;
+    for (UIView* view = control; view && view != reference; view = view.superview) {
+        if (view.layer.animationKeys.count > 0) {
+            animating = YES;
+            break;
+        }
+    }
+    if (animating) {
+        CALayer* shown = logo.layer.presentationLayer ?: logo.layer;
+        CALayer* base = reference.layer.presentationLayer ?: reference.layer;
+        CGPoint at = [shown convertPoint:middle toLayer:base];
+        BOOL flying = fabs(at.x - target) > 40 || at.x < 0 || at.x > CGRectGetWidth(reference.bounds);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        control.layer.opacity = flying ? 0 : 1;
+        [CATransaction commit];
+        __weak UIView* weakControl = control;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           if (weakControl) {
+                               ApplyLogoShift(weakControl);
+                           }
+                       });
+        return;
+    }
+
+    // At rest: the shift is corrected by the remaining gap, so it does not matter how UIKit
+    // has placed or sized the title. The size is the wanted 40pt over however big it is laid
+    // out (about the control's centre, where the logo sits).
+    CGPoint logoCenter = [reference convertPoint:middle fromView:logo];
+    CGFloat gap = target - logoCenter.x;
+    CGFloat tx = current.m41;
+    CGFloat newTx = fabs(gap) > 0.5 ? tx + gap : tx;
+    CGFloat scale = kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1);
+    gLogoShiftDebug = [NSString stringWithFormat:@"ref=%@ refWidth=%.0f logoX=%.1f target=%.1f gap=%.1f tx=%.1f scale=%.2f logo=%.1f control=%@",
+                                                 NSStringFromClass(reference.class),
+                                                 CGRectGetWidth(reference.bounds), logoCenter.x, target, gap,
+                                                 newTx, scale, CGRectGetWidth(logo.bounds),
+                                                 NSStringFromCGRect(control.frame)];
+    if (control.layer.opacity < 1) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        control.layer.opacity = 1;
+        [CATransaction commit];
+    }
+    if (fabs(newTx - tx) > 0.5 || fabs(scale - current.m11) > 0.01) {
+        CATransform3D wanted = CATransform3DScale(CATransform3DMakeTranslation(newTx, 0, 0), scale, scale, 1);
+        [CATransaction begin];
+        if (fabs(gap) < 30 && fabs(scale - current.m11) < 0.01) {
+            // A small correction (a few points, like the drawer opening and closing) eases in.
+            [CATransaction setAnimationDuration:0.18];
+        } else {
+            [CATransaction setDisableActions:YES];
+        }
+        control.layer.sublayerTransform = wanted;
+        [CATransaction commit];
     }
 }
 

@@ -213,24 +213,15 @@ static void StopLogoLoading(void) {
     logo.image = holder.originalImage;
     [holder stop];
 
-    // A small, soft swell relative to the size the logo has now (it is drawn larger than
-    // laid out), without the springy overshoot.
-    CGAffineTransform base = logo.transform;
-    [UIView animateWithDuration:0.28
-        delay:0
-        options:UIViewAnimationOptionCurveEaseInOut
-        animations:^{
-            logo.transform = CGAffineTransformScale(base, 1.07, 1.07);
-        }
-        completion:^(BOOL finished) {
-            [UIView animateWithDuration:0.28
-                                  delay:0
-                                options:UIViewAnimationOptionCurveEaseInOut
-                             animations:^{
-                                 logo.transform = base;
-                             }
-                             completion:nil];
-        }];
+    // A small, soft swell as a layer animation only: nothing changes on the view itself, so
+    // UIKit has nothing to react to (a transform on the logo made it re-measure the title).
+    CABasicAnimation* swell = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+    swell.fromValue = @1.0;
+    swell.toValue = @1.07;
+    swell.duration = 0.28;
+    swell.autoreverses = YES;
+    swell.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [logo.layer addAnimation:swell forKey:@"nfbSwell"];
 }
 
 %hook TFNPullToRefreshControl

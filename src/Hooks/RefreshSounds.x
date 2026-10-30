@@ -64,6 +64,10 @@ static char kManualRefreshKey;
     } else if (status == 0 && wasActive) {
         if ([objc_getAssociatedObject(self, &kManualRefreshKey) boolValue]) {
             PlayRefreshSound(RefreshSoundPop);
+            if ([BHTSettings boolForKey:@"kemo_haptics"]) {
+                [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight]
+                    impactOccurred];
+            }
         }
         objc_setAssociatedObject(self, &kManualRefreshKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }

@@ -358,6 +358,16 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openBubbleSettings:"
                     },
                     @{
+                        @"key": @"kemo_draft_autosave",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_haptics",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_shake_dump",
                         @"default": @NO,
                         @"type": @"toggle"

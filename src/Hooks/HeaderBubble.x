@@ -276,6 +276,9 @@ static void RenderBubble(void) {
         // Just a change of words (or of the count): swapped in place.
         RemoveHostOf(existing);
     } else {
+        if ([BHTSettings boolForKey:@"kemo_haptics"]) {
+            [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurred];
+        }
         bubble.alpha = 0;
         bubble.transform = CGAffineTransformMakeScale(0.6, 0.6);
         [UIView animateWithDuration:0.35

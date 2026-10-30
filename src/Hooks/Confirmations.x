@@ -45,6 +45,9 @@ static void ShowConfirmation(void (^confirmed)(void)) {
          showFrom:topMostController()];
 }
 
+// The draft autosave forgets the saved text once the tweet is really on its way.
+extern void NFBDraftNoteSent(UIViewController* composer);
+
 // MARK: - Tweet confirm
 
 // All send paths funnel through this. Some callers send no argument, so the
@@ -54,11 +57,13 @@ static void ShowConfirmation(void (^confirmed)(void)) {
 - (void)_t1_didTapSendButton:(__unsafe_unretained UIButton*)sendButton {
     if (![BHTSettings boolForKey:@"tweet_confirm"]) {
         PlayCustomSendSound();
+        NFBDraftNoteSent((UIViewController*)self);
         return %orig;
     }
 
     ShowConfirmation(^{
         PlayCustomSendSound();
+        NFBDraftNoteSent((UIViewController*)self);
         %orig;
     });
 }

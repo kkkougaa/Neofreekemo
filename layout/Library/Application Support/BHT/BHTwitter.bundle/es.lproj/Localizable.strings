@@ -519,3 +519,7 @@
 "KEMO_BUBBLE_DDAY_TITLE" = "D-day (from D-1, once a day)";
 "KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE" = "Song check interval";
 "KEMO_BUBBLE_SECONDS" = "%ld s";
+"KEMO_DRAFT_AUTOSAVE_TITLE" = "Autosave drafts";
+"KEMO_HAPTICS_TITLE" = "Haptics for refresh and bubble";
+"KEMO_DRAFT_RESTORE" = "Restore draft";
+"KEMO_DRAFT_DISCARD" = "Discard";

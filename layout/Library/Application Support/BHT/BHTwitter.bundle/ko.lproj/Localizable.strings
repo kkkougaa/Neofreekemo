@@ -492,3 +492,7 @@
 "KEMO_BUBBLE_DDAY_TITLE" = "D-day (D-1부터, 하루 한 번)";
 "KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE" = "곡 확인 간격";
 "KEMO_BUBBLE_SECONDS" = "%ld초";
+"KEMO_DRAFT_AUTOSAVE_TITLE" = "쓰던 글 자동 저장";
+"KEMO_HAPTICS_TITLE" = "새로고침·말풍선 햅틱";
+"KEMO_DRAFT_RESTORE" = "이어 쓰던 글 불러오기";
+"KEMO_DRAFT_DISCARD" = "버리기";

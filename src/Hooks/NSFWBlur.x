@@ -30,8 +30,10 @@ static const void* kScoreKey = &kScoreKey;        // UIImage -> @(score), or @(-
 static const void* kRevealedKey = &kRevealedKey;  // media view -> the image or video the user opened
 static const void* kScheduledKey = &kScheduledKey;
 
+// NSFW mode (the drawer toggle) shows everything, so the cover only works while it is off.
 static BOOL NFBBlurActive(void) {
-    return [BHTSettings boolForKey:kBlurSettingKey];
+    return [BHTSettings boolForKey:kBlurSettingKey] &&
+           ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
 }
 
 // MARK: Model

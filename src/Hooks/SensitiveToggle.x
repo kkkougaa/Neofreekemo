@@ -4,6 +4,7 @@
 //
 
 #import "HookHelpers.h"
+#import "Core/BHTAvatars.h"
 #import "Core/BHTEvents.h"
 #import "Settings/ModernSettingsPageViewController.h"
 
@@ -82,7 +83,19 @@ static UIImage* ToggleImage(NSString* name) {
 
 - (void)toggle {
     BOOL on = ![BHTSettings boolForKey:kSensitiveKey];
-    [[NSUserDefaults standardUserDefaults] setBool:on forKey:kSensitiveKey];
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:on forKey:kSensitiveKey];
+
+    // NSFW mode shows everything: the AI cover goes off with it, and goes back to what
+    // it was before when the mode is turned off again.
+    static NSString* const kBlurKey = @"nsfw_ai_blur";
+    static NSString* const kBlurBeforeKey = @"nfb_nsfw_blur_before";
+    if (on) {
+        [defaults setBool:[BHTSettings boolForKey:kBlurKey] forKey:kBlurBeforeKey];
+        [defaults setBool:NO forKey:kBlurKey];
+    } else {
+        [defaults setBool:[defaults boolForKey:kBlurBeforeKey] forKey:kBlurKey];
+    }
 
     [[[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
@@ -233,10 +246,12 @@ static BOOL IsDrawerList(UIScrollView* list) {
     return NO;
 }
 
-// MARK: D-day lines under the NSFW row
+// MARK: D-day group under the menu list
 
 static const CGFloat kEventRowHeight = 40.0;
-static const CGFloat kEventGap = 8.0;
+static const CGFloat kEventTitleHeight = 22.0;
+static const CGFloat kEventGroupGap = 14.0;
+static const CGFloat kAvatarSize = 28.0;
 static const NSUInteger kMaxEventRows = 4;
 
 @interface NFBEventRow : UIControl
@@ -252,8 +267,8 @@ static const NSUInteger kMaxEventRows = 4;
 
 @end
 
-// Rows for the soonest events: "D-12  Event name"; tapping one opens the event's
-// account when it has one.
+// A small "D-day" title and rows for the soonest events: "D-12  (avatar) Event name".
+// Tapping a row opens the event's account when it has one.
 @interface NFBEventRows : UIView
 @property (nonatomic, copy) NSString* signature;
 - (CGFloat)reloadWithIconX:(CGFloat)iconX width:(CGFloat)width;
@@ -274,14 +289,27 @@ static const NSUInteger kMaxEventRows = 4;
     }
 }
 
-// Returns the height the rows need (0 when there are no upcoming events).
+// Returns the height the group needs (0 when there are no upcoming events).
 - (CGFloat)reloadWithIconX:(CGFloat)iconX width:(CGFloat)width {
     NSArray<NSDictionary*>* events = [BHTEvents upcoming:kMaxEventRows];
+    __weak NFBEventRows* weakSelf = self;
+
+    // Pictures that are already here (this also starts the download of the others).
+    NSMutableDictionary<NSString*, UIImage*>* avatars = [NSMutableDictionary dictionary];
     NSMutableString* signature = [NSMutableString stringWithFormat:@"%.0f|%.0f|", iconX, width];
     for (NSDictionary* event in events) {
         NSDate* date = [NSDate dateWithTimeIntervalSince1970:[event[@"time"] doubleValue]];
-        [signature appendFormat:@"%@:%ld:%@;", event[@"name"], (long)[BHTEvents daysUntil:date],
-                                event[@"handle"]];
+        NSString* handle = event[@"handle"];
+        UIImage* avatar = [BHTAvatars imageForHandle:handle
+                                          completion:^{
+                                              weakSelf.signature = nil;
+                                              [weakSelf.superview setNeedsLayout];
+                                          }];
+        if (avatar) {
+            avatars[handle] = avatar;
+        }
+        [signature appendFormat:@"%@:%ld:%@:%d;", event[@"name"], (long)[BHTEvents daysUntil:date],
+                                handle, avatar != nil];
     }
     [signature appendFormat:@"%@", CurrentAccentColor()];
 
@@ -290,30 +318,58 @@ static const NSUInteger kMaxEventRows = 4;
         for (UIView* old in [self.subviews copy]) {
             [old removeFromSuperview];
         }
-        CGFloat y = 0;
+        if (events.count == 0) {
+            return 0;
+        }
+
+        UILabel* title = [UILabel new];
+        title.text = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_DDAY_HEADER"];
+        title.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        title.textColor = [UIColor secondaryLabelColor];
+        title.frame = CGRectMake(iconX, 0, MAX(width - iconX - 16, 0), kEventTitleHeight);
+        [self addSubview:title];
+
+        CGFloat y = kEventTitleHeight;
         for (NSDictionary* event in events) {
             NSDate* date = [NSDate dateWithTimeIntervalSince1970:[event[@"time"] doubleValue]];
             NSInteger days = [BHTEvents daysUntil:date];
+            NSString* handle = event[@"handle"];
 
             NFBEventRow* row = [[NFBEventRow alloc]
                 initWithFrame:CGRectMake(0, y, width, kEventRowHeight)];
-            row.handle = event[@"handle"];
+            row.handle = handle;
             [row addTarget:self action:@selector(openAccount:) forControlEvents:UIControlEventTouchUpInside];
 
             UILabel* count = [UILabel new];
             count.text = days == 0 ? @"D-Day" : [NSString stringWithFormat:@"D-%ld", (long)days];
             count.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold];
             count.textColor = CurrentAccentColor();
-            count.frame = CGRectMake(iconX, 0, 64, kEventRowHeight);
+            count.frame = CGRectMake(iconX, 0, 60, kEventRowHeight);
             count.userInteractionEnabled = NO;
             [row addSubview:count];
+
+            // The account's picture, or a plain disc until it has arrived.
+            CGFloat nameX = iconX + 64;
+            if (handle.length > 0) {
+                UIImageView* avatar = [UIImageView new];
+                avatar.frame = CGRectMake(nameX, (kEventRowHeight - kAvatarSize) / 2, kAvatarSize,
+                                          kAvatarSize);
+                avatar.contentMode = UIViewContentModeScaleAspectFill;
+                avatar.layer.cornerRadius = kAvatarSize / 2;
+                avatar.clipsToBounds = YES;
+                avatar.backgroundColor = [UIColor tertiarySystemFillColor];
+                avatar.image = avatars[handle];
+                avatar.userInteractionEnabled = NO;
+                [row addSubview:avatar];
+                nameX += kAvatarSize + 10;
+            }
 
             UILabel* name = [UILabel new];
             name.text = event[@"name"];
             name.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
             name.textColor = [UIColor labelColor];
             name.lineBreakMode = NSLineBreakByTruncatingTail;
-            name.frame = CGRectMake(iconX + 68, 0, MAX(width - iconX - 68 - 16, 0), kEventRowHeight);
+            name.frame = CGRectMake(nameX, 0, MAX(width - nameX - 16, 0), kEventRowHeight);
             name.userInteractionEnabled = NO;
             [row addSubview:name];
 
@@ -321,7 +377,7 @@ static const NSUInteger kMaxEventRows = 4;
             y += kEventRowHeight;
         }
     }
-    return self.subviews.count * kEventRowHeight;
+    return self.subviews.count == 0 ? 0 : kEventTitleHeight + (self.subviews.count - 1) * kEventRowHeight;
 }
 
 @end
@@ -335,7 +391,7 @@ static void InstallRow(UIScrollView* list) {
         return;
     }
 
-    // Sit right under the last menu row, as tall as the first one.
+    // Just under the last menu row.
     NSArray<UIView*>* cells = [(id)list performSelector:@selector(visibleCells)];
     CGFloat bottom = 0;
     for (UIView* cell in cells) {
@@ -345,23 +401,7 @@ static void InstallRow(UIScrollView* list) {
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
 
-    NFBSensitiveRow* row = gRow;
-    if (!row || row.superview != list) {
-        [gRow removeFromSuperview];
-        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
-        gRow = row;
-        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-        row.baseTextColor = [UIColor labelColor];
-        [list addSubview:row];
-    }
-    [row applyLabelColor];
-    row.frame = CGRectMake(0, bottom, CGRectGetWidth(list.bounds), rowHeight);
-    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(
-        labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
-    [row.icon applyState];
-
-    // D-day lines right under it.
+    // The D-day group scrolls with the list.
     NFBEventRows* events = gEventRows;
     if (!events || events.superview != list) {
         [gEventRows removeFromSuperview];
@@ -370,19 +410,38 @@ static void InstallRow(UIScrollView* list) {
         [list addSubview:events];
     }
     CGFloat eventsHeight = [events reloadWithIconX:iconX width:CGRectGetWidth(list.bounds)];
-    events.frame = CGRectMake(0, bottom + rowHeight + kEventGap, CGRectGetWidth(list.bounds),
-                              eventsHeight);
+    events.frame = CGRectMake(0, bottom + kEventGroupGap, CGRectGetWidth(list.bounds), eventsHeight);
     events.hidden = eventsHeight == 0;
-    CGFloat totalHeight = rowHeight + (eventsHeight > 0 ? kEventGap + eventsHeight : 0);
 
-    // Let the list scroll far enough to reach the extra rows.
+    // The NSFW mode row is its own control, pinned near the bottom of the drawer.
+    UIView* host = list.superview;
+    NFBSensitiveRow* row = gRow;
+    if (!row || row.superview != host) {
+        [gRow removeFromSuperview];
+        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
+        gRow = row;
+        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        row.baseTextColor = [UIColor labelColor];
+        [host addSubview:row];
+    }
+    [row applyLabelColor];
+    CGFloat safeBottom = MAX(list.window.safeAreaInsets.bottom, host.safeAreaInsets.bottom);
+    row.frame = CGRectMake(0, CGRectGetHeight(host.bounds) - safeBottom - rowHeight - 12,
+                           CGRectGetWidth(host.bounds), rowHeight);
+    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    row.label.frame = CGRectMake(
+        labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
+    [row.icon applyState];
+    [host bringSubviewToFront:row];
+
+    // Room to scroll past the D-day group and the pinned row.
+    CGFloat needed = (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight + 24.0;
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-    if (fabs(added - totalHeight) > 0.5) {
+    if (fabs(added - needed) > 0.5) {
         UIEdgeInsets inset = list.contentInset;
-        inset.bottom += totalHeight - added;
+        inset.bottom += needed - added;
         list.contentInset = inset;
-        objc_setAssociatedObject(list, kInsetAddedKey, @(totalHeight),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(list, kInsetAddedKey, @(needed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 

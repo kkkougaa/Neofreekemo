@@ -237,11 +237,16 @@ static void DumpTexts(UIView* view, int depth, NSMutableString* out) {
 
 // The screen's view controllers, parents to children: shows how a screen with tabs is put
 // together (which controller is the pager, which are the pages).
+static NSMutableArray<UIViewController*>* gOnScreenControllers;
+
 static void DumpControllers(UIViewController* controller, int depth, NSMutableString* out, NSUInteger* lines) {
     if (!controller || depth > 12 || *lines > 160) {
         return;
     }
     (*lines)++;
+    if (controller.isViewLoaded && controller.view.window) {
+        [gOnScreenControllers addObject:controller];
+    }
     [out appendFormat:@"%@%@%@%c", [@"" stringByPaddingToLength:(NSUInteger)depth withString:@" " startingAtIndex:0],
                       NSStringFromClass(controller.class),
                       controller.isViewLoaded && controller.view.window ? @" (on screen)" : @"", 10];
@@ -262,6 +267,50 @@ static void DumpControllers(UIViewController* controller, int depth, NSMutableSt
     }
 }
 
+// The inside of a class: its properties, instance variables and (the telling) methods. For
+// finding out how a screen keeps its list of pages and tabs.
+static void DumpClassInfo(Class cls, NSMutableString* out) {
+    [out appendFormat:@"-- %@", NSStringFromClass(cls)];
+    for (Class parent = class_getSuperclass(cls); parent && parent != [NSObject class] &&
+                                                  parent != [UIViewController class] &&
+                                                  parent != [UIView class];
+         parent = class_getSuperclass(parent)) {
+        [out appendFormat:@" < %@", NSStringFromClass(parent)];
+    }
+    [out appendFormat:@"%c", 10];
+
+    unsigned int count = 0;
+    objc_property_t* properties = class_copyPropertyList(cls, &count);
+    for (unsigned int i = 0; i < count && i < 60; i++) {
+        [out appendFormat:@"  prop %s %s%c", property_getName(properties[i]),
+                          property_getAttributes(properties[i]), 10];
+    }
+    free(properties);
+
+    Ivar* ivars = class_copyIvarList(cls, &count);
+    for (unsigned int i = 0; i < count && i < 60; i++) {
+        [out appendFormat:@"  ivar %s %s%c", ivar_getName(ivars[i]), ivar_getTypeEncoding(ivars[i]), 10];
+    }
+    free(ivars);
+
+    NSArray* words = @[ @"page", @"tab", @"title", @"item", @"segment", @"content", @"child", @"select",
+                        @"reload", @"update", @"data", @"source", @"controller", @"index", @"setup", @"make",
+                        @"configure", @"build", @"create" ];
+    Method* methods = class_copyMethodList(cls, &count);
+    int printed = 0;
+    for (unsigned int i = 0; i < count && printed < 90; i++) {
+        NSString* name = NSStringFromSelector(method_getName(methods[i]));
+        for (NSString* word in words) {
+            if ([name localizedCaseInsensitiveContainsString:word]) {
+                [out appendFormat:@"  method %@%c", name, 10];
+                printed++;
+                break;
+            }
+        }
+    }
+    free(methods);
+}
+
 // Builds the outline of what's on screen and puts it on the pasteboard.
 static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
@@ -272,7 +321,21 @@ static void PerformDump(UIWindow* window) {
     {
         [out appendFormat:@"== CONTROLLERS ==%c", 10];
         NSUInteger controllerLines = 0;
+        gOnScreenControllers = [NSMutableArray array];
         DumpControllers(window.rootViewController, 0, out, &controllerLines);
+
+        // The inside of the screen's own controllers (not the shell around every screen).
+        [out appendFormat:@"== CLASS INFO ==%c", 10];
+        NSMutableSet<NSString*>* described = [NSMutableSet set];
+        for (UIViewController* controller in gOnScreenControllers) {
+            NSString* name = NSStringFromClass(controller.class);
+            if (([name containsString:@"ActivityHistory"] || [name containsString:@"Segmented"] ||
+                 [name containsString:@"Paging"] || [name containsString:@"Bookmarks"]) &&
+                ![described containsObject:name] && described.count < 6) {
+                [described addObject:name];
+                DumpClassInfo(controller.class, out);
+            }
+        }
 
         [out appendFormat:@"== TOP REGION ==%c", 10];
         NSMutableArray<UIView*>* topQueue = [NSMutableArray arrayWithObject:window];

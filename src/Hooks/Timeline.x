@@ -1047,6 +1047,7 @@ static void KeepRestore(UITableView* table, NSString* anchorID, CGFloat anchorOf
         if ([cell.accessibilityIdentifier isEqualToString:anchorID]) {
             CGFloat delta = (CGRectGetMinY(cell.frame) - top) - anchorOffset;
             if (fabs(delta) > 1.0) {
+                NFBNewTweetsLog([NSString stringWithFormat:@"restore: anchor in view, moving by %.0f", delta]);
                 // Straight to the table, bypassing the block below.
                 BOOL armed = gKeepRefreshing;
                 gKeepRefreshing = NO;
@@ -1060,6 +1061,7 @@ static void KeepRestore(UITableView* table, NSString* anchorID, CGFloat anchorOf
         }
     }
     // Not on screen any more: find it in the new data and scroll there.
+    NFBNewTweetsLog(@"restore: anchor not in view, looking in the new data");
     for (NSUInteger section = 0; section < sections.count; section++) {
         id items = sections[section];
         if (![items isKindOfClass:[NSArray class]]) {
@@ -1126,6 +1128,8 @@ void NFBKeepPositionBegin(UIView* control) {
     gKeepAnchorOffset = anchorOffset;
     gKeepRefreshing = keep;
     gKeepUntil = nil;
+    NFBNewTweetsLog([NSString stringWithFormat:@"pull started: keep=%d anchor=%@ offset=%.0f", keep,
+                                               anchorID, anchorOffset]);
 }
 
 void NFBKeepPositionEnd(void) {
@@ -1139,6 +1143,8 @@ void NFBKeepPositionEnd(void) {
     KeepRestoreSoon(1.0);
 }
 
+static NSUInteger gKeepBlocked;
+
 static BOOL KeepShouldBlock(UIScrollView* scrollView, CGPoint offset) {
     if ((__bridge const void*)scrollView != gKeepTablePtr || !KeepArmed()) {
         return NO;
@@ -1147,7 +1153,12 @@ static BOOL KeepShouldBlock(UIScrollView* scrollView, CGPoint offset) {
         return NO;
     }
     CGFloat topY = -scrollView.adjustedContentInset.top;
-    return offset.y <= topY + 4 && scrollView.contentOffset.y > topY + 40;
+    BOOL block = offset.y <= topY + 4 && scrollView.contentOffset.y > topY + 40;
+    if (block && ++gKeepBlocked <= 3) {
+        NFBNewTweetsLog([NSString stringWithFormat:@"blocked a jump to the top (from %.0f)",
+                                                   scrollView.contentOffset.y]);
+    }
+    return block;
 }
 
 %hook UIScrollView

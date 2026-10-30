@@ -53,9 +53,9 @@ static void PawStart(UIActivityIndicatorView* spinner) {
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     spinner.color = [UIColor clearColor];
 
-    static const CGFloat kPaw = 11.0;
-    static const CGFloat kStep = 14.0;
-    UIView* paws = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kStep * 4, 24)];
+    static const CGFloat kPaw = 16.5;
+    static const CGFloat kStep = 21.0;
+    UIView* paws = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kStep * 4, 36)];
     paws.tag = kPawTag;
     paws.userInteractionEnabled = NO;
     paws.center = CGPointMake(CGRectGetMidX(spinner.bounds), CGRectGetMidY(spinner.bounds));
@@ -64,7 +64,7 @@ static void PawStart(UIActivityIndicatorView* spinner) {
         CAShapeLayer* paw = [CAShapeLayer layer];
         paw.path = PawPath(kPaw).CGPath;
         paw.fillColor = CurrentAccentColor().CGColor;
-        paw.frame = CGRectMake(1 + i * kStep, i % 2 ? 12 : 1, kPaw, kPaw);
+        paw.frame = CGRectMake(1.5 + i * kStep, i % 2 ? 18 : 1.5, kPaw, kPaw);
         paw.opacity = 0;
 
         CAKeyframeAnimation* fade = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];

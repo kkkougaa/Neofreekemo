@@ -78,50 +78,86 @@ static UIImage* SpotifyMark(void) {
                          : nil;
 }
 
-// Notes pop out to the left of the bubble, drift a little, and shrink away.
+// A note pops out like jelly, sways up and to the left, then goes "pop" in a few sparkles.
+static void SparkleBurst(UIWindow* window, CGPoint at) {
+    UIColor* color = CurrentAccentColor();
+    for (int i = 0; i < 5; i++) {
+        CGFloat angle = (M_PI * 2 / 5) * i + 0.4;
+        UIView* dot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, i % 2 ? 3 : 4.5, i % 2 ? 3 : 4.5)];
+        dot.backgroundColor = color;
+        dot.layer.cornerRadius = CGRectGetWidth(dot.bounds) / 2;
+        dot.center = at;
+        dot.alpha = 1;
+        [window addSubview:dot];
+        CGFloat distance = 9 + (i % 2) * 4;
+        [UIView animateWithDuration:0.4
+            delay:0
+            options:UIViewAnimationOptionCurveEaseOut
+            animations:^{
+                dot.center = CGPointMake(at.x + cos(angle) * distance, at.y + sin(angle) * distance);
+                dot.alpha = 0;
+                dot.transform = CGAffineTransformMakeScale(0.2, 0.2);
+            }
+            completion:^(BOOL finished) {
+                [dot removeFromSuperview];
+            }];
+    }
+}
+
 static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second) {
     UILabel* note = [UILabel new];
     note.text = second ? @"♫" : @"♪";
-    note.font = [UIFont systemFontOfSize:second ? 11 : 13 weight:UIFontWeightBold];
+    note.font = [UIFont systemFontOfSize:second ? 12 : 14 weight:UIFontWeightHeavy];
     note.textColor = CurrentAccentColor();
     [note sizeToFit];
-    CGFloat sideways = MAX(0, MIN(30, left - 64));
-    CGFloat startX = left - 8;
-    CGFloat angle = second ? 0.25 : -0.25;
-    note.center = CGPointMake(startX, midY + (second ? 3 : -3));
+    CGFloat sideways = MAX(0, MIN(34, left - 64));
+    CGPoint start = CGPointMake(left - 8, midY + (second ? 3 : -3));
+    CGPoint end = CGPointMake(start.x - sideways * (second ? 0.7 : 1.0), midY - (second ? 19 : 14));
+    note.center = start;
     note.alpha = 0;
-    note.transform = CGAffineTransformMakeScale(0.2, 0.2);
     [window addSubview:note];
 
-    [UIView animateWithDuration:0.38
-                          delay:0
-         usingSpringWithDamping:0.38
-          initialSpringVelocity:0
-                        options:0
-                     animations:^{
-                         note.alpha = 1;
-                         note.transform = CGAffineTransformMakeRotation(angle);
-                     }
-                     completion:nil];
-    [UIView animateWithDuration:0.8
-                          delay:0
-                        options:UIViewAnimationOptionCurveEaseOut
-                     animations:^{
-                         note.center = CGPointMake(startX - sideways * (second ? 0.7 : 1.0),
-                                                   midY - (second ? 18 : 13));
-                     }
-                     completion:nil];
-    [UIView animateWithDuration:0.28
-        delay:0.55
-        options:UIViewAnimationOptionCurveEaseIn
-        animations:^{
-            note.alpha = 0;
-            note.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.1, 0.1),
-                                                     CGAffineTransformMakeRotation(-angle));
-        }
-        completion:^(BOOL finished) {
-            [note removeFromSuperview];
-        }];
+    // Jelly pop: it overshoots, squashes, and settles, with a little wobble.
+    CAKeyframeAnimation* jelly = [CAKeyframeAnimation animationWithKeyPath:@"transform.scale"];
+    jelly.values = @[ @0.0, @1.4, @0.82, @1.12, @0.96, @1.0 ];
+    jelly.keyTimes = @[ @0, @0.28, @0.5, @0.7, @0.85, @1 ];
+    CAKeyframeAnimation* wobble = [CAKeyframeAnimation animationWithKeyPath:@"transform.rotation.z"];
+    CGFloat tilt = second ? 0.35 : -0.35;
+    wobble.values = @[ @(tilt * 2), @(-tilt), @(tilt * 0.6), @(-tilt * 0.3), @0 ];
+    wobble.keyTimes = @[ @0, @0.3, @0.55, @0.8, @1 ];
+    CAAnimationGroup* pop = [CAAnimationGroup animation];
+    pop.animations = @[ jelly, wobble ];
+    pop.duration = 0.55;
+    note.alpha = 1;
+    [note.layer addAnimation:pop forKey:@"pop"];
+
+    // Drifts along a soft curve while bobbing.
+    UIBezierPath* path = [UIBezierPath bezierPath];
+    [path moveToPoint:start];
+    [path addCurveToPoint:end
+            controlPoint1:CGPointMake(start.x + 3, start.y - 10)
+            controlPoint2:CGPointMake(end.x + (second ? -4 : 5), end.y + 8)];
+    CAKeyframeAnimation* drift = [CAKeyframeAnimation animationWithKeyPath:@"position"];
+    drift.path = path.CGPath;
+    drift.duration = 1.0;
+    drift.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    drift.fillMode = kCAFillModeForwards;
+    drift.removedOnCompletion = NO;
+    [note.layer addAnimation:drift forKey:@"drift"];
+
+    // Then it swells for an instant and bursts.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.85 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       [UIView animateWithDuration:0.12
+                           animations:^{
+                               note.transform = CGAffineTransformMakeScale(1.5, 1.5);
+                           }
+                           completion:^(BOOL finished) {
+                               [note.layer removeAllAnimations];
+                               [note removeFromSuperview];
+                               SparkleBurst(window, end);
+                           }];
+                   });
 }
 
 static void StartNoteEffect(UIWindow* window, CGFloat left, CGFloat midY) {
@@ -907,23 +943,35 @@ static void ApplyLogoShift(UIView* control) {
             reference = reference.superview;
         }
         reference = reference ?: window;
-        // Centre of the control with no transform.
-        CGPoint center = [parent convertPoint:control.center toView:reference];
         // Mirrors the 44pt profile button that sits 20pt from the left edge.
         CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
-        shift = target - center.x;
+        if ([reference isKindOfClass:[UINavigationBar class]]) {
+            // UIKit keeps the title in the middle of the bar, so the shift is a constant.
+            // Not read from the control's position: that moves around while the bar is
+            // re-laid out (during a refresh) and made the logo fly about.
+            shift = target - CGRectGetWidth(reference.bounds) / 2;
+        } else {
+            CGPoint center = [parent convertPoint:control.center toView:reference];
+            shift = target - center.x;
+        }
     }
 
     // Only the shift goes on the control. UIKit lays out what is inside a scaled control
     // smaller (the logo shrank after a refresh), so the size is set on the image itself,
     // from however big it was laid out. Both are compared with the live values, since
     // UIKit resets them now and then.
+    // Never animated: UIKit often lays the bar out inside an animation block, and a
+    // transform set there would slide from the old value to the new one.
     if (fabs(control.transform.tx - shift) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
-        control.transform = CGAffineTransformMakeTranslation(shift, 0);
+        [UIView performWithoutAnimation:^{
+            control.transform = CGAffineTransformMakeTranslation(shift, 0);
+        }];
     }
     CGFloat scale = enabled ? kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1) : 1;
-    if (fabs(logo.transform.a - scale) > 0.01) {
-        logo.transform = CGAffineTransformMakeScale(scale, scale);
+    if (fabs(logo.transform.a - scale) > 0.01 && ![logo.layer animationForKey:@"nfbPop"]) {
+        [UIView performWithoutAnimation:^{
+            logo.transform = CGAffineTransformMakeScale(scale, scale);
+        }];
     }
 }
 

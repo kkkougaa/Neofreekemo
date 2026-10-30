@@ -213,9 +213,12 @@ static void StopLogoLoading(void) {
     logo.image = holder.originalImage;
     [holder stop];
 
+    // The pop is relative to the size the logo has now (it is drawn larger than laid out),
+    // so it ends where it started instead of at the plain size.
+    CGAffineTransform base = logo.transform;
     [UIView animateWithDuration:0.18
         animations:^{
-            logo.transform = CGAffineTransformMakeScale(1.25, 1.25);
+            logo.transform = CGAffineTransformScale(base, 1.25, 1.25);
         }
         completion:^(BOOL finished) {
             [UIView animateWithDuration:0.3
@@ -224,7 +227,7 @@ static void StopLogoLoading(void) {
                   initialSpringVelocity:0
                                 options:0
                              animations:^{
-                                 logo.transform = CGAffineTransformIdentity;
+                                 logo.transform = base;
                              }
                              completion:nil];
         }];

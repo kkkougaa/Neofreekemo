@@ -865,9 +865,38 @@ static NSArray* panelIDsForDashSnapshot(NSArray* panelIDs) {
     return spoofed;
 }
 
+static __weak id gDashController;
+
+// Coming back from another app rebuilds the drawer list somewhere this tweak does not
+// see, and the full menu is back. So the drawer is asked to take its snapshot again (through
+// the guarded path above) a moment after the app is active.
+static void RefreshDrawerSnapshot(void) {
+    id dash = gDashController;
+    if (dash && [dash respondsToSelector:@selector(updateVisiblePanelIDs)]) {
+        ((void (*)(id, SEL))objc_msgSend)(dash, @selector(updateVisiblePanelIDs));
+    }
+}
+
+%ctor {
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:UIApplicationDidBecomeActiveNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* note) {
+                    for (NSNumber* delay in @[ @0.4, @1.5, @4.0 ]) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                                     (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                                       dispatch_get_main_queue(), ^{
+                                           RefreshDrawerSnapshot();
+                                       });
+                    }
+                }];
+}
+
 %hook T1DashContentController
 
 - (void)updateVisiblePanelIDs {
+    gDashController = self;
     BOOL saved = DashPanelIDQuery;
     DashPanelIDQuery = YES;
     @try {

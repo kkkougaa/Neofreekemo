@@ -16,6 +16,7 @@
 
 extern UIImageView* HeaderLogoInWindow(UIWindow* window);
 extern UIWindow* NFBKeyWindow(void);
+extern void NFBRecentTick(void);
 extern UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color);
 
 static const NSInteger kBubbleTag = 0x4E464C42;
@@ -141,7 +142,7 @@ static UIView* NoteView(CGFloat size, UIColor* color) {
 // A note pops out like jelly, sways up and to the left, then goes "pop" in a few sparkles.
 // The small one is a little smaller, a little later, and goes its own way.
 static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL small) {
-    CGFloat size = small ? 15 : 22;
+    CGFloat size = small ? 12 : 17.5;
     UIView* note = NoteView(size, CurrentAccentColor());
     CGFloat sideways = MAX(0, MIN(34, left - 64));
     CGPoint start = CGPointMake(left - (small ? 5 : 9), midY + (small ? 6 : -3));
@@ -193,10 +194,10 @@ static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL small) 
                    });
 }
 
-// Two notes at a time, a big one and a small one right behind it, three times over.
+// Two notes, a big one and a small one right behind it, once.
 static void StartNoteEffect(UIWindow* window, CGFloat left, CGFloat midY) {
-    static const double times[] = {0.25, 1.75, 3.25};
-    for (int i = 0; i < 3; i++) {
+    static const double times[] = {0.25};
+    for (int i = 0; i < 1; i++) {
         for (int k = 0; k < 2; k++) {
             BOOL small = k == 1;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
@@ -957,6 +958,7 @@ static void Tick(void) {
         return;
     }
     gTicks++;
+    NFBRecentTick();
     UIImageView* headerLogo = HeaderLogoInWindow(window);
     if (headerLogo) {
         ApplyLogoShift(headerLogo.superview.superview);

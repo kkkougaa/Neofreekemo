@@ -617,3 +617,8 @@
 "KEMO_PAW_LOADING_TITLE" = "Paw prints for loading spinners";
 "KEMO_BOOKMARK_WIGGLE_TITLE" = "Bookmark icon wiggle";
 "KEMO_IMAGE_REVEAL_TITLE" = "Images fade in from a blur";
+"KEMO_RECENT_TWEETS_TITLE" = "Remember recently viewed tweets (last 30)";
+"KEMO_LOGO_MENU_TITLE" = "Open a menu when the logo is tapped";
+"KEMO_MENU_RECENT" = "Recently viewed";
+"KEMO_MENU_SETTINGS" = "Settings";
+"KEMO_RECENT_EMPTY" = "Nothing here yet";

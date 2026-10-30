@@ -499,3 +499,8 @@
 "KEMO_PAW_LOADING_TITLE" = "로딩 표시를 발자국으로";
 "KEMO_BOOKMARK_WIGGLE_TITLE" = "북마크할 때 아이콘 흔들림";
 "KEMO_IMAGE_REVEAL_TITLE" = "이미지가 흐림에서 선명하게 나타나기";
+"KEMO_RECENT_TWEETS_TITLE" = "방금 본 트윗 기록 (최근 30개)";
+"KEMO_LOGO_MENU_TITLE" = "로고를 누르면 메뉴 열기";
+"KEMO_MENU_RECENT" = "방금 본 트윗";
+"KEMO_MENU_SETTINGS" = "설정";
+"KEMO_RECENT_EMPTY" = "아직 기록이 없어요";

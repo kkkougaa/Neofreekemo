@@ -216,7 +216,7 @@ NSString* NFBStringProbeText(void) {
 }
 
 static void ProbeTimeString(NSBundle* bundle, NSString* key, NSString* table, NSString* result) {
-    if (result.length == 0 || result.length > 40 || ![result containsString:@"시간 전"] ||
+    if (result.length == 0 || result.length > 16 || !([result containsString:@" 전"] || [result hasSuffix:@"표"] || [result containsString:@"표 "]) ||
         ![[NSUserDefaults standardUserDefaults] boolForKey:@"kemo_shake_dump"]) {
         return;
     }

@@ -30,7 +30,7 @@ UIImageView* HeaderLogoInWindow(UIWindow* window) {
         UIView* view = queue.firstObject;
         [queue removeObjectAtIndex:0];
         if ([view isKindOfClass:[UIImageView class]] && !view.hidden && view.alpha > 0.01 &&
-            CGRectGetWidth(view.bounds) <= 40 && CGRectGetWidth(view.bounds) >= 24 &&
+            CGRectGetWidth(view.bounds) <= 80 && CGRectGetWidth(view.bounds) >= 24 &&
             [NSStringFromClass([view.superview.superview class]) containsString:@"NavigationBarTitleControl"]) {
             return (UIImageView*)view;
         }

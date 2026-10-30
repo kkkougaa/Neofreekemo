@@ -752,6 +752,7 @@ NSString* NFBBubbleDebugText(void) {
                       [BHTSettings boolForKey:@"kemo_bubble_dday"],
                       [BHTSettings boolForKey:@"kemo_bubble_spotify"],
                       (long)[BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 10];
+    [out appendFormat:@"keepPosition=%d mediaOnly=%d%c", [BHTSettings boolForKey:@"kemo_keep_position"], [BHTSettings boolForKey:@"kemo_media_only"], 10];
     [out appendFormat:@"account=%@ badgeLast=%@ lastScan=%@%c", gAccountKey, gBadgeLast, gLastScanText, 10];
     [out appendFormat:@"newCount=%lu shown=%lu persistent=%@%c", (unsigned long)gNewCount,
                       (unsigned long)gNewShown, gPersistentText, 10];
@@ -923,7 +924,7 @@ static void ApplyLogoShift(UIView* control) {
             UIView* view = stack.lastObject;
             [stack removeLastObject];
             if ([view isKindOfClass:[UIImageView class]] && CGRectGetWidth(view.bounds) >= 24 &&
-                CGRectGetWidth(view.bounds) <= 40 && ((UIImageView*)view).image) {
+                CGRectGetWidth(view.bounds) <= 80 && ((UIImageView*)view).image) {
                 logo = (UIImageView*)view;
             }
             [stack addObjectsFromArray:view.subviews];

@@ -14,6 +14,8 @@
 // The app's Client ID from the Spotify developer dashboard, kept in the kemo settings.
 @property (nonatomic, copy, readonly) NSString* clientID;
 @property (nonatomic, readonly) BOOL isConnected;
+// How the last now-playing check went, in a few words (shown in the kemo settings).
+@property (nonatomic, copy, readonly) NSString* lastStatus;
 
 // Opens Spotify's login page; the completion runs on the main queue.
 - (void)loginWithCompletion:(void (^)(NSError* error))completion;

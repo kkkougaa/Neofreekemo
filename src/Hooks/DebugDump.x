@@ -371,10 +371,13 @@ static void PerformDump(UIWindow* window) {
 
 extern UIWindow* NFBKeyWindow(void);
 
-// Pressing volume down starts the dump (instead of shaking). The system announces every
-// volume change with a notification; one caused by the buttons that goes down is the
-// trigger. At the lowest volume nothing changes, so there is nothing to announce.
+// Pressing volume down starts the dump (instead of shaking). The volume only reports its
+// changes to an app whose audio session is active, so while the dump is switched on a
+// quiet "ambient" session (mixes with everything, makes no sound) is kept active, and the
+// volume is watched both through that session and through the system's notification.
+// At the lowest volume nothing changes, so there is nothing to report.
 static float gLastVolume = -1;
+static CFAbsoluteTime gLastVolumeDump = 0;
 
 static void DumpFromVolumeButton(void) {
     UIWindow* window = NFBKeyWindow();
@@ -395,8 +398,59 @@ static void DumpFromVolumeButton(void) {
                    });
 }
 
+static void HandleVolume(float now) {
+    BOOL pressedDown = gLastVolume >= 0 && now < gLastVolume - 0.001;
+    gLastVolume = now;
+    // Both watchers may report the same press.
+    if (pressedDown && CFAbsoluteTimeGetCurrent() - gLastVolumeDump > 1.5) {
+        gLastVolumeDump = CFAbsoluteTimeGetCurrent();
+        DumpFromVolumeButton();
+    }
+}
+
+@interface NFBVolumeWatcher : NSObject
+@end
+
+@implementation NFBVolumeWatcher
+
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary*)change
+                       context:(void*)context {
+    NSNumber* value = change[NSKeyValueChangeNewKey];
+    if ([value isKindOfClass:[NSNumber class]]) {
+        HandleVolume(value.floatValue);
+    }
+}
+
+@end
+
+static void ArmVolumeWatcher(void) {
+    if (![BHTSettings boolForKey:@"kemo_shake_dump"]) {
+        return;
+    }
+    AVAudioSession* session = [AVAudioSession sharedInstance];
+    // Only the plain default category is replaced; if the app has chosen its own, it stays.
+    if ([session.category isEqualToString:AVAudioSessionCategorySoloAmbient]) {
+        [session setCategory:AVAudioSessionCategoryAmbient
+                 withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                       error:nil];
+    }
+    [session setActive:YES error:nil];
+
+    static NFBVolumeWatcher* watcher;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        watcher = [NFBVolumeWatcher new];
+        gLastVolume = session.outputVolume;
+        [session addObserver:watcher
+                  forKeyPath:@"outputVolume"
+                     options:NSKeyValueObservingOptionNew
+                     context:nil];
+    });
+}
+
 %ctor {
-    gLastVolume = [AVAudioSession sharedInstance].outputVolume;
     [[NSNotificationCenter defaultCenter]
         addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification"
                     object:nil
@@ -404,15 +458,16 @@ static void DumpFromVolumeButton(void) {
                 usingBlock:^(NSNotification* note) {
                     NSNumber* volume = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
                     NSString* reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
-                    if (!volume) {
-                        return;
+                    if (volume && (!reason || [reason isEqualToString:@"ExplicitVolumeChange"])) {
+                        HandleVolume(volume.floatValue);
                     }
-                    float now = volume.floatValue;
-                    BOOL pressedDown = gLastVolume >= 0 && now < gLastVolume &&
-                                       (!reason || [reason isEqualToString:@"ExplicitVolumeChange"]);
-                    gLastVolume = now;
-                    if (pressedDown) {
-                        DumpFromVolumeButton();
-                    }
+                }];
+    // Also whenever the app comes to the front, since another audio session may have taken over.
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:UIApplicationDidBecomeActiveNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* note) {
+                    ArmVolumeWatcher();
                 }];
 }

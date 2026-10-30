@@ -38,8 +38,11 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                                             forIndexPath:indexPath];
         NSString* state = [BHTSpotify shared].isConnected ? @"SPOTIFY_CONNECTED_LABEL"
                                                          : @"SPOTIFY_DISCONNECTED_LABEL";
+        NSString* status = [BHTSpotify shared].lastStatus;
         [cell configureWithTitle:[self localized:data[@"titleKey"]]
-                        subtitle:[self localized:state]];
+                        subtitle:status.length > 0
+                                     ? [NSString stringWithFormat:@"%@ · %@", [self localized:state], status]
+                                     : [self localized:state]];
         return cell;
     }
     if ([data[@"key"] isEqualToString:@"kemo_events"]) {
@@ -72,6 +75,17 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
         return cell;
     }
     return [super tableView:tableView cellForRowAtIndexPath:indexPath];
+}
+
+// Opening the page asks Spotify once, so the connection row shows how it is going.
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if ([BHTSpotify shared].isConnected) {
+        __weak KemoSettingsViewController* weakSelf = self;
+        [[BHTSpotify shared] fetchCurrentlyPlaying:^(NSString* title, NSString* artist, NSString* url, NSError* error) {
+            [weakSelf.tableView reloadData];
+        }];
+    }
 }
 
 - (void)openBubbleSettings:(NSDictionary*)sender {

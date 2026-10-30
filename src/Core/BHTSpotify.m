@@ -29,6 +29,7 @@ static const uint16_t kLoopbackPort = 8888;
 @interface BHTSpotify () <ASWebAuthenticationPresentationContextProviding>
 @property (nonatomic, strong) ASWebAuthenticationSession* session;
 @property (nonatomic, strong) dispatch_source_t listener;
+@property (nonatomic, copy, readwrite) NSString* lastStatus;
 @end
 
 @implementation BHTSpotify
@@ -370,6 +371,13 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                     }];
 }
 
+- (NSString*)statusLine:(NSString*)text {
+    NSString* time = [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                                    dateStyle:NSDateFormatterNoStyle
+                                                    timeStyle:NSDateFormatterMediumStyle];
+    return [NSString stringWithFormat:@"%@ %@", time, text];
+}
+
 #pragma mark - Now playing
 
 - (void)fetchCurrentlyPlaying:(void (^)(NSString* title, NSString* artist, NSString* shareURL,
@@ -377,6 +385,7 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
     [self withAccessToken:^(NSString* token, NSError* tokenError) {
         if (!token) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                self.lastStatus = [self statusLine:[NSString stringWithFormat:@"로그인 오류: %@", tokenError.localizedDescription]];
                 completion(nil, nil, nil, tokenError);
             });
             return;
@@ -427,6 +436,13 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                       result = [NSError errorWithDomain:kErrorDomain code:status userInfo:info];
                   }
                   dispatch_async(dispatch_get_main_queue(), ^{
+                      if (result) {
+                          self.lastStatus = [self statusLine:[NSString stringWithFormat:@"오류: %@", result.localizedDescription]];
+                      } else if (title.length > 0) {
+                          self.lastStatus = [self statusLine:[@"재생 중: " stringByAppendingString:title]];
+                      } else {
+                          self.lastStatus = [self statusLine:[NSString stringWithFormat:@"재생 중인 곡 없음 (HTTP %ld)", (long)status]];
+                      }
                       completion(title, artist, url, result);
                   });
               }] resume];

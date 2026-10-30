@@ -877,6 +877,29 @@ static NSArray* panelIDsForDashSnapshot(NSArray* panelIDs) {
     }
 }
 
+// The drawer also rebuilds its list when the account data or a team invitation updates
+// (after a long time open, or coming back to the app). Those runs get the same treatment,
+// or the full menu comes back.
+- (void)accountUserDidUpdateWithNotification:(id)notification {
+    BOOL saved = DashPanelIDQuery;
+    DashPanelIDQuery = YES;
+    @try {
+        %orig;
+    } @finally {
+        DashPanelIDQuery = saved;
+    }
+}
+
+- (void)teamsInvitationDidUpdateWithNotification:(id)notification {
+    BOOL saved = DashPanelIDQuery;
+    DashPanelIDQuery = YES;
+    @try {
+        %orig;
+    } @finally {
+        DashPanelIDQuery = saved;
+    }
+}
+
 %end
 
 %hook T1TabbedAppNavigationViewController

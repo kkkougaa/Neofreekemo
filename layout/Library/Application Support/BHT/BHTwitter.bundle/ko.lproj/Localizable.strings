@@ -496,3 +496,6 @@
 "KEMO_HAPTICS_TITLE" = "새로고침·말풍선 햅틱";
 "KEMO_DRAFT_RESTORE" = "이어 쓰던 글 불러오기";
 "KEMO_DRAFT_DISCARD" = "버리기";
+"KEMO_PAW_LOADING_TITLE" = "로딩 표시를 발자국으로";
+"KEMO_BOOKMARK_WIGGLE_TITLE" = "북마크할 때 아이콘 흔들림";
+"KEMO_IMAGE_REVEAL_TITLE" = "이미지가 흐림에서 선명하게 나타나기";

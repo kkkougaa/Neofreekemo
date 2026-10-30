@@ -81,6 +81,57 @@ static UIImage* ToggleImage(NSString* name) {
     BHTMarkAccentTintedIcon(self.badgeView, on);
 }
 
+// A few small hearts pop out around the icon and drift away (the blush stays as it is).
+- (void)burstHearts {
+    UIView* host = self.superview;
+    if (!host) {
+        return;
+    }
+    static const CGFloat angles[] = {-0.9, -0.2, 0.5, -1.7, 1.2};
+    static const CGFloat sizes[] = {9, 7, 8, 7, 6};
+    UIColor* pink = [UIColor colorWithRed:1.0 green:0.45 blue:0.62 alpha:1.0];
+    UIImageSymbolConfiguration* config =
+        [UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightBold];
+    CGPoint center = [host convertPoint:CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds))
+                               fromView:self];
+    CGFloat radius = CGRectGetWidth(self.bounds) / 2;
+    for (int i = 0; i < 5; i++) {
+        UIImageView* heart = [[UIImageView alloc]
+            initWithImage:[UIImage systemImageNamed:@"heart.fill" withConfiguration:config]];
+        heart.tintColor = pink;
+        heart.contentMode = UIViewContentModeScaleAspectFit;
+        heart.bounds = CGRectMake(0, 0, sizes[i], sizes[i]);
+        CGFloat angle = angles[i] - M_PI_2;
+        heart.center = CGPointMake(center.x + cos(angle) * radius * 0.7, center.y + sin(angle) * radius * 0.7);
+        heart.alpha = 0;
+        heart.transform = CGAffineTransformMakeScale(0.3, 0.3);
+        [host addSubview:heart];
+
+        NSTimeInterval delay = 0.06 * i;
+        [UIView animateWithDuration:0.25
+                              delay:delay
+             usingSpringWithDamping:0.55
+              initialSpringVelocity:0
+                            options:0
+                         animations:^{
+                             heart.alpha = 1;
+                             heart.transform = CGAffineTransformIdentity;
+                         }
+                         completion:nil];
+        [UIView animateWithDuration:0.8
+            delay:delay + 0.15
+            options:UIViewAnimationOptionCurveEaseOut
+            animations:^{
+                heart.center = CGPointMake(center.x + cos(angle) * (radius + 16),
+                                           center.y + sin(angle) * (radius + 16) - 6);
+                heart.alpha = 0;
+            }
+            completion:^(BOOL finished) {
+                [heart removeFromSuperview];
+            }];
+    }
+}
+
 - (void)toggle {
     BOOL on = ![BHTSettings boolForKey:kSensitiveKey];
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
@@ -110,6 +161,9 @@ static UIImage* ToggleImage(NSString* name) {
         }
         completion:^(BOOL finished) {
             [self applyState];
+            if (on) {
+                [self burstHearts];
+            }
             [UIView animateWithDuration:0.5
                                   delay:0
                  usingSpringWithDamping:0.4

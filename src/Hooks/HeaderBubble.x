@@ -16,6 +16,7 @@
 
 extern UIImageView* HeaderLogoInWindow(UIWindow* window);
 extern UIWindow* NFBKeyWindow(void);
+extern UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color);
 
 static const NSInteger kBubbleTag = 0x4E464C42;
 static const NSInteger kBubbleHostTag = 0x4E464C48;
@@ -31,6 +32,10 @@ static BOOL BubbleEnabled(void) {
 // MARK: Bubble view
 
 @interface NFBBubbleView : UIView
+// Set when the bubble shows the new-tweets count: the number gets its own label so it can
+// roll to the next value.
+@property (nonatomic, strong) UILabel* numberLabel;
+@property (nonatomic, assign) NSUInteger digitCount;
 @end
 
 @implementation NFBBubbleView
@@ -58,8 +63,10 @@ static UIBezierPath* BubblePath(CGFloat width, CGFloat height) {
 // What the bubble says: a short notice (transient) wins over the new-tweets count.
 static NSString* gTransientText;
 static NSString* gPersistentText;
+static NSUInteger gNewShown; // how many new tweets are still above the screen
 static NSString* gShownText;
 static BOOL gTransientSpotify; // the notice is a song change: Spotify mark and floating notes
+static NSString* gTransientSymbol; // otherwise: SF Symbol name for a notice, or nil
 
 // The official Spotify mark, shipped as nfb_spotify_logo.png in the tweak bundle.
 static UIImage* SpotifyMark(void) {
@@ -71,37 +78,46 @@ static UIImage* SpotifyMark(void) {
                          : nil;
 }
 
-// One or two notes pop out to the left of the bubble and drift up, now and then.
+// Notes pop out to the left of the bubble, drift a little, and shrink away.
 static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second) {
     UILabel* note = [UILabel new];
     note.text = second ? @"♫" : @"♪";
-    note.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    note.font = [UIFont systemFontOfSize:second ? 11 : 13 weight:UIFontWeightBold];
     note.textColor = CurrentAccentColor();
     [note sizeToFit];
-    CGFloat sideways = MAX(0, MIN(18, left - 70));
-    note.center = CGPointMake(left - 2, midY + (second ? 4 : -2));
+    CGFloat sideways = MAX(0, MIN(30, left - 64));
+    CGFloat startX = left - 8;
+    CGFloat angle = second ? 0.25 : -0.25;
+    note.center = CGPointMake(startX, midY + (second ? 3 : -3));
     note.alpha = 0;
-    note.transform = CGAffineTransformMakeScale(0.3, 0.3);
+    note.transform = CGAffineTransformMakeScale(0.2, 0.2);
     [window addSubview:note];
 
-    [UIView animateWithDuration:0.3
+    [UIView animateWithDuration:0.38
                           delay:0
-         usingSpringWithDamping:0.5
+         usingSpringWithDamping:0.38
           initialSpringVelocity:0
                         options:0
                      animations:^{
                          note.alpha = 1;
-                         note.transform = CGAffineTransformMakeRotation(second ? 0.3 : -0.3);
+                         note.transform = CGAffineTransformMakeRotation(angle);
                      }
                      completion:nil];
-    [UIView animateWithDuration:0.9
-        delay:0.25
-        options:UIViewAnimationOptionCurveEaseOut
+    [UIView animateWithDuration:0.8
+                          delay:0
+                        options:UIViewAnimationOptionCurveEaseOut
+                     animations:^{
+                         note.center = CGPointMake(startX - sideways * (second ? 0.7 : 1.0),
+                                                   midY - (second ? 18 : 13));
+                     }
+                     completion:nil];
+    [UIView animateWithDuration:0.28
+        delay:0.55
+        options:UIViewAnimationOptionCurveEaseIn
         animations:^{
-            note.center = CGPointMake(left - 2 - sideways * (second ? 0.6 : 1.0),
-                                      midY - (second ? 20 : 15));
             note.alpha = 0;
-            note.transform = CGAffineTransformMakeRotation(second ? -0.2 : 0.2);
+            note.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.1, 0.1),
+                                                     CGAffineTransformMakeRotation(-angle));
         }
         completion:^(BOOL finished) {
             [note removeFromSuperview];
@@ -185,17 +201,58 @@ static void RemoveHostOf(UIView* bubble) {
 static void RemoveBubble(UIView* bubble) {
     bubble.tag = 0;
     UIWindow* window = bubble.window;
-    [UIView animateWithDuration:0.375
+    // A small swell first, then it shrinks away.
+    [UIView animateWithDuration:0.15
+        delay:0
+        options:UIViewAnimationOptionCurveEaseOut
         animations:^{
-            bubble.alpha = 0;
-            bubble.transform = CGAffineTransformMakeScale(0.85, 0.85);
+            bubble.transform = CGAffineTransformMakeScale(1.08, 1.08);
         }
-        completion:^(BOOL finished) {
-            RemoveHostOf(bubble);
-            if (![window viewWithTag:kBubbleHostTag]) {
-                [gFollow stop];
-            }
+        completion:^(BOOL swelled) {
+            [UIView animateWithDuration:0.375
+                delay:0
+                options:UIViewAnimationOptionCurveEaseIn
+                animations:^{
+                    bubble.alpha = 0;
+                    bubble.transform = CGAffineTransformMakeScale(0.8, 0.8);
+                }
+                completion:^(BOOL finished) {
+                    RemoveHostOf(bubble);
+                    if (![window viewWithTag:kBubbleHostTag]) {
+                        [gFollow stop];
+                    }
+                }];
         }];
+}
+
+// The logo blinks once as the bubble opens: the eye is squashed for a moment (a second
+// bundled drawing with the eye closed), then the normal logo is back. Nothing runs
+// between bubbles.
+static void BlinkLogo(UIImageView* logo) {
+    if (!logo.image || [logo viewWithTag:0x4E464C44]) {
+        return; // the loading dots own the logo image right now
+    }
+    UIColor* color = logo.tintColor ?: CurrentAccentColor();
+    UIImage* closed = NFBRenderLogoSVG(@"logo_blink.svg", logo.bounds.size, color);
+    if (!closed) {
+        return;
+    }
+    UIImage* open = logo.image;
+    __weak UIImageView* weakLogo = logo;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       UIImageView* current = weakLogo;
+                       if (!current || current.image != open || [current viewWithTag:0x4E464C44]) {
+                           return;
+                       }
+                       current.image = closed;
+                       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.13 * NSEC_PER_SEC)),
+                                      dispatch_get_main_queue(), ^{
+                                          if (current.image == closed) {
+                                              current.image = open;
+                                          }
+                                      });
+                   });
 }
 
 static void RenderBubble(void) {
@@ -214,10 +271,35 @@ static void RenderBubble(void) {
         gShownText = nil;
         return;
     }
-    BOOL withMark = gTransientText && gTransientSpotify;
-    NSString* shownKey = [NSString stringWithFormat:@"%@|%d", text, withMark];
+    BOOL withSpotify = gTransientText && gTransientSpotify;
+    NSString* symbol = (gTransientText && !gTransientSpotify) ? gTransientSymbol : nil;
+    BOOL withMark = withSpotify || symbol.length > 0;
+    NSString* shownKey = [NSString stringWithFormat:@"%@|%d|%@", text, withSpotify, symbol ?: @""];
     if (existing && [gShownText isEqualToString:shownKey]) {
         return;
+    }
+
+    // The count on its own (no notice mixed in) rolls from one number to the next.
+    BOOL splitMode = !gTransientText && gPersistentText.length > 0 && gNewShown > 0;
+    NSString* numberText = splitMode ? [NSString stringWithFormat:@"%lu", (unsigned long)gNewShown] : nil;
+    if (existing && splitMode && [existing isKindOfClass:[NFBBubbleView class]]) {
+        NFBBubbleView* current = (NFBBubbleView*)existing;
+        if (current.numberLabel && current.digitCount == numberText.length) {
+            NSString* oldText = current.numberLabel.text;
+            if (![oldText isEqualToString:numberText]) {
+                CATransition* roll = [CATransition animation];
+                roll.type = kCATransitionPush;
+                roll.subtype = numberText.integerValue < oldText.integerValue ? kCATransitionFromTop
+                                                                              : kCATransitionFromBottom;
+                roll.duration = 0.32;
+                roll.timingFunction =
+                    [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+                [current.numberLabel.layer addAnimation:roll forKey:@"roll"];
+                current.numberLabel.text = numberText;
+            }
+            gShownText = shownKey;
+            return;
+        }
     }
 
     CGRect logoFrame = [window convertRect:logo.bounds fromView:logo];
@@ -227,12 +309,40 @@ static void RenderBubble(void) {
         return;
     }
 
+    UIFont* font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     UILabel* label = [UILabel new];
-    label.text = text;
-    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    label.textColor = [UIColor whiteColor];
-    label.lineBreakMode = NSLineBreakByTruncatingTail;
-    CGFloat textWidth = ceil([label sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
+    UILabel* prefixLabel = nil;
+    UILabel* numberLabel = nil;
+    UILabel* suffixLabel = nil;
+    CGFloat prefixWidth = 0;
+    CGFloat numberWidth = 0;
+    CGFloat suffixWidth = 0;
+    CGFloat textWidth = 0;
+    if (splitMode) {
+        prefixLabel = [UILabel new];
+        prefixLabel.text = @"새 트윗 ";
+        prefixLabel.font = font;
+        numberLabel = [UILabel new];
+        numberLabel.text = numberText;
+        numberLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold];
+        numberLabel.clipsToBounds = YES;
+        suffixLabel = [UILabel new];
+        suffixLabel.text = @"건";
+        suffixLabel.font = font;
+        for (UILabel* part in @[ prefixLabel, numberLabel, suffixLabel ]) {
+            part.textColor = [UIColor whiteColor];
+        }
+        prefixWidth = ceil([prefixLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
+        numberWidth = ceil([numberLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
+        suffixWidth = ceil([suffixLabel sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
+        textWidth = prefixWidth + numberWidth + suffixWidth;
+    } else {
+        label.text = text;
+        label.font = font;
+        label.textColor = [UIColor whiteColor];
+        label.lineBreakMode = NSLineBreakByTruncatingTail;
+        textWidth = ceil([label sizeThatFits:CGSizeMake(CGFLOAT_MAX, kBubbleHeight)].width);
+    }
     // The Spotify mark takes the place of the music note in front of the title.
     CGFloat markSpace = withMark ? 24 : 0;
     CGFloat width = MIN(textWidth + 24 + markSpace + kBubbleTail, available);
@@ -247,10 +357,30 @@ static void RenderBubble(void) {
     shape.fillColor = CurrentAccentColor().CGColor;
     [bubble.layer addSublayer:shape];
 
-    label.frame = CGRectMake(12 + markSpace, 0, width - 24 - markSpace - kBubbleTail, kBubbleHeight);
-    [bubble addSubview:label];
+    if (splitMode) {
+        prefixLabel.frame = CGRectMake(12, 0, prefixWidth, kBubbleHeight);
+        numberLabel.frame = CGRectMake(12 + prefixWidth, 0, numberWidth, kBubbleHeight);
+        suffixLabel.frame = CGRectMake(12 + prefixWidth + numberWidth, 0, suffixWidth, kBubbleHeight);
+        [bubble addSubview:prefixLabel];
+        [bubble addSubview:numberLabel];
+        [bubble addSubview:suffixLabel];
+        bubble.numberLabel = numberLabel;
+        bubble.digitCount = numberText.length;
+    } else {
+        label.frame = CGRectMake(12 + markSpace, 0, width - 24 - markSpace - kBubbleTail, kBubbleHeight);
+        [bubble addSubview:label];
+    }
     if (withMark) {
-        UIImageView* mark = [[UIImageView alloc] initWithImage:SpotifyMark()];
+        UIImage* markImage = SpotifyMark();
+        if (!withSpotify) {
+            UIImageSymbolConfiguration* config =
+                [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightBold];
+            markImage = [[UIImage systemImageNamed:symbol withConfiguration:config]
+                imageWithTintColor:[UIColor whiteColor]
+                     renderingMode:UIImageRenderingModeAlwaysOriginal];
+        }
+        UIImageView* mark = [[UIImageView alloc] initWithImage:markImage];
+        mark.contentMode = UIViewContentModeScaleAspectFit;
         mark.frame = CGRectMake(10, (kBubbleHeight - 18) / 2, 18, 18);
         [bubble addSubview:mark];
     }
@@ -293,8 +423,11 @@ static void RenderBubble(void) {
                          completion:nil];
     }
     gShownText = shownKey;
-    if (withMark && !existing) {
+    if (withSpotify && !existing) {
         StartNoteEffect(window, right - width, CGRectGetMidY(logoFrame));
+    }
+    if (!existing) {
+        BlinkLogo(logo);
     }
 }
 
@@ -310,10 +443,12 @@ static void PumpQueue(void) {
     // Everything waiting is said in one go ("새 DM 2건 · 새 알림 3건"); stale notices drop.
     NSMutableArray<NSString*>* parts = [NSMutableArray array];
     BOOL spotify = NO;
+    NSMutableSet<NSString*>* icons = [NSMutableSet set];
     for (NSDictionary* queued in gQueue) {
         if (-[queued[@"at"] timeIntervalSinceNow] <= 20 && parts.count < 3) {
             [parts addObject:queued[@"text"]];
             spotify = spotify || [queued[@"icon"] isEqualToString:@"spotify"];
+            [icons addObject:queued[@"icon"] ?: @""];
         }
     }
     [gQueue removeAllObjects];
@@ -323,11 +458,18 @@ static void PumpQueue(void) {
     gShowing = YES;
     gTransientText = [parts componentsJoinedByString:@" · "];
     gTransientSpotify = spotify;
+    // One kind of notice keeps its own icon; a mix of kinds shows none.
+    NSString* only = icons.count == 1 ? icons.anyObject : nil;
+    gTransientSymbol = [only isEqualToString:@"dm"]         ? @"envelope.fill"
+                       : [only isEqualToString:@"bell"]     ? @"bell.fill"
+                       : [only isEqualToString:@"calendar"] ? @"calendar"
+                                                            : nil;
     RenderBubble();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
                        gTransientText = nil;
                        gTransientSpotify = NO;
+                       gTransientSymbol = nil;
                        RenderBubble();
                        gShowing = NO;
                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
@@ -384,7 +526,6 @@ static __weak id gNewController;
 static NSDictionary<NSString*, NSNumber*>* gNewIndex; // tweet id -> position in the list
 static NSArray<NSNumber*>* gNewPositions;               // positions of the new tweets
 static NSUInteger gNewCount;
-static NSUInteger gNewShown;
 static NSDate* gNewAt;
 
 static NSString* NewTweetsText(NSUInteger count) {
@@ -509,7 +650,7 @@ static NSInteger FirstInteger(NSString* text) {
 
 // Unread counts the tab bar exposes through accessibility, keyed "dm" / "notifications".
 static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
-    NSArray* dmWords = @[ @"쪽지", @"메시지", @"DM", @"Messages", @"Message", @"メッセージ", @"チャット" ];
+    NSArray* dmWords = @[ @"쪽지", @"메시지", @"DM", @"Messages", @"Message", @"Chat", @"채팅", @"メッセージ", @"チャット" ];
     NSArray* notificationWords = @[ @"알림", @"Notifications", @"通知", @"お知らせ" ];
     NSMutableDictionary<NSString*, NSNumber*>* found = [NSMutableDictionary dictionary];
     CGFloat bottomEdge = CGRectGetHeight(window.bounds) - 160;
@@ -537,6 +678,10 @@ static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
             if (kind) {
                 NSString* source = view.accessibilityValue.length > 0 ? view.accessibilityValue : label;
                 NSInteger count = FirstInteger(source);
+                // A badge with words but no number ("새 항목.") is a dot: one thing new.
+                if (count == 0 && view.accessibilityValue.length > 0) {
+                    count = 1;
+                }
                 if (!found[kind] || count > [found[kind] integerValue]) {
                     found[kind] = @(count);
                 }
@@ -549,6 +694,36 @@ static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
 
 static NSMutableDictionary<NSString*, NSNumber*>* gBadgeLast;
 static NSString* gAccountKey;
+static NSString* gLastScanText;
+static NSMutableArray<NSString*>* gNewTweetsLog;
+
+// What the new-tweets counter decided on its last runs (shown in the shake dump).
+void NFBNewTweetsLog(NSString* line) {
+    if (!gNewTweetsLog) {
+        gNewTweetsLog = [NSMutableArray array];
+    }
+    [gNewTweetsLog addObject:line];
+    while (gNewTweetsLog.count > 8) {
+        [gNewTweetsLog removeObjectAtIndex:0];
+    }
+}
+
+NSString* NFBBubbleDebugText(void) {
+    NSMutableString* out = [NSMutableString string];
+    [out appendFormat:@"bubble=%d newTweets=%d notifications=%d dday=%d spotify=%d interval=%ld%c",
+                      BubbleEnabled(), [BHTSettings boolForKey:@"kemo_bubble_new_tweets"],
+                      [BHTSettings boolForKey:@"kemo_bubble_notifications"],
+                      [BHTSettings boolForKey:@"kemo_bubble_dday"],
+                      [BHTSettings boolForKey:@"kemo_bubble_spotify"],
+                      (long)[BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 10];
+    [out appendFormat:@"account=%@ badgeLast=%@ lastScan=%@%c", gAccountKey, gBadgeLast, gLastScanText, 10];
+    [out appendFormat:@"newCount=%lu shown=%lu persistent=%@%c", (unsigned long)gNewCount,
+                      (unsigned long)gNewShown, gPersistentText, 10];
+    for (NSString* line in gNewTweetsLog) {
+        [out appendFormat:@"newTweets: %@%c", line, 10];
+    }
+    return out;
+}
 
 // Identity of the account in use, to notice a switch.
 static NSString* CurrentAccountKey(void) {
@@ -577,6 +752,7 @@ static NSString* CurrentAccountKey(void) {
 
 static void CheckBadges(UIWindow* window) {
     NSDictionary<NSString*, NSNumber*>* now = ScanBadges(window);
+    gLastScanText = [NSString stringWithFormat:@"%@ at %@", now, [NSDate date]];
     NSString* accountKey = CurrentAccountKey();
     BOOL switched = gAccountKey && accountKey && ![gAccountKey isEqualToString:accountKey];
     gAccountKey = accountKey ?: gAccountKey;
@@ -595,7 +771,7 @@ static void CheckBadges(UIWindow* window) {
             NSString* text = [kind isEqualToString:@"dm"]
                                  ? [NSString stringWithFormat:@"새 DM %ld건", (long)(count - last)]
                                  : [NSString stringWithFormat:@"새 알림 %ld건", (long)(count - last)];
-            NFBShowBubble(text);
+            NFBShowBubbleWithIcon(text, [kind isEqualToString:@"dm"] ? @"dm" : @"bell");
         }
         gBadgeLast[kind] = @(count);
     }
@@ -625,9 +801,9 @@ static void CheckDDay(void) {
         NSDate* date = [NSDate dateWithTimeIntervalSince1970:[event[@"time"] doubleValue]];
         NSInteger days = [BHTEvents daysUntil:date];
         if (days == 0) {
-            NFBShowBubble([NSString stringWithFormat:@"오늘 D-Day · %@", event[@"name"]]);
+            NFBShowBubbleWithIcon([NSString stringWithFormat:@"오늘 D-Day · %@", event[@"name"]], @"calendar");
         } else if (days == 1) {
-            NFBShowBubble([NSString stringWithFormat:@"내일 D-1 · %@", event[@"name"]]);
+            NFBShowBubbleWithIcon([NSString stringWithFormat:@"내일 D-1 · %@", event[@"name"]], @"calendar");
         }
     }
 }
@@ -693,10 +869,9 @@ static void Tick(void) {
 
 // MARK: Logo at the right end
 
-// The logo is drawn a little larger than the 32pt it is laid out at, to sit with the 44pt
-// profile button on the left.
+// The logo is drawn a little larger than it is laid out, to sit with the 44pt profile
+// button on the left.
 static const CGFloat kLogoSize = 40.0;
-static const CGFloat kLogoLaidOut = 32.0;
 
 static void ApplyLogoShift(UIView* control) {
     UIWindow* window = control.window;
@@ -724,7 +899,6 @@ static void ApplyLogoShift(UIView* control) {
 
     BOOL enabled = BubbleEnabled();
     CGFloat shift = 0;
-    CGFloat scale = 1;
     if (enabled) {
         // Measured inside the navigation bar, not the window: while the side drawer slides
         // the whole screen sideways, but the bar's own coordinates stay put.
@@ -738,15 +912,18 @@ static void ApplyLogoShift(UIView* control) {
         // Mirrors the 44pt profile button that sits 20pt from the left edge.
         CGFloat target = CGRectGetWidth(reference.bounds) - kEdgeMargin - 22;
         shift = target - center.x;
-        scale = kLogoSize / kLogoLaidOut;
     }
 
-    // Compared against the live transform: UIKit resets it on its own now and then.
-    CGAffineTransform wanted =
-        CGAffineTransformScale(CGAffineTransformMakeTranslation(shift, 0), scale, scale);
-    if (!CGAffineTransformEqualToTransform(control.transform, wanted) &&
-        !(fabs(control.transform.tx - shift) < 0.5 && fabs(control.transform.a - scale) < 0.01)) {
-        control.transform = wanted;
+    // Only the shift goes on the control. UIKit lays out what is inside a scaled control
+    // smaller (the logo shrank after a refresh), so the size is set on the image itself,
+    // from however big it was laid out. Both are compared with the live values, since
+    // UIKit resets them now and then.
+    if (fabs(control.transform.tx - shift) > 0.5 || fabs(control.transform.a - 1) > 0.001) {
+        control.transform = CGAffineTransformMakeTranslation(shift, 0);
+    }
+    CGFloat scale = enabled ? kLogoSize / MAX(CGRectGetWidth(logo.bounds), 1) : 1;
+    if (fabs(logo.transform.a - scale) > 0.01) {
+        logo.transform = CGAffineTransformMakeScale(scale, scale);
     }
 }
 

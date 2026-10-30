@@ -368,6 +368,21 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_paw_loading",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_bookmark_wiggle",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_image_reveal",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_shake_dump",
                         @"default": @NO,
                         @"type": @"toggle"

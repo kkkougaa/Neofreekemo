@@ -54,8 +54,8 @@ UIWindow* NFBKeyWindow(void) {
 }
 
 // The logo without its bird: the bundled SVG is plain polygons (M x y x y ... Z, even-odd).
-static UIImage* LogoWithoutBird(CGSize size, UIColor* color) {
-    NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"logo_loading.svg"];
+UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color) {
+    NSURL* url = [[BHTBundle sharedBundle] pathForFile:fileName];
     NSString* svg = url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil] : nil;
     NSRange start = [svg rangeOfString:@" d=\""];
     if (start.location == NSNotFound) {
@@ -114,9 +114,27 @@ static UIImage* LogoWithoutBird(CGSize size, UIColor* color) {
 @implementation NFBLogoDots
 
 - (void)tick {
+    NSInteger previous = self.count;
     self.count = self.count % 3 + 1;
     for (NSUInteger i = 0; i < self.dots.count; i++) {
-        self.dots[i].alpha = (NSInteger)i < self.count ? 1.0 : 0.0;
+        BOOL visible = (NSInteger)i < self.count;
+        UIView* dot = self.dots[i];
+        if (visible && dot.alpha < 0.5 && previous != 0) {
+            // The dot that just appeared pops in a little, and that is all.
+            dot.alpha = 1;
+            dot.transform = CGAffineTransformMakeScale(0.5, 0.5);
+            [UIView animateWithDuration:0.22
+                                  delay:0
+                 usingSpringWithDamping:0.6
+                  initialSpringVelocity:0
+                                options:0
+                             animations:^{
+                                 dot.transform = CGAffineTransformIdentity;
+                             }
+                             completion:nil];
+        } else {
+            dot.alpha = visible ? 1.0 : 0.0;
+        }
     }
 }
 
@@ -151,7 +169,7 @@ static void StartLogoLoading(void) {
     }
 
     UIColor* color = logo.tintColor ?: CurrentAccentColor();
-    UIImage* empty = LogoWithoutBird(logo.bounds.size, color);
+    UIImage* empty = NFBRenderLogoSVG(@"logo_loading.svg", logo.bounds.size, color);
     if (!empty) {
         return;
     }

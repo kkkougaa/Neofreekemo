@@ -519,3 +519,6 @@
 "KEMO_HAPTICS_TITLE" = "Haptics for refresh and bubble";
 "KEMO_DRAFT_RESTORE" = "Restore draft";
 "KEMO_DRAFT_DISCARD" = "Discard";
+"KEMO_PAW_LOADING_TITLE" = "Paw prints for loading spinners";
+"KEMO_BOOKMARK_WIGGLE_TITLE" = "Bookmark icon wiggle";
+"KEMO_IMAGE_REVEAL_TITLE" = "Images fade in from a blur";

@@ -910,6 +910,7 @@ static id RemoveVideoCarouselEntries(id node, BOOL* removed) {
 extern void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSArray<NSNumber*>* positions);
 extern BOOL NFBRefreshWasRecent(void);
 extern NSUInteger NFBRefreshGeneration(void);
+extern void NFBNewTweetsLog(NSString* line);
 
 static NSString* gKeepAnchorID;
 static const void* kSeenTweetsKey = &kSeenTweetsKey;
@@ -919,6 +920,7 @@ static const void* kBaselineGenKey = &kBaselineGenKey;
 static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* sections) {
     // Only the tab on screen: the other home tab refreshes in the background too.
     if (!controller.isViewLoaded || !controller.view.window) {
+        NFBNewTweetsLog(@"skipped: this tab is not on screen");
         return;
     }
 
@@ -941,6 +943,9 @@ static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* secti
         [all unionSet:seen];
     }
     objc_setAssociatedObject(controller, kSeenTweetsKey, all, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NFBNewTweetsLog([NSString stringWithFormat:@"update: ids=%lu seen=%lu refreshRecent=%d anchor=%@",
+                                               (unsigned long)ids.count, (unsigned long)seen.count,
+                                               NFBRefreshWasRecent(), gKeepAnchorID]);
     if (seen.count == 0 || ids.count == 0) {
         return;
     }
@@ -971,6 +976,7 @@ static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* secti
             }
         }
         if (anchorIndex == NSNotFound) {
+            NFBNewTweetsLog(@"no count: the tweet that was on top is not in the new list");
             return;
         }
         for (NSUInteger i = 0; i < anchorIndex; i++) {
@@ -992,6 +998,7 @@ static void NoteNewTweets(TFNItemsDataViewController* controller, NSArray* secti
             return;
         }
     }
+    NFBNewTweetsLog([NSString stringWithFormat:@"new tweets: %lu", (unsigned long)positions.count]);
     if (positions.count > 0) {
         NFBSetNewTweets(controller, ids, positions);
     }
@@ -1091,9 +1098,7 @@ static void KeepRestoreSoon(NSTimeInterval delay) {
 
 // The pull-to-refresh control calls these when a refresh starts and ends.
 void NFBKeepPositionBegin(UIView* control) {
-    if (![BHTSettings boolForKey:@"kemo_keep_position"]) {
-        return;
-    }
+    BOOL keep = [BHTSettings boolForKey:@"kemo_keep_position"];
     UIView* view = control;
     while (view && ![view isKindOfClass:[UITableView class]]) {
         view = view.superview;
@@ -1104,19 +1109,22 @@ void NFBKeepPositionBegin(UIView* control) {
         responder = responder.nextResponder;
     }
     if (!table || !responder || !IsHomeTimeline((UIViewController*)responder)) {
+        NFBNewTweetsLog(@"pull started outside the home timeline");
         return;
     }
 
     NSString* anchorID = nil;
     CGFloat anchorOffset = 0;
     if (!KeepCaptureAnchor(table, &anchorID, &anchorOffset)) {
+        gKeepAnchorID = nil;
+        NFBNewTweetsLog(@"pull started: no tweet id found in the visible cells");
         return;
     }
     gKeepTable = table;
     gKeepTablePtr = (__bridge const void*)table;
     gKeepAnchorID = anchorID;
     gKeepAnchorOffset = anchorOffset;
-    gKeepRefreshing = YES;
+    gKeepRefreshing = keep;
     gKeepUntil = nil;
 }
 

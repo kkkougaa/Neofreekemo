@@ -4,6 +4,7 @@
 //
 
 #import "HookHelpers.h"
+#import "Core/BHTEvents.h"
 #import "Settings/ModernSettingsPageViewController.h"
 
 // MARK: - NSFW mode row in the side drawer
@@ -232,7 +233,101 @@ static BOOL IsDrawerList(UIScrollView* list) {
     return NO;
 }
 
+// MARK: D-day lines under the NSFW row
+
+static const CGFloat kEventRowHeight = 40.0;
+static const CGFloat kEventGap = 8.0;
+static const NSUInteger kMaxEventRows = 4;
+
+@interface NFBEventRow : UIControl
+@property (nonatomic, copy) NSString* handle;
+@end
+
+@implementation NFBEventRow
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    self.alpha = highlighted ? 0.6 : 1.0;
+}
+
+@end
+
+// Rows for the soonest events: "D-12  Event name"; tapping one opens the event's
+// account when it has one.
+@interface NFBEventRows : UIView
+@property (nonatomic, copy) NSString* signature;
+- (CGFloat)reloadWithIconX:(CGFloat)iconX width:(CGFloat)width;
+@end
+
+@implementation NFBEventRows
+
+- (void)openAccount:(NFBEventRow*)row {
+    if (row.handle.length == 0) {
+        return;
+    }
+    NSString* encoded =
+        [row.handle stringByAddingPercentEncodingWithAllowedCharacters:
+                        [NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSURL* url = [NSURL URLWithString:[@"twitter://user?screen_name=" stringByAppendingString:encoded]];
+    if (url) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    }
+}
+
+// Returns the height the rows need (0 when there are no upcoming events).
+- (CGFloat)reloadWithIconX:(CGFloat)iconX width:(CGFloat)width {
+    NSArray<NSDictionary*>* events = [BHTEvents upcoming:kMaxEventRows];
+    NSMutableString* signature = [NSMutableString stringWithFormat:@"%.0f|%.0f|", iconX, width];
+    for (NSDictionary* event in events) {
+        NSDate* date = [NSDate dateWithTimeIntervalSince1970:[event[@"time"] doubleValue]];
+        [signature appendFormat:@"%@:%ld:%@;", event[@"name"], (long)[BHTEvents daysUntil:date],
+                                event[@"handle"]];
+    }
+    [signature appendFormat:@"%@", CurrentAccentColor()];
+
+    if (![signature isEqualToString:self.signature]) {
+        self.signature = signature;
+        for (UIView* old in [self.subviews copy]) {
+            [old removeFromSuperview];
+        }
+        CGFloat y = 0;
+        for (NSDictionary* event in events) {
+            NSDate* date = [NSDate dateWithTimeIntervalSince1970:[event[@"time"] doubleValue]];
+            NSInteger days = [BHTEvents daysUntil:date];
+
+            NFBEventRow* row = [[NFBEventRow alloc]
+                initWithFrame:CGRectMake(0, y, width, kEventRowHeight)];
+            row.handle = event[@"handle"];
+            [row addTarget:self action:@selector(openAccount:) forControlEvents:UIControlEventTouchUpInside];
+
+            UILabel* count = [UILabel new];
+            count.text = days == 0 ? @"D-Day" : [NSString stringWithFormat:@"D-%ld", (long)days];
+            count.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold];
+            count.textColor = CurrentAccentColor();
+            count.frame = CGRectMake(iconX, 0, 64, kEventRowHeight);
+            count.userInteractionEnabled = NO;
+            [row addSubview:count];
+
+            UILabel* name = [UILabel new];
+            name.text = event[@"name"];
+            name.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+            name.textColor = [UIColor labelColor];
+            name.lineBreakMode = NSLineBreakByTruncatingTail;
+            name.frame = CGRectMake(iconX + 68, 0, MAX(width - iconX - 68 - 16, 0), kEventRowHeight);
+            name.userInteractionEnabled = NO;
+            [row addSubview:name];
+
+            [self addSubview:row];
+            y += kEventRowHeight;
+        }
+    }
+    return self.subviews.count * kEventRowHeight;
+}
+
+@end
+
 static __weak NFBSensitiveRow* gRow;
+static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
 static void InstallRow(UIScrollView* list) {
@@ -266,13 +361,27 @@ static void InstallRow(UIScrollView* list) {
         labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
     [row.icon applyState];
 
-    // Let the list scroll far enough to reach the extra row.
+    // D-day lines right under it.
+    NFBEventRows* events = gEventRows;
+    if (!events || events.superview != list) {
+        [gEventRows removeFromSuperview];
+        events = [NFBEventRows new];
+        gEventRows = events;
+        [list addSubview:events];
+    }
+    CGFloat eventsHeight = [events reloadWithIconX:iconX width:CGRectGetWidth(list.bounds)];
+    events.frame = CGRectMake(0, bottom + rowHeight + kEventGap, CGRectGetWidth(list.bounds),
+                              eventsHeight);
+    events.hidden = eventsHeight == 0;
+    CGFloat totalHeight = rowHeight + (eventsHeight > 0 ? kEventGap + eventsHeight : 0);
+
+    // Let the list scroll far enough to reach the extra rows.
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-    if (fabs(added - rowHeight) > 0.5) {
+    if (fabs(added - totalHeight) > 0.5) {
         UIEdgeInsets inset = list.contentInset;
-        inset.bottom += rowHeight - added;
+        inset.bottom += totalHeight - added;
         list.contentInset = inset;
-        objc_setAssociatedObject(list, kInsetAddedKey, @(rowHeight),
+        objc_setAssociatedObject(list, kInsetAddedKey, @(totalHeight),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }

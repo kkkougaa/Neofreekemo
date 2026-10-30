@@ -474,3 +474,10 @@
 "KEMO_KEYWORDS_TITLE" = "강조할 키워드";
 "KEMO_KEYWORD_ADD_TITLE" = "키워드 추가";
 "KEMO_SHAKE_DUMP_TITLE" = "흔들어서 화면 구조 복사";
+"KEMO_EVENTS_TITLE" = "행사 일정 (D-day)";
+"KEMO_EVENT_ADD_TITLE" = "일정 추가";
+"KEMO_EVENT_NAME_PLACEHOLDER" = "행사 이름";
+"KEMO_EVENT_ACCOUNT_PLACEHOLDER" = "@계정 (선택)";
+"KEMO_EVENT_DATE_PLACEHOLDER" = "날짜";
+"KEMO_KEEP_POSITION_TITLE" = "새로고침해도 보던 위치 유지";
+"KEMO_MEDIA_COUNT_BADGE_TITLE" = "이미지 장수 배지 (1/4)";

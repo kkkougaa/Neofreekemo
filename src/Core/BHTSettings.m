@@ -336,6 +336,22 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openKeywordEditor:"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_events",
+                        @"titleKey": @"KEMO_EVENTS_TITLE",
+                        @"action": @"openEventEditor:"
+                    },
+                    @{
+                        @"key": @"kemo_media_count_badge",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_keep_position",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_shake_dump",
                         @"default": @NO,
                         @"type": @"toggle"

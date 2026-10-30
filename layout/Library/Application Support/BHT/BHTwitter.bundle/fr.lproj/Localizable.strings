@@ -497,3 +497,10 @@
 "KEMO_KEYWORDS_TITLE" = "Highlight keywords";
 "KEMO_KEYWORD_ADD_TITLE" = "Add keyword";
 "KEMO_SHAKE_DUMP_TITLE" = "Shake to copy screen outline";
+"KEMO_EVENTS_TITLE" = "Event countdowns (D-day)";
+"KEMO_EVENT_ADD_TITLE" = "Add event";
+"KEMO_EVENT_NAME_PLACEHOLDER" = "Event name";
+"KEMO_EVENT_ACCOUNT_PLACEHOLDER" = "@account (optional)";
+"KEMO_EVENT_DATE_PLACEHOLDER" = "Date";
+"KEMO_KEEP_POSITION_TITLE" = "Keep my place when refreshing";
+"KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";

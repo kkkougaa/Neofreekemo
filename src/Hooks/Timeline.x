@@ -908,6 +908,11 @@ static id RemoveVideoCarouselEntries(id node, BOOL* removed) {
 %hook TFNItemsDataViewController
 
 - (void)setSections:(NSArray*)sections restoreScrollPosition:(BOOL)restoreScrollPosition {
+    // Home timeline only: ask for the scroll position to be restored, so a refresh
+    // leaves you where you were instead of jumping to the newest tweets.
+    if ([BHTSettings boolForKey:@"kemo_keep_position"] && IsHomeTimeline(self)) {
+        restoreScrollPosition = YES;
+    }
     %orig(FilteredTimelineSections(self, sections), restoreScrollPosition);
 }
 

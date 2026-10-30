@@ -161,6 +161,28 @@ static UIView* FindViewOfController(UIView* view, NSString* name) {
     return nil;
 }
 
+// First view whose class name contains all the given fragments.
+static UIView* FindViewByClassParts(UIView* view, NSArray<NSString*>* parts) {
+    NSString* name = NSStringFromClass(view.class);
+    BOOL all = YES;
+    for (NSString* part in parts) {
+        if (![name containsString:part]) {
+            all = NO;
+            break;
+        }
+    }
+    if (all) {
+        return view;
+    }
+    for (UIView* sub in view.subviews) {
+        UIView* found = FindViewByClassParts(sub, parts);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
 // MARK: First visible tweet cell
 
 static UIView* FindStatusCell(UIView* view) {
@@ -239,6 +261,16 @@ static void PerformDump(UIWindow* window) {
         }
     } else {
         [out appendFormat:@"(none)%c", 10];
+    }
+
+    // The top navigation bar (where the logo is), hidden pieces included.
+    UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);
+    if (navBar) {
+        [out appendFormat:@"== NAV BAR %@ ==%c", NSStringFromClass(navBar.class), 10];
+        NSUInteger navLines = 0;
+        gIncludeHidden = YES;
+        DumpView(navBar, 0, out, &navLines);
+        gIncludeHidden = NO;
     }
 
     // Menus, popovers and sheets can live in windows of their own; listed first so a

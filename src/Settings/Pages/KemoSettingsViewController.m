@@ -6,11 +6,13 @@
 #import "Settings/Pages/KemoSettingsViewController.h"
 #import "Core/BHTBundle.h"
 #import "Core/BHTAliases.h"
+#import "Core/BHTEvents.h"
 #import "Core/BHTKeywords.h"
 #import "Core/BHTSettings.h"
 #import "Core/BHTSpotify.h"
 #import "Settings/ModernSettingsCells.h"
 #import "Settings/Pages/KemoAliasListViewController.h"
+#import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
 static NSString* const kClientIDKey = @"spotify_client_id";
@@ -39,6 +41,15 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                         subtitle:[self localized:state]];
         return cell;
     }
+    if ([data[@"key"] isEqualToString:@"kemo_events"]) {
+        ModernSettingsCompactButtonCell* cell =
+            [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
+                                            forIndexPath:indexPath];
+        [cell configureWithTitle:[self localized:data[@"titleKey"]]
+                        subtitle:[NSString stringWithFormat:@"%lu",
+                                                            (unsigned long)[BHTEvents upcoming:99].count]];
+        return cell;
+    }
     if ([data[@"key"] isEqualToString:@"kemo_keywords"]) {
         ModernSettingsCompactButtonCell* cell =
             [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
@@ -60,6 +71,10 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
         return cell;
     }
     return [super tableView:tableView cellForRowAtIndexPath:indexPath];
+}
+
+- (void)openEventEditor:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[KemoEventListViewController new] animated:YES];
 }
 
 - (void)openKeywordEditor:(NSDictionary*)sender {

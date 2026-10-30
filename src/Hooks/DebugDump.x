@@ -267,6 +267,39 @@ static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(window.frame)];
     NSUInteger mediaCount = 0;
+    // How the screen is put together: view controllers, and everything in the top part of the
+    // screen (where a row of tabs lives) with its text.
+    {
+        [out appendFormat:@"== CONTROLLERS ==%c", 10];
+        NSUInteger controllerLines = 0;
+        DumpControllers(window.rootViewController, 0, out, &controllerLines);
+
+        [out appendFormat:@"== TOP REGION ==%c", 10];
+        NSMutableArray<UIView*>* topQueue = [NSMutableArray arrayWithObject:window];
+        NSUInteger topVisited = 0;
+        NSUInteger topLines = 0;
+        while (topQueue.count > 0 && topVisited < 6000 && topLines < 120) {
+            UIView* view = topQueue.firstObject;
+            [topQueue removeObjectAtIndex:0];
+            topVisited++;
+            CGRect inWindow = [window convertRect:view.bounds fromView:view];
+            NSString* text = nil;
+            if ([view isKindOfClass:[UILabel class]]) {
+                text = ((UILabel*)view).text;
+            } else if ([view isKindOfClass:[UIButton class]]) {
+                text = [(UIButton*)view titleForState:UIControlStateNormal];
+            }
+            if (!view.hidden && CGRectGetMinY(inWindow) > 100 && CGRectGetMinY(inWindow) < 230 &&
+                CGRectGetHeight(inWindow) < 80 && CGRectGetWidth(inWindow) > 0 &&
+                (text.length > 0 || view.accessibilityLabel.length > 0)) {
+                topLines++;
+                [out appendFormat:@"%@ %@ text=%@ label=%@%c", NSStringFromClass(view.class),
+                                  NSStringFromCGRect(inWindow), text, view.accessibilityLabel, 10];
+            }
+            [topQueue addObjectsFromArray:view.subviews];
+        }
+    }
+
     [out appendFormat:@"== MEDIA VIEWS ==%c", 10];
     FindMedia(window, out, &mediaCount);
     if (!mediaCount) {
@@ -327,39 +360,6 @@ static void PerformDump(UIWindow* window) {
             }
         }
         free(methods);
-    }
-
-    // How the screen is put together: view controllers, and everything in the top part of the
-    // screen (where a row of tabs lives) with its text.
-    {
-        [out appendFormat:@"== CONTROLLERS ==%c", 10];
-        NSUInteger controllerLines = 0;
-        DumpControllers(window.rootViewController, 0, out, &controllerLines);
-
-        [out appendFormat:@"== TOP REGION ==%c", 10];
-        NSMutableArray<UIView*>* topQueue = [NSMutableArray arrayWithObject:window];
-        NSUInteger topVisited = 0;
-        NSUInteger topLines = 0;
-        while (topQueue.count > 0 && topVisited < 6000 && topLines < 120) {
-            UIView* view = topQueue.firstObject;
-            [topQueue removeObjectAtIndex:0];
-            topVisited++;
-            CGRect inWindow = [window convertRect:view.bounds fromView:view];
-            NSString* text = nil;
-            if ([view isKindOfClass:[UILabel class]]) {
-                text = ((UILabel*)view).text;
-            } else if ([view isKindOfClass:[UIButton class]]) {
-                text = [(UIButton*)view titleForState:UIControlStateNormal];
-            }
-            if (!view.hidden && CGRectGetMinY(inWindow) > 100 && CGRectGetMinY(inWindow) < 230 &&
-                CGRectGetHeight(inWindow) < 80 && CGRectGetWidth(inWindow) > 0 &&
-                (text.length > 0 || view.accessibilityLabel.length > 0)) {
-                topLines++;
-                [out appendFormat:@"%@ %@ text=%@ label=%@%c", NSStringFromClass(view.class),
-                                  NSStringFromCGRect(inWindow), text, view.accessibilityLabel, 10];
-            }
-            [topQueue addObjectsFromArray:view.subviews];
-        }
     }
 
     // Tab bar: the accessibility label and value of every element along the bottom edge

@@ -50,7 +50,70 @@ static void SaveRecentSoon(void) {
                    });
 }
 
-static void RememberTweet(NSString* tweetID, NSString* label) {
+// A small picture of the tweet's first image, kept as a tiny JPEG in Caches (about 5 KB each,
+// 30 at most). It is made once, when the tweet is recorded; the list only reads the files.
+static NSURL* ThumbnailURL(NSString* tweetID) {
+    NSURL* caches = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory
+                                                             inDomains:NSUserDomainMask] firstObject];
+    NSURL* directory = [caches URLByAppendingPathComponent:@"nfb_recent" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:directory
+                             withIntermediateDirectories:YES
+                                              attributes:nil
+                                                   error:nil];
+    return [directory URLByAppendingPathComponent:[tweetID stringByAppendingString:@".jpg"]];
+}
+
+// Returns whether a picture was saved; `sensitive` says the tweet's media was covered (by the
+// app's own warning or by the AI cover), in which case no picture is kept at all.
+static BOOL SaveThumbnail(UITableViewCell* cell, NSString* tweetID, BOOL* sensitive) {
+    *sensitive = NO;
+    __block UIImage* best = nil;
+    __block CGFloat bestArea = 0;
+    Class interstitial = NSClassFromString(@"HFSensitiveTweetBlurredInterstitialView");
+    EnumerateSubviewsRecursively(cell, ^(UIView* view) {
+        if ((interstitial && [view isKindOfClass:interstitial]) || view.tag == 0x4e464232) {
+            *sensitive = YES;
+            return;
+        }
+        if (![view isKindOfClass:[UIImageView class]]) {
+            return;
+        }
+        UIImage* image = ((UIImageView*)view).image;
+        // Tweet pictures are big; avatars and icons are not.
+        if (!image.CGImage || image.size.width < 100 || image.size.height < 100) {
+            return;
+        }
+        CGFloat area = image.size.width * image.size.height;
+        if (area > bestArea) {
+            bestArea = area;
+            best = image;
+        }
+    });
+    if (*sensitive || !best) {
+        return NO;
+    }
+    CGFloat edge = 112;
+    CGFloat scale = MAX(edge / best.size.width, edge / best.size.height);
+    CGSize target = CGSizeMake(best.size.width * scale, best.size.height * scale);
+    UIGraphicsImageRendererFormat* format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = 1;
+    UIGraphicsImageRenderer* renderer =
+        [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(edge, edge) format:format];
+    NSData* data = [renderer JPEGDataWithCompressionQuality:0.6
+                                                    actions:^(UIGraphicsImageRendererContext* context) {
+                                                        // Centre crop to a square.
+                                                        [best drawInRect:CGRectMake((edge - target.width) / 2,
+                                                                                    (edge - target.height) / 2,
+                                                                                    target.width, target.height)];
+                                                    }];
+    return [data writeToURL:ThumbnailURL(tweetID) atomically:YES];
+}
+
+static void RemoveThumbnail(NSString* tweetID) {
+    [[NSFileManager defaultManager] removeItemAtURL:ThumbnailURL(tweetID) error:nil];
+}
+
+static void RememberTweet(NSString* tweetID, NSString* label, BOOL hasThumbnail, BOOL sensitive) {
     RecentTweets();
     for (NSDictionary* entry in [gRecent copy]) {
         if ([entry[@"id"] isEqualToString:tweetID]) {
@@ -61,9 +124,12 @@ static void RememberTweet(NSString* tweetID, NSString* label) {
         @"id" : tweetID,
         @"label" : label ?: @"",
         @"at" : @([[NSDate date] timeIntervalSince1970]),
+        @"thumb" : @(hasThumbnail),
+        @"sensitive" : @(sensitive),
     }
                   atIndex:0];
     while (gRecent.count > kRecentLimit) {
+        RemoveThumbnail(gRecent.lastObject[@"id"]);
         [gRecent removeLastObject];
     }
     SaveRecentSoon();
@@ -119,7 +185,9 @@ static void WatchTimeline(void) {
             NSDictionary* first = RecentTweets().firstObject;
             NSString* label = [first[@"id"] isEqualToString:tweetID] ? nil : cell.accessibilityLabel;
             if (label.length > 0) {
-                RememberTweet(tweetID, label);
+                BOOL sensitive = NO;
+                BOOL thumb = SaveThumbnail(cell, tweetID, &sensitive);
+                RememberTweet(tweetID, label, thumb, sensitive);
             }
         }
     }
@@ -182,6 +250,22 @@ static void WatchTimeline(void) {
         content.secondaryTextProperties.color = [UIColor secondaryLabelColor];
         content.textProperties.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+
+        NSDictionary* entry = self.items[indexPath.row];
+        if ([entry[@"sensitive"] boolValue]) {
+            // Covered media stays covered: no picture, just a mark.
+            content.image = [UIImage systemImageNamed:@"eye.slash"];
+            content.imageProperties.tintColor = [UIColor secondaryLabelColor];
+            content.imageProperties.reservedLayoutSize = CGSizeMake(56, 56);
+        } else if ([entry[@"thumb"] boolValue]) {
+            UIImage* picture = [UIImage imageWithContentsOfFile:ThumbnailURL(entry[@"id"]).path];
+            if (picture) {
+                content.image = picture;
+                content.imageProperties.maximumSize = CGSizeMake(56, 56);
+                content.imageProperties.reservedLayoutSize = CGSizeMake(56, 56);
+                content.imageProperties.cornerRadius = 8;
+            }
+        }
     }
     cell.contentConfiguration = content;
     return cell;

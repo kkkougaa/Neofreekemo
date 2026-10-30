@@ -1132,7 +1132,7 @@ void NFBKeepPositionEnd(void) {
 }
 
 static BOOL KeepShouldBlock(UIScrollView* scrollView, CGPoint offset) {
-    if ((const void*)scrollView != gKeepTablePtr || !KeepArmed()) {
+    if ((__bridge const void*)scrollView != gKeepTablePtr || !KeepArmed()) {
         return NO;
     }
     if (scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating) {

@@ -751,22 +751,22 @@ static void ApplyLogoShift(UIView* control) {
 
 - (void)layoutSubviews {
     %orig;
-    ApplyLogoShift(self);
+    ApplyLogoShift((UIView*)self);
 }
 
 - (void)setCenter:(CGPoint)center {
     %orig;
-    ApplyLogoShift(self);
+    ApplyLogoShift((UIView*)self);
 }
 
 - (void)setFrame:(CGRect)frame {
     %orig;
-    ApplyLogoShift(self);
+    ApplyLogoShift((UIView*)self);
 }
 
 - (void)didMoveToWindow {
     %orig;
-    ApplyLogoShift(self);
+    ApplyLogoShift((UIView*)self);
 }
 
 %end

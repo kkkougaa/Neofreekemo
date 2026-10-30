@@ -1017,6 +1017,8 @@ static CGFloat gKeepAnchorOffset;
 static NSArray* gKeepSections;
 static BOOL gKeepRefreshing;
 static NSDate* gKeepUntil;
+static NSDate* gKeepBeganAt;
+static BOOL gKeepEnded; // the pull has finished (the list may still be settling)
 
 static BOOL KeepArmed(void) {
     return gKeepRefreshing || (gKeepUntil && [gKeepUntil timeIntervalSinceNow] > 0);
@@ -1098,6 +1100,78 @@ static void KeepRestoreSoon(NSTimeInterval delay) {
                    });
 }
 
+// The pin: while a pull is settling, the remembered tweet is held at its place on every
+// frame. This does not depend on how the app moves the list (any way it scrolls back to the
+// top is corrected on the next frame), and it lets go as soon as a finger touches the list
+// after the refresh is over.
+static BOOL KeepNudge(UITableView* table, NSString* anchorID, CGFloat anchorOffset) {
+    CGFloat top = table.contentOffset.y + table.adjustedContentInset.top;
+    for (UITableViewCell* cell in table.visibleCells) {
+        if ([cell.accessibilityIdentifier isEqualToString:anchorID]) {
+            CGFloat delta = (CGRectGetMinY(cell.frame) - top) - anchorOffset;
+            if (fabs(delta) > 0.5) {
+                BOOL armed = gKeepRefreshing;
+                NSDate* until = gKeepUntil;
+                gKeepRefreshing = NO;
+                gKeepUntil = nil;
+                table.contentOffset = CGPointMake(table.contentOffset.x, table.contentOffset.y + delta);
+                gKeepRefreshing = armed;
+                gKeepUntil = until;
+                return YES;
+            }
+            return NO;
+        }
+    }
+    return NO;
+}
+
+@interface NFBKeepPin : NSObject
+@property (nonatomic, strong) CADisplayLink* link;
+- (void)start;
+- (void)stop;
+@end
+
+static NFBKeepPin* gKeepPin;
+static NSUInteger gKeepPinMoves;
+
+@implementation NFBKeepPin
+
+- (void)start {
+    if (self.link) {
+        return;
+    }
+    self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(step:)];
+    [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+- (void)stop {
+    [self.link invalidate];
+    self.link = nil;
+}
+
+- (void)step:(CADisplayLink*)link {
+    UITableView* table = gKeepTable;
+    if (!table || !table.window || !KeepArmed() || gKeepAnchorID.length == 0 ||
+        -[gKeepBeganAt timeIntervalSinceNow] > 12) {
+        [self stop];
+        return;
+    }
+    BOOL touched = table.isTracking || table.isDragging || table.isDecelerating;
+    if (touched && gKeepEnded) {
+        // The refresh is over and the reader has taken the list back.
+        [self stop];
+        return;
+    }
+    if (touched) {
+        return;
+    }
+    if (KeepNudge(table, gKeepAnchorID, gKeepAnchorOffset) && ++gKeepPinMoves <= 6) {
+        NFBNewTweetsLog(@"pin: put the remembered tweet back in place");
+    }
+}
+
+@end
+
 // The pull-to-refresh control calls these when a refresh starts and ends.
 void NFBKeepPositionBegin(UIView* control) {
     BOOL keep = [BHTSettings boolForKey:@"kemo_keep_position"];
@@ -1128,6 +1202,15 @@ void NFBKeepPositionBegin(UIView* control) {
     gKeepAnchorOffset = anchorOffset;
     gKeepRefreshing = keep;
     gKeepUntil = nil;
+    gKeepBeganAt = [NSDate date];
+    gKeepEnded = NO;
+    gKeepPinMoves = 0;
+    if (keep) {
+        if (!gKeepPin) {
+            gKeepPin = [NFBKeepPin new];
+        }
+        [gKeepPin start];
+    }
     NFBNewTweetsLog([NSString stringWithFormat:@"pull started: keep=%d anchor=%@ offset=%.0f", keep,
                                                anchorID, anchorOffset]);
 }
@@ -1137,7 +1220,8 @@ void NFBKeepPositionEnd(void) {
         return;
     }
     gKeepRefreshing = NO;
-    gKeepUntil = [NSDate dateWithTimeIntervalSinceNow:3.0];
+    gKeepEnded = YES;
+    gKeepUntil = [NSDate dateWithTimeIntervalSinceNow:4.0];
     KeepRestoreSoon(0.05);
     KeepRestoreSoon(0.4);
     KeepRestoreSoon(1.0);
@@ -1183,6 +1267,9 @@ static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* 
                                void (^apply)(void)) {
     UITableView* table = (UITableView*)controller.tableView;
     BOOL pulling = KeepArmed() && table == gKeepTable;
+    NFBNewTweetsLog([NSString stringWithFormat:@"setSections: armed=%d sameTable=%d table=%@ keepTable=%@",
+                                               KeepArmed(), table == gKeepTable, NSStringFromClass(table.class),
+                                               NSStringFromClass(gKeepTable.class)]);
     if (!pulling) {
         // Not a pull (a background update): remember where we are from here.
         NSString* anchorID = nil;

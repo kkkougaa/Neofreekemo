@@ -78,7 +78,6 @@ static UIImage* SpotifyMark(void) {
                          : nil;
 }
 
-// A note pops out like jelly, sways up and to the left, then goes "pop" in a few sparkles.
 static void SparkleBurst(UIWindow* window, CGPoint at) {
     UIColor* color = CurrentAccentColor();
     for (int i = 0; i < 5; i++) {
@@ -104,15 +103,49 @@ static void SparkleBurst(UIWindow* window, CGPoint at) {
     }
 }
 
-static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second) {
-    UILabel* note = [UILabel new];
-    note.text = second ? @"♫" : @"♪";
-    note.font = [UIFont systemFontOfSize:second ? 12 : 14 weight:UIFontWeightHeavy];
-    note.textColor = CurrentAccentColor();
-    [note sizeToFit];
+// The note is the picture "nfb_note.png" from the tweak bundle (a plain black note on
+// transparent), painted in the accent colour. All the movement is on this view as a whole.
+static UIImage* NoteImage(void) {
+    static UIImage* image;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"nfb_note.png"];
+        UIImage* loaded = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+        image = [loaded imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    });
+    return image;
+}
+
+static UIView* NoteView(CGFloat size, UIColor* color) {
+    UIView* view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+    view.userInteractionEnabled = NO;
+    UIImage* image = NoteImage();
+    if (image) {
+        UIImageView* note = [[UIImageView alloc] initWithImage:image];
+        note.tintColor = color;
+        note.contentMode = UIViewContentModeScaleAspectFit;
+        note.frame = view.bounds;
+        [view addSubview:note];
+    } else {
+        UILabel* fallback = [UILabel new];
+        fallback.text = @"♪";
+        fallback.textColor = color;
+        fallback.font = [UIFont systemFontOfSize:size weight:UIFontWeightHeavy];
+        fallback.textAlignment = NSTextAlignmentCenter;
+        fallback.frame = view.bounds;
+        [view addSubview:fallback];
+    }
+    return view;
+}
+
+// A note pops out like jelly, sways up and to the left, then goes "pop" in a few sparkles.
+// The small one is a little smaller, a little later, and goes its own way.
+static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL small) {
+    CGFloat size = small ? 15 : 22;
+    UIView* note = NoteView(size, CurrentAccentColor());
     CGFloat sideways = MAX(0, MIN(34, left - 64));
-    CGPoint start = CGPointMake(left - 8, midY + (second ? 3 : -3));
-    CGPoint end = CGPointMake(start.x - sideways * (second ? 0.7 : 1.0), midY - (second ? 19 : 14));
+    CGPoint start = CGPointMake(left - (small ? 5 : 9), midY + (small ? 6 : -3));
+    CGPoint end = CGPointMake(start.x - sideways * (small ? 0.55 : 1.0), midY - (small ? 22 : 14));
     note.center = start;
     note.alpha = 0;
     [window addSubview:note];
@@ -122,7 +155,7 @@ static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second)
     jelly.values = @[ @0.0, @1.4, @0.82, @1.12, @0.96, @1.0 ];
     jelly.keyTimes = @[ @0, @0.28, @0.5, @0.7, @0.85, @1 ];
     CAKeyframeAnimation* wobble = [CAKeyframeAnimation animationWithKeyPath:@"transform.rotation.z"];
-    CGFloat tilt = second ? 0.35 : -0.35;
+    CGFloat tilt = small ? 0.4 : -0.3;
     wobble.values = @[ @(tilt * 2), @(-tilt), @(tilt * 0.6), @(-tilt * 0.3), @0 ];
     wobble.keyTimes = @[ @0, @0.3, @0.55, @0.8, @1 ];
     CAAnimationGroup* pop = [CAAnimationGroup animation];
@@ -136,7 +169,7 @@ static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second)
     [path moveToPoint:start];
     [path addCurveToPoint:end
             controlPoint1:CGPointMake(start.x + 3, start.y - 10)
-            controlPoint2:CGPointMake(end.x + (second ? -4 : 5), end.y + 8)];
+            controlPoint2:CGPointMake(end.x + (small ? -4 : 5), end.y + 8)];
     CAKeyframeAnimation* drift = [CAKeyframeAnimation animationWithKeyPath:@"position"];
     drift.path = path.CGPath;
     drift.duration = 1.0;
@@ -160,16 +193,20 @@ static void FloatNote(UIWindow* window, CGFloat left, CGFloat midY, BOOL second)
                    });
 }
 
+// Two notes at a time, a big one and a small one right behind it, three times over.
 static void StartNoteEffect(UIWindow* window, CGFloat left, CGFloat midY) {
-    static const double times[] = {0.25, 0.95, 1.65, 2.35, 3.05, 3.75};
-    for (int i = 0; i < 6; i++) {
-        BOOL second = i % 2 == 1;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(times[i] * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-                           if (gTransientSpotify && [window viewWithTag:kBubbleTag]) {
-                               FloatNote(window, left, midY, second);
-                           }
-                       });
+    static const double times[] = {0.25, 1.75, 3.25};
+    for (int i = 0; i < 3; i++) {
+        for (int k = 0; k < 2; k++) {
+            BOOL small = k == 1;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                         (int64_t)((times[i] + (small ? 0.18 : 0)) * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                               if (gTransientSpotify && [window viewWithTag:kBubbleTag]) {
+                                   FloatNote(window, left, midY, small);
+                               }
+                           });
+        }
     }
 }
 

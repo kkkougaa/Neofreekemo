@@ -505,3 +505,4 @@
 "KEMO_KEEP_POSITION_TITLE" = "Keep my place when refreshing";
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
+"KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";

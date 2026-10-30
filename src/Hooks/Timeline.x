@@ -905,15 +905,83 @@ static id RemoveVideoCarouselEntries(id node, BOOL* removed) {
 
 %end
 
+// For You refreshes ignore the restore flag, so the first status in view is remembered by
+// its id and put back where it was once the new sections have been laid out.
+static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* sections,
+                               void (^apply)(void)) {
+    UITableView* table = (UITableView*)controller.tableView;
+    NSString* anchorID = nil;
+    CGFloat anchorOffset = 0;
+    CGFloat topEdge = table.contentOffset.y + table.adjustedContentInset.top;
+    if (table.window && topEdge > 40) {
+        for (UITableViewCell* cell in table.visibleCells) {
+            NSString* cellID = cell.accessibilityIdentifier;
+            if (cellID.length > 8 && CGRectGetMaxY(cell.frame) > topEdge &&
+                (!anchorID || CGRectGetMinY(cell.frame) < anchorOffset + topEdge)) {
+                anchorID = cellID;
+                anchorOffset = CGRectGetMinY(cell.frame) - topEdge;
+            }
+        }
+    }
+    apply();
+    if (!anchorID) {
+        return;
+    }
+
+    __weak UITableView* weakTable = table;
+    void (^restore)(void) = ^{
+        UITableView* current = weakTable;
+        if (!current) {
+            return;
+        }
+        [current layoutIfNeeded];
+        CGFloat top = current.contentOffset.y + current.adjustedContentInset.top;
+        for (UITableViewCell* cell in current.visibleCells) {
+            if ([cell.accessibilityIdentifier isEqualToString:anchorID]) {
+                CGFloat delta = (CGRectGetMinY(cell.frame) - top) - anchorOffset;
+                if (fabs(delta) > 1.0) {
+                    current.contentOffset = CGPointMake(current.contentOffset.x,
+                                                        current.contentOffset.y + delta);
+                }
+                return;
+            }
+        }
+        // Not on screen any more: find it in the new data and scroll there.
+        for (NSUInteger section = 0; section < sections.count; section++) {
+            id items = sections[section];
+            if (![items isKindOfClass:[NSArray class]]) {
+                continue;
+            }
+            for (NSUInteger row = 0; row < [items count]; row++) {
+                if ([[items[row] description] containsString:anchorID] &&
+                    section < (NSUInteger)current.numberOfSections &&
+                    row < (NSUInteger)[current numberOfRowsInSection:section]) {
+                    [current scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:section]
+                                   atScrollPosition:UITableViewScrollPositionTop
+                                           animated:NO];
+                    return;
+                }
+            }
+        }
+    };
+    dispatch_async(dispatch_get_main_queue(), restore);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), restore);
+}
+
 %hook TFNItemsDataViewController
 
 - (void)setSections:(NSArray*)sections restoreScrollPosition:(BOOL)restoreScrollPosition {
     // Home timeline only: ask for the scroll position to be restored, so a refresh
     // leaves you where you were instead of jumping to the newest tweets.
+    NSArray* filtered = FilteredTimelineSections(self, sections);
     if ([BHTSettings boolForKey:@"kemo_keep_position"] && IsHomeTimeline(self)) {
-        restoreScrollPosition = YES;
+        KeepPositionAround(self, filtered, ^{
+            %orig(filtered, YES);
+        });
+        return;
     }
-    %orig(FilteredTimelineSections(self, sections), restoreScrollPosition);
+    %orig(filtered, restoreScrollPosition);
 }
 
 - (void)updateSections:(NSArray*)sections

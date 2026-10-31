@@ -9,11 +9,11 @@
   ## Twitter Branding
 
   <div>
-    <a href="https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://raw.githubusercontent.com/NeoFreeBird/app/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_altstore.png" alt="Add to AltStore" height="40"></a>
+    <a href="https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_altstore.png" alt="Add to AltStore" height="40"></a>
     &nbsp;
-    <a href="https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://raw.githubusercontent.com/NeoFreeBird/app/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_sidestore.png" alt="Add to SideStore" height="40"></a>
+    <a href="https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_sidestore.png" alt="Add to SideStore" height="40"></a>
     &nbsp;
-    <a href="https://intradeus.github.io/http-protocol-redirector?r=feather://source/https://raw.githubusercontent.com/NeoFreeBird/app/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_feather.png" alt="Add to Feather" height="40"></a>
+    <a href="https://intradeus.github.io/http-protocol-redirector?r=feather://source/https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/AltSource.json"><img src="resources/badges/add_to_feather.png" alt="Add to Feather" height="40"></a>
     &nbsp;
     <a href="https://github.com/NeoFreeBird/app/releases"><img src="resources/badges/download_from_github.png" alt="Download from GitHub" height="40"></a>
     &nbsp;

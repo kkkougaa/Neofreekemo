@@ -29,7 +29,7 @@ on:
         required: false
         type: string
       create_release:
-        description: "Collect every build into a single draft release"
+        description: "Collect every build into a single published release"
         default: true
         required: false
         type: boolean
@@ -217,4 +217,4 @@ jobs:
           files: |
             main/packages/${{ steps.tweak_info.outputs.name }}-*
             main/packages/*.deb
-          draft: true
+          draft: false

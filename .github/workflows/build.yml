@@ -48,7 +48,7 @@ on:
         required: false
         type: boolean
       create_release:
-        description: "Create a draft release (Private)"
+        description: "Publish a GitHub release (SideStore can download it)"
         default: false
         required: false
         type: boolean
@@ -209,4 +209,4 @@ jobs:
           tag_name: v${{ steps.tweak_info.outputs.version }}
           name: v${{ steps.tweak_info.outputs.version }} - ${{ steps.tweak_info.outputs.name }}
           files: main/packages/${{ steps.package_name.outputs.package }}
-          draft: true
+          draft: false

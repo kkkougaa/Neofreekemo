@@ -31,6 +31,20 @@ inject_appex() {
     mkdir -p "$tmp/Payload/Twitter.app/PlugIns"
     cp -R "$appex" "$tmp/Payload/Twitter.app/PlugIns/"
 
+    # iOS refuses the whole install when an embedded extension's version does not
+    # match the app. The Safari extension ships as 1.0.
+    local app_plist="$tmp/Payload/Twitter.app/Info.plist"
+    local appex_plist="$tmp/Payload/Twitter.app/PlugIns/OpenTwitterSafariExtension.appex/Info.plist"
+    if [[ -f "$app_plist" && -f "$appex_plist" ]]; then
+        local short build
+        short="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_plist")"
+        build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_plist")"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short" "$appex_plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$appex_plist"
+    fi
+    # Leftover marker from some decrypted IPAs. It is not part of the app.
+    rm -rf "$tmp/Payload/decrypt.day"
+
     rm -f "$ipa"
 
     (

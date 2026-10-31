@@ -10,7 +10,8 @@
 
 // While the compose screen is open, what has been typed is saved every couple of seconds.
 // If the app is closed or crashes before the tweet goes out, the next empty compose screen
-// offers to bring the text back. Nothing is inserted on its own.
+// offers to bring the text back. Nothing is inserted on its own. The offer sits at the
+// bottom right, just above the composer's undo icon, so it does not cover the text.
 
 static NSString* const kDraftTextKey = @"nfb_draft_text";
 static NSString* const kDraftTimeKey = @"nfb_draft_time";
@@ -111,10 +112,135 @@ void NFBDraftNoteSent(UIViewController* composer) {
     ClearDraft();
 }
 
-// MARK: Restore banner
+// MARK: Restore offer
+
+static const CGFloat kBannerHeight = 34.0;
+
+// The composer's undo control. Matched by name first (class, accessibility, icon);
+// otherwise the rightmost icon button on the compose toolbar, which is where that
+// undo icon sits.
+static BOOL TextMentionsUndo(NSString* text) {
+    if (text.length == 0) {
+        return NO;
+    }
+    if ([text rangeOfString:@"undo" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+    return [text containsString:@"되돌리"] || [text containsString:@"실행 취소"];
+}
+
+static NSString* VectorImageName(UIImage* image) {
+    if (!image) {
+        return nil;
+    }
+    for (NSString* key in @[ @"name", @"imageName" ]) {
+        SEL selector = NSSelectorFromString(key);
+        if (![image respondsToSelector:selector]) {
+            continue;
+        }
+        id value = ((id (*)(id, SEL))objc_msgSend)(image, selector);
+        if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+            return value;
+        }
+    }
+    return nil;
+}
+
+static BOOL IsIconSized(CGRect frame) {
+    return frame.size.width >= 16 && frame.size.width <= 64 && frame.size.height >= 16 &&
+           frame.size.height <= 64;
+}
+
+static BOOL ViewIsUndoControl(UIView* view) {
+    if (TextMentionsUndo(NSStringFromClass(view.class)) ||
+        TextMentionsUndo(view.accessibilityIdentifier) ||
+        TextMentionsUndo(view.accessibilityLabel)) {
+        return YES;
+    }
+    if (![view isKindOfClass:[UIButton class]]) {
+        return NO;
+    }
+    UIButton* button = (UIButton*)view;
+    if (TextMentionsUndo([button titleForState:UIControlStateNormal]) ||
+        TextMentionsUndo(button.imageView.accessibilityLabel)) {
+        return YES;
+    }
+    UIImage* image = [button imageForState:UIControlStateNormal] ?: button.imageView.image;
+    return TextMentionsUndo(VectorImageName(image));
+}
+
+// Top edge of the compose toolbar, in the compose view's coordinates.
+static CGFloat ComposeToolbarTop(UIView* host) {
+    __block UIView* replyButton = nil;
+    EnumerateSubviewsRecursively(host, ^(UIView* view) {
+        if (!replyButton && [NSStringFromClass(view.class)
+                                isEqualToString:@"T1TweetComposeConversationControlButton"]) {
+            replyButton = view;
+        }
+    });
+    UIView* toolbar = replyButton.superview.superview;
+    if (toolbar && toolbar.superview) {
+        return CGRectGetMinY([toolbar.superview convertRect:toolbar.frame toView:host]);
+    }
+    return CGRectGetHeight(host.bounds) - host.safeAreaInsets.bottom - 56.0;
+}
+
+static UIView* ComposeUndoButton(UIView* host, UIView* banner) {
+    __block UIView* named = nil;
+    __block CGFloat namedScore = -1;
+    __block UIView* toolbar = nil;
+
+    EnumerateSubviewsRecursively(host, ^(UIView* view) {
+        if (view == banner || [view isDescendantOfView:banner]) {
+            return;
+        }
+        if (!toolbar && [NSStringFromClass(view.class)
+                            isEqualToString:@"T1TweetComposeConversationControlButton"]) {
+            toolbar = view.superview.superview;
+        }
+        if (view.hidden || view.alpha < 0.01) {
+            return;
+        }
+        CGRect frame = [view convertRect:view.bounds toView:host];
+        if (!IsIconSized(frame) || !ViewIsUndoControl(view)) {
+            return;
+        }
+        CGFloat score = CGRectGetMaxX(frame) + CGRectGetMaxY(frame);
+        if (score > namedScore) {
+            namedScore = score;
+            named = view;
+        }
+    });
+    if (named) {
+        return named;
+    }
+    if (!toolbar) {
+        return nil;
+    }
+
+    // No labelled undo control: the undo icon is the rightmost icon on that toolbar.
+    __block UIView* rightmost = nil;
+    __block CGFloat rightmostX = -1;
+    EnumerateSubviewsRecursively(toolbar, ^(UIView* view) {
+        if (view.hidden || view.alpha < 0.01 || ![view isKindOfClass:[UIControl class]]) {
+            return;
+        }
+        CGRect frame = [view convertRect:view.bounds toView:host];
+        if (!IsIconSized(frame)) {
+            return;
+        }
+        CGFloat edge = CGRectGetMaxX(frame);
+        if (edge > rightmostX) {
+            rightmostX = edge;
+            rightmost = view;
+        }
+    });
+    return rightmost;
+}
 
 @interface NFBDraftBanner : UIView
 @property (nonatomic, weak) UIViewController* composer;
+- (void)placeAboveUndo;
 @end
 
 @implementation NFBDraftBanner
@@ -137,7 +263,52 @@ void NFBDraftNoteSent(UIViewController* composer) {
     [self dismiss];
 }
 
+- (void)placeAboveUndo {
+    UIView* host = self.composer.view;
+    if (!host) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(self.bounds);
+    CGFloat height = CGRectGetHeight(self.bounds);
+    if (width < 1 || height < 1) {
+        return;
+    }
+
+    UIView* undo = ComposeUndoButton(host, self);
+    CGFloat right;
+    CGFloat bottom;
+    if (undo) {
+        CGRect frame = [undo convertRect:undo.bounds toView:host];
+        right = CGRectGetMaxX(frame);
+        bottom = CGRectGetMinY(frame) - 6.0;
+    } else {
+        right = CGRectGetWidth(host.bounds) - host.safeAreaInsets.right - 12.0;
+        bottom = ComposeToolbarTop(host) - 6.0;
+    }
+
+    CGFloat minX = host.safeAreaInsets.left + 8.0;
+    CGFloat x = MAX(right - width, minX);
+    CGFloat maxX = CGRectGetWidth(host.bounds) - host.safeAreaInsets.right - 8.0 - width;
+    if (x > maxX) {
+        x = MAX(minX, maxX);
+    }
+    CGFloat y = MAX(bottom - height, host.safeAreaInsets.top + 4.0);
+    CGRect next = CGRectMake(x, y, width, height);
+    if (!CGRectEqualToRect(self.frame, next)) {
+        self.frame = next;
+    }
+    if (host.subviews.lastObject != self) {
+        [host bringSubviewToFront:self];
+    }
+}
+
+- (void)keyboardMoved:(NSNotification*)note {
+    (void)note;
+    [self placeAboveUndo];
+}
+
 - (void)dismiss {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [UIView animateWithDuration:0.2
         animations:^{
             self.alpha = 0;
@@ -174,7 +345,7 @@ static void ShowBanner(UIViewController* composer) {
     banner.composer = composer;
     banner.tag = kDraftBannerTag;
     banner.backgroundColor = CurrentAccentColor();
-    banner.layer.cornerRadius = 18;
+    banner.layer.cornerRadius = kBannerHeight / 2;
 
     BHTBundle* bundle = [BHTBundle sharedBundle];
     UIButton* restore = BannerButton([bundle localizedStringForKey:@"KEMO_DRAFT_RESTORE"],
@@ -183,15 +354,20 @@ static void ShowBanner(UIViewController* composer) {
                                      @selector(discard), banner, NO);
     CGFloat gap = 14;
     CGFloat width = 16 + CGRectGetWidth(restore.bounds) + gap + CGRectGetWidth(discard.bounds) + 16;
-    restore.frame = CGRectMake(16, 0, CGRectGetWidth(restore.bounds), 36);
-    discard.frame = CGRectMake(CGRectGetMaxX(restore.frame) + gap, 0, CGRectGetWidth(discard.bounds), 36);
+    restore.frame = CGRectMake(16, 0, CGRectGetWidth(restore.bounds), kBannerHeight);
+    discard.frame =
+        CGRectMake(CGRectGetMaxX(restore.frame) + gap, 0, CGRectGetWidth(discard.bounds), kBannerHeight);
     [banner addSubview:restore];
     [banner addSubview:discard];
+    banner.bounds = CGRectMake(0, 0, width, kBannerHeight);
 
-    CGFloat top = composer.view.safeAreaInsets.top + 8;
-    banner.frame = CGRectMake((CGRectGetWidth(composer.view.bounds) - width) / 2, top, width, 36);
-    banner.alpha = 0;
+    [[NSNotificationCenter defaultCenter] addObserver:banner
+                                             selector:@selector(keyboardMoved:)
+                                                 name:UIKeyboardWillChangeFrameNotification
+                                               object:nil];
     [composer.view addSubview:banner];
+    [banner placeAboveUndo];
+    banner.alpha = 0;
     [UIView animateWithDuration:0.25
                      animations:^{
                          banner.alpha = 1;
@@ -239,6 +415,14 @@ static void StopDrafts(UIViewController* composer) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     StartDrafts((UIViewController*)self);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    UIView* banner = [self.view viewWithTag:kDraftBannerTag];
+    if ([banner isKindOfClass:[NFBDraftBanner class]]) {
+        [(NFBDraftBanner*)banner placeAboveUndo];
+    }
 }
 
 - (void)viewWillDisappear:(BOOL)animated {

@@ -130,11 +130,12 @@ static UIViewController* RecentPage(id controller) {
         return;
     }
     NSInteger articles = ArticlesTabIndex(controller);
-    if (articles == NSNotFound || ![self respondsToSelector:@selector(reloadTabContentAt:)]) {
+    id controller = self;
+    if (articles == NSNotFound || ![controller respondsToSelector:@selector(reloadTabContentAt:)]) {
         return;
     }
     objc_setAssociatedObject(self, kReloadedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ((void (*)(id, SEL, long long))objc_msgSend)(self, @selector(reloadTabContentAt:), articles);
+    ((void (*)(id, SEL, long long))objc_msgSend)(controller, @selector(reloadTabContentAt:), articles);
 }
 
 %end

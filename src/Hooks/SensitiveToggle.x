@@ -4,6 +4,7 @@
 //
 
 #import "HookHelpers.h"
+#import "DrawerLayout.h"
 #import "Core/BHTAvatars.h"
 #import "Core/BHTEvents.h"
 #import "Settings/ModernSettingsPageViewController.h"
@@ -600,101 +601,6 @@ static CGFloat SpacesInsertY(UICollectionView* list) {
     return CGRectGetMaxY(beforeGap.frame);
 }
 
-static const void* kLayoutInsertKey = &kLayoutInsertKey;
-static const void* kMenuFailedKey = &kMenuFailedKey;
-static const void* kLayoutHookedKey = &kLayoutHookedKey;
-static const void* kOrigElementsKey = &kOrigElementsKey;
-static const void* kOrigItemKey = &kOrigItemKey;
-static const void* kOrigSizeKey = &kOrigSizeKey;
-static const CGFloat kMenuShift = 104.0;
-
-typedef NSArray* (*NFBElementsIMP)(id, SEL, CGRect);
-typedef UICollectionViewLayoutAttributes* (*NFBItemIMP)(id, SEL, NSIndexPath*);
-typedef CGSize (*NFBSizeIMP)(id, SEL);
-
-static CGFloat LayoutInsertY(id layout) {
-    UICollectionView* list = ((UICollectionViewLayout*)layout).collectionView;
-    NSNumber* mark = objc_getAssociatedObject(list, kLayoutInsertKey);
-    return mark ? mark.doubleValue : -1;
-}
-
-static UICollectionViewLayoutAttributes* ShiftedAttribute(UICollectionViewLayoutAttributes* attr, CGFloat insertY) {
-    if (CGRectGetMidY(attr.frame) <= insertY + 0.5) {
-        return attr;
-    }
-    UICollectionViewLayoutAttributes* copy = [attr copy];
-    CGRect frame = copy.frame;
-    frame.origin.y += kMenuShift;
-    copy.frame = frame;
-    return copy;
-}
-
-static NSArray* NFBLayoutElements(id self, SEL cmd, CGRect rect) {
-    NFBElementsIMP orig = (NFBElementsIMP)[objc_getAssociatedObject([self class], kOrigElementsKey) pointerValue];
-    NSArray* attrs = orig ? orig(self, cmd, rect) : nil;
-    CGFloat insertY = LayoutInsertY(self);
-    if (insertY < 0 || attrs.count == 0) {
-        return attrs;
-    }
-    NSMutableArray* shifted = [NSMutableArray arrayWithCapacity:attrs.count];
-    for (UICollectionViewLayoutAttributes* attr in attrs) {
-        [shifted addObject:ShiftedAttribute(attr, insertY)];
-    }
-    return shifted;
-}
-
-static UICollectionViewLayoutAttributes* NFBLayoutItem(id self, SEL cmd, NSIndexPath* path) {
-    NFBItemIMP orig = (NFBItemIMP)[objc_getAssociatedObject([self class], kOrigItemKey) pointerValue];
-    UICollectionViewLayoutAttributes* attr = orig ? orig(self, cmd, path) : nil;
-    CGFloat insertY = LayoutInsertY(self);
-    if (insertY < 0 || !attr) {
-        return attr;
-    }
-    return ShiftedAttribute(attr, insertY);
-}
-
-static CGSize NFBLayoutSize(id self, SEL cmd) {
-    NFBSizeIMP orig = (NFBSizeIMP)[objc_getAssociatedObject([self class], kOrigSizeKey) pointerValue];
-    CGSize size = orig ? orig(self, cmd) : CGSizeZero;
-    if (LayoutInsertY(self) >= 0) {
-        size.height += kMenuShift;
-    }
-    return size;
-}
-
-static void HookOne(Class cls, SEL sel, IMP hook, const void* store) {
-    Method method = class_getInstanceMethod(cls, sel);
-    if (!method || objc_getAssociatedObject(cls, store)) {
-        return;
-    }
-    IMP orig = method_getImplementation(method);
-    objc_setAssociatedObject(cls, store, [NSValue valueWithPointer:orig], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!class_addMethod(cls, sel, hook, method_getTypeEncoding(method))) {
-        method_setImplementation(method, hook);
-    }
-}
-
-static void HookDrawerLayout(UICollectionView* list) {
-    Class cls = list.collectionViewLayout.class;
-    if (!cls || objc_getAssociatedObject(cls, kLayoutHookedKey)) {
-        return;
-    }
-    objc_setAssociatedObject(cls, kLayoutHookedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    HookOne(cls, @selector(layoutAttributesForElementsInRect:), (IMP)NFBLayoutElements, kOrigElementsKey);
-    HookOne(cls, @selector(layoutAttributesForItemAtIndexPath:), (IMP)NFBLayoutItem, kOrigItemKey);
-    HookOne(cls, @selector(collectionViewContentSize), (IMP)NFBLayoutSize, kOrigSizeKey);
-}
-
-static BOOL RowsCoverCells(UICollectionView* list, CGRect top, CGRect bottom) {
-    CGRect band = CGRectInset(CGRectUnion(top, bottom), 8, 8);
-    for (UICollectionViewCell* cell in list.visibleCells) {
-        if (CGRectIntersectsRect(cell.frame, band)) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
 static void InstallRow(UIScrollView* list) {
     if (!list.window || !IsDrawerList(list)) {
         return;
@@ -735,74 +641,93 @@ static void InstallRow(UIScrollView* list) {
         [list addSubview:row];
     }
 
-    CGFloat insertY = -1;
-    if ([list isKindOfClass:[UICollectionView class]]) {
-        HookDrawerLayout((UICollectionView*)list);
-        if (objc_getAssociatedObject(list, kMenuFailedKey)) {
-            insertY = -1;
-        } else {
-            insertY = SpacesInsertY((UICollectionView*)list);
+    UICollectionView* collection =
+        [list isKindOfClass:[UICollectionView class]] ? (UICollectionView*)list : nil;
+    NFBBox boxes[64];
+    UICollectionViewCell* boxedCells[64];
+    int boxCount = 0;
+    if (collection) {
+        for (UICollectionViewCell* cell in collection.visibleCells) {
+            if (boxCount >= 64) {
+                break;
+            }
+            NSIndexPath* path = [collection indexPathForCell:cell];
+            UICollectionViewLayoutAttributes* attr =
+                path ? [collection layoutAttributesForItemAtIndexPath:path] : nil;
+            CGRect home = attr ? attr.frame : cell.frame;
+            boxes[boxCount].y = (float)CGRectGetMinY(home);
+            boxes[boxCount].h = (float)CGRectGetHeight(home);
+            boxes[boxCount].w = (float)CGRectGetWidth(home);
+            boxedCells[boxCount] = cell;
+            boxCount++;
         }
     }
-    // The dash hosting view already pinned these under Spaces. Leave them there
-    // unless this list itself has the Spaces row.
-    if (insertY < 0 && objc_getAssociatedObject(gOpenXRow, kDashPinnedKey)) {
-        return;
-    }
-    if (insertY >= 0) {
-        objc_setAssociatedObject(gOpenXRow, kDashPinnedKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-
-    BOOL slotReady = insertY >= 0 && objc_getAssociatedObject(list, kLayoutInsertKey) != nil;
-    CGFloat menuY = insertY >= 0 ? insertY : anchor;
-    if (insertY < 0 && eventsHeight > 0) {
-        menuY += kEventGroupGap + eventsHeight;
-    }
-    CGRect topSlot = CGRectMake(0, menuY, width, rowHeight);
-    CGRect bottomSlot = CGRectMake(0, menuY + rowHeight, width, rowHeight);
-    if (slotReady && [list isKindOfClass:[UICollectionView class]] &&
-        RowsCoverCells((UICollectionView*)list, topSlot, bottomSlot)) {
-        // The menu did not make room. Drop back under D-day instead of covering it.
-        objc_setAssociatedObject(list, kMenuFailedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(list, kLayoutInsertKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        [[(UICollectionView*)list collectionViewLayout] invalidateLayout];
-        insertY = -1;
-        menuY = anchor + (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0);
-    } else if (insertY >= 0) {
-        NSNumber* previous = objc_getAssociatedObject(list, kLayoutInsertKey);
-        if (!previous || fabs(previous.doubleValue - insertY) > 0.5) {
-            objc_setAssociatedObject(list, kLayoutInsertKey, @(insertY), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [[(UICollectionView*)list collectionViewLayout] invalidateLayout];
+    int footerIndex[2] = {0, 0};
+    int footerCount = NFBFooterIndices(boxes, boxCount, footerIndex);
+    NFBDrawerPlace place;
+    BOOL placed = NO;
+    if (footerCount == 2) {
+        NFBBox homes[2] = {boxes[footerIndex[0]], boxes[footerIndex[1]]};
+        placed = NFBPlaceDrawer((float)CGRectGetHeight(list.bounds), (float)list.contentOffset.y,
+                                (float)list.safeAreaInsets.bottom, homes, 2, (float)eventsHeight,
+                                &place);
+        if (placed) {
+            // Rows must sit in an empty slot. The fixed chrome is allowed to cover
+            // rows only while they scroll underneath it, so that check is at rest.
+            BOOL atRest = list.contentOffset.y <= 1.0;
+            for (int i = 0; i < boxCount; i++) {
+                if (i == footerIndex[0] || i == footerIndex[1]) {
+                    continue;
+                }
+                if (NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.rowY[0], place.rowH[0]) ||
+                    NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.rowY[1], place.rowH[1])) {
+                    placed = NO;
+                    break;
+                }
+                if (atRest && NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.eventsY,
+                                              (place.pinY[1] + place.pinH[1]) - place.eventsY)) {
+                    placed = NO;
+                    break;
+                }
+            }
         }
     }
 
-    CGFloat eventsExtra = eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0;
-    CGFloat tail = rowHeight * 2 + eventsExtra + 16.0;
-    CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-    if (fabs(added - tail) > 0.5) {
-        UIEdgeInsets inset = list.contentInset;
-        inset.bottom += tail - added;
-        list.contentInset = inset;
-        objc_setAssociatedObject(list, kInsetAddedKey, @(tail), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CGFloat menuY = anchor + (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0);
+    CGFloat eventsY = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
+    if (placed) {
+        CGFloat chrome = (place.pinY[1] + place.pinH[1]) - place.eventsY + 8.0;
+        CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
+        if (fabs(added - chrome) > 0.5) {
+            UIEdgeInsets inset = list.contentInset;
+            inset.bottom += chrome - added;
+            list.contentInset = inset;
+            objc_setAssociatedObject(list, kInsetAddedKey, @(chrome), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        menuY = place.rowY[0];
+        eventsY = place.eventsY;
+        for (int i = 0; i < 2; i++) {
+            UICollectionViewCell* cell = boxedCells[footerIndex[i]];
+            CGRect frame = cell.frame;
+            frame.origin.y = place.pinY[i];
+            frame.size.height = place.pinH[i];
+            cell.frame = frame;
+            [list bringSubviewToFront:cell];
+        }
     }
 
-    openX.frame = CGRectMake(0, menuY, width, rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
+    openX.frame = CGRectMake(0, menuY, width, placed ? place.rowH[0] : rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (CGRectGetHeight(openX.frame) - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), CGRectGetHeight(openX.frame));
     [row applyLabelColor];
-    row.frame = CGRectMake(0, CGRectGetMaxY(openX.frame), width, rowHeight);
-    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
+    row.frame = CGRectMake(0, placed ? place.rowY[1] : CGRectGetMaxY(openX.frame), width,
+                           placed ? place.rowH[1] : rowHeight);
+    row.icon.frame = CGRectMake(iconX, (CGRectGetHeight(row.frame) - kIconSize) / 2, kIconSize, kIconSize);
+    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), CGRectGetHeight(row.frame));
     [row.icon applyState];
-    CGFloat eventsY = CGRectGetMaxY(row.frame);
-    if ([list isKindOfClass:[UICollectionView class]]) {
-        for (UICollectionViewCell* cell in ((UICollectionView*)list).visibleCells) {
-            eventsY = MAX(eventsY, CGRectGetMaxY(cell.frame));
-        }
-    }
-    eventsY += eventsHeight > 0 ? kEventGroupGap : 0;
     events.frame = CGRectMake(0, eventsY, width, eventsHeight);
     events.hidden = eventsHeight == 0;
+    [list bringSubviewToFront:events];
 }
 
 static NSInteger gInstallDepth;
@@ -834,60 +759,7 @@ static UIView* FindSpacesView(UIView* root) {
 }
 
 static void PlaceRowsUnderSpaces(UIView* root) {
-    if (!root.window) {
-        return;
-    }
-    UIView* spaces = FindSpacesView(root);
-    if (!spaces) {
-        return;
-    }
-    UIView* rowView = spaces;
-    while (rowView.superview && rowView.superview != root && CGRectGetHeight(rowView.bounds) < 48.0) {
-        rowView = rowView.superview;
-    }
-    CGRect spot = [rowView convertRect:rowView.bounds toView:root];
-    if (CGRectIsEmpty(spot)) {
-        return;
-    }
-
-    CGFloat rowHeight = 52.0;
-    CGFloat width = CGRectGetWidth(root.bounds);
-    CGFloat iconX = 32.0;
-    CGFloat labelX = iconX + kIconSize + 16.0;
-
-    NFBOpenXRow* openX = gOpenXRow;
-    if (!openX) {
-        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
-        gOpenXRow = openX;
-    }
-    NFBSensitiveRow* row = gRow;
-    if (!row) {
-        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
-        gRow = row;
-        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-        row.baseTextColor = [UIColor labelColor];
-    }
-    if (openX.superview != root) {
-        [root addSubview:openX];
-    }
-    if (row.superview != root) {
-        [root addSubview:row];
-    }
-    objc_setAssociatedObject(openX, kDashPinnedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    CGFloat y = CGRectGetMaxY(spot);
-    openX.frame = CGRectMake(0, y, width, rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
-    row.frame = CGRectMake(0, y + rowHeight, width, rowHeight);
-    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
-    [row applyLabelColor];
-    [row.icon applyState];
-    openX.backgroundColor = root.backgroundColor ?: [UIColor systemBackgroundColor];
-    row.backgroundColor = openX.backgroundColor;
-    [root bringSubviewToFront:openX];
-    [root bringSubviewToFront:row];
+    (void)root;
 }
 
 %hook _TtC11TwitterDash21DashHostingController

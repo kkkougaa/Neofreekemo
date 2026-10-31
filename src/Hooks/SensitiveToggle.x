@@ -508,6 +508,80 @@ static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
+// The two rows belong in the official menu, directly under Spaces. Cells below
+// that row are pushed down. D-day stays at the end. Until Spaces has been seen,
+// the rows stay at the end so they never cover a menu item.
+
+static BOOL TextIsSpaces(NSString* text) {
+    if (text.length == 0 || text.length > 20) {
+        return NO;
+    }
+    NSString* trimmed =
+        [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString* name in @[ @"스페이스", @"Spaces", @"Space", @"スペース", @"Espacios", @"Espaces" ]) {
+        if ([trimmed caseInsensitiveCompare:name] == NSOrderedSame) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL ViewIsSpaces(UIView* view) {
+    if ([view isKindOfClass:[UILabel class]] && TextIsSpaces(((UILabel*)view).text)) {
+        return YES;
+    }
+    if (TextIsSpaces(view.accessibilityLabel)) {
+        return YES;
+    }
+    for (UIView* sub in view.subviews) {
+        if (ViewIsSpaces(sub)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static const void* kSpacesPathKey = &kSpacesPathKey;
+
+static CGFloat SpacesInsertY(UICollectionView* list) {
+    for (UICollectionViewCell* cell in list.visibleCells) {
+        if (!ViewIsSpaces(cell)) {
+            continue;
+        }
+        NSIndexPath* path = [list indexPathForCell:cell];
+        if (path) {
+            objc_setAssociatedObject(list, kSpacesPathKey, path, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        return CGRectGetMaxY(cell.frame);
+    }
+    NSIndexPath* saved = objc_getAssociatedObject(list, kSpacesPathKey);
+    if (saved) {
+        UICollectionViewLayoutAttributes* attr = [list layoutAttributesForItemAtIndexPath:saved];
+        if (attr) {
+            return CGRectGetMaxY(attr.frame);
+        }
+    }
+    return -1;
+}
+
+static void ShiftContentBelow(UIScrollView* list, CGFloat insertY, CGFloat shift, UIView* events,
+                              UIView* openX, UIView* row) {
+    for (UIView* sub in list.subviews) {
+        if (sub == events || sub == openX || sub == row) {
+            continue;
+        }
+        if (![sub isKindOfClass:[UICollectionReusableView class]]) {
+            continue;
+        }
+        if (CGRectGetMinY(sub.frame) + 0.5 < insertY) {
+            continue;
+        }
+        CGRect frame = sub.frame;
+        frame.origin.y += shift;
+        sub.frame = frame;
+    }
+}
+
 static void InstallRow(UIScrollView* list) {
     if (!list.window || !IsDrawerList(list)) {
         return;
@@ -517,8 +591,6 @@ static void InstallRow(UIScrollView* list) {
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
     CGFloat width = CGRectGetWidth(list.bounds);
-
-    // Sit at the end of the menu and scroll with it. A pinned row covers the D-day lines.
     CGFloat anchor = list.contentSize.height;
     if (anchor < 1) {
         return;
@@ -532,12 +604,6 @@ static void InstallRow(UIScrollView* list) {
         [list addSubview:events];
     }
     CGFloat eventsHeight = [events reloadWithIconX:iconX width:width];
-    CGFloat y = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
-    events.frame = CGRectMake(0, y, width, eventsHeight);
-    events.hidden = eventsHeight == 0;
-    if (eventsHeight > 0) {
-        y += eventsHeight;
-    }
 
     NFBOpenXRow* openX = gOpenXRow;
     if (!openX || openX.superview != list) {
@@ -546,11 +612,6 @@ static void InstallRow(UIScrollView* list) {
         gOpenXRow = openX;
         [list addSubview:openX];
     }
-    openX.frame = CGRectMake(0, y + 8, width, rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame =
-        CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
-
     NFBSensitiveRow* row = gRow;
     if (!row || row.superview != list) {
         [gRow removeFromSuperview];
@@ -560,37 +621,67 @@ static void InstallRow(UIScrollView* list) {
         row.baseTextColor = [UIColor labelColor];
         [list addSubview:row];
     }
+
+    CGFloat insertY = -1;
+    CGFloat shift = 0;
+    if ([list isKindOfClass:[UICollectionView class]]) {
+        insertY = SpacesInsertY((UICollectionView*)list);
+    }
+    if (insertY >= 0) {
+        shift = rowHeight * 2;
+    }
+
+    CGFloat menuY = insertY >= 0 ? insertY : anchor;
+    if (insertY < 0 && eventsHeight > 0) {
+        menuY += kEventGroupGap + eventsHeight;
+    }
+
+    CGFloat eventsY = anchor + shift + (eventsHeight > 0 ? kEventGroupGap : 0);
+    CGFloat eventsExtra = eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0;
+    CGFloat tail = (insertY >= 0 ? shift : rowHeight * 2) + eventsExtra + 16.0;
+    CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
+    if (fabs(added - tail) > 0.5) {
+        UIEdgeInsets inset = list.contentInset;
+        inset.bottom += tail - added;
+        list.contentInset = inset;
+        objc_setAssociatedObject(list, kInsetAddedKey, @(tail), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // Changing the inset lays the list out again and puts the cells back.
+        // Place the rows after that, below.
+        if ([list isKindOfClass:[UICollectionView class]]) {
+            CGFloat again = SpacesInsertY((UICollectionView*)list);
+            if (again >= 0) {
+                insertY = again;
+                shift = rowHeight * 2;
+                menuY = insertY;
+            }
+        }
+        eventsY = anchor + shift + (eventsHeight > 0 ? kEventGroupGap : 0);
+    }
+
+    if (insertY >= 0) {
+        ShiftContentBelow(list, insertY, shift, events, openX, row);
+    }
+    openX.frame = CGRectMake(0, menuY, width, rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
     [row applyLabelColor];
     row.frame = CGRectMake(0, CGRectGetMaxY(openX.frame), width, rowHeight);
     row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
     row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
     [row.icon applyState];
-
-    CGFloat needed = CGRectGetMaxY(row.frame) - anchor + 16.0;
-    CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-    if (fabs(added - needed) > 0.5) {
-        UIEdgeInsets inset = list.contentInset;
-        inset.bottom += needed - added;
-        list.contentInset = inset;
-        objc_setAssociatedObject(list, kInsetAddedKey, @(needed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    events.frame = CGRectMake(0, eventsY, width, eventsHeight);
+    events.hidden = eventsHeight == 0;
 }
 
-static const void* kCheckedAtKey = &kCheckedAtKey;
+static NSInteger gInstallDepth;
 
-// The drawer may be built long after launch and without any view controller
-// appearance, so watch the lists themselves; throttled per list.
 static void CheckList(UIScrollView* list) {
-    if (!list.window) {
+    if (!list.window || gInstallDepth > 0) {
         return;
     }
-    CFTimeInterval now = CACurrentMediaTime();
-    NSNumber* last = objc_getAssociatedObject(list, kCheckedAtKey);
-    if (last && now - last.doubleValue < 0.5) {
-        return;
-    }
-    objc_setAssociatedObject(list, kCheckedAtKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    gInstallDepth++;
     InstallRow(list);
+    gInstallDepth--;
 }
 
 %hook UITableView

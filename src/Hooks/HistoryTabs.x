@@ -130,7 +130,6 @@ static UIViewController* RecentPage(id controller) {
         return;
     }
     NSInteger articles = ArticlesTabIndex(controller);
-    id controller = self;
     if (articles == NSNotFound || ![controller respondsToSelector:@selector(reloadTabContentAt:)]) {
         return;
     }

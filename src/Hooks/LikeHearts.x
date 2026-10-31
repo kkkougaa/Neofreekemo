@@ -333,10 +333,14 @@ static void NoteFavoriteTap(UIView* button, BOOL selectedBefore, UIImage* imageB
         if (view.window) {
             point = [recognizer locationInView:view.window];
         }
-    } else if ([self isKindOfClass:[UIView class]]) {
-        view = (UIView*)self;
-        point = [view convertPoint:CGPointMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds))
-                            toView:view.window];
+    } else {
+        // Logos only forward-declares this Swift class, so self cannot be messaged.
+        id receiver = (id)self;
+        if ([receiver isKindOfClass:[UIView class]]) {
+            view = receiver;
+            point = [view convertPoint:CGPointMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds))
+                               toView:view.window];
+        }
     }
     if (!view.window) {
         return;

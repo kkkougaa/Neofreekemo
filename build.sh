@@ -26,6 +26,18 @@ strip_plugins() {
 
     unzip -q "$ipa" -d "$tmp"
     rm -rf "$tmp/Payload/Twitter.app/PlugIns" "$tmp/Payload/decrypt.day"
+
+    # SideStore compares this to the source. Keep it on the tweak version
+    # (7.3.2, then 7.3.3, ...) instead of the bundled X version, which is
+    # numerically higher and blocks the update.
+    local app_plist="$tmp/Payload/Twitter.app/Info.plist"
+    local tweak_version
+    tweak_version="$(awk '/^Version:/ {print $2; exit}' "$SCRIPT_DIR/control")"
+    if [[ -n "$tweak_version" && -f "$app_plist" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $tweak_version" "$app_plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${tweak_version##*.}" "$app_plist"
+    fi
+
     rm -f "$ipa"
 
     (

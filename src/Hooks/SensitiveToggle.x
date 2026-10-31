@@ -283,6 +283,64 @@ static UIImage* ToggleImage(NSString* name) {
 
 @end
 
+// MARK: Open in X, pinned just above NSFW mode
+
+@interface NFBOpenXRow : UIControl
+@property (nonatomic, strong) UIImageView* iconView;
+@property (nonatomic, strong) UILabel* label;
+@end
+
+@implementation NFBOpenXRow
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.isAccessibilityElement = YES;
+        self.accessibilityTraits = UIAccessibilityTraitButton;
+        self.accessibilityLabel =
+            [[BHTBundle sharedBundle] localizedStringForKey:@"OPEN_IN_X_TITLE"];
+
+        UIImageSymbolConfiguration* config = [UIImageSymbolConfiguration
+            configurationWithPointSize:22
+                                weight:UIImageSymbolWeightSemibold];
+        _iconView = [[UIImageView alloc]
+            initWithImage:[UIImage systemImageNamed:@"arrow.up.forward.app"
+                                    withConfiguration:config]];
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        _iconView.tintColor = [UIColor labelColor];
+        _iconView.userInteractionEnabled = NO;
+        [self addSubview:_iconView];
+
+        _label = [UILabel new];
+        _label.text = self.accessibilityLabel;
+        _label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        _label.textColor = [UIColor labelColor];
+        _label.userInteractionEnabled = NO;
+        [self addSubview:_label];
+
+        [self addTarget:self
+                      action:@selector(rowTapped)
+            forControlEvents:UIControlEventTouchUpInside];
+    }
+    return self;
+}
+
+- (void)rowTapped {
+    NSURL* url = [NSURL URLWithString:@"https://x.com"];
+    if (!url) {
+        return;
+    }
+    [[[UIImpactFeedbackGenerator alloc]
+        initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    self.alpha = highlighted ? 0.6 : 1.0;
+}
+
+@end
+
 // MARK: Locating the drawer list
 
 static BOOL IsDrawerList(UIScrollView* list) {
@@ -437,6 +495,7 @@ static const NSUInteger kMaxEventRows = 4;
 @end
 
 static __weak NFBSensitiveRow* gRow;
+static __weak NFBOpenXRow* gOpenRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
@@ -467,8 +526,24 @@ static void InstallRow(UIScrollView* list) {
     events.frame = CGRectMake(0, bottom + kEventGroupGap, CGRectGetWidth(list.bounds), eventsHeight);
     events.hidden = eventsHeight == 0;
 
-    // The NSFW mode row is its own control, pinned near the bottom of the drawer.
+    // X로 이동 sits directly above NSFW mode. Both stay pinned to the drawer bottom.
     UIView* host = list.superview;
+    CGFloat safeBottom = MAX(list.window.safeAreaInsets.bottom, host.safeAreaInsets.bottom);
+    CGFloat nsfwY = CGRectGetHeight(host.bounds) - safeBottom - rowHeight - 12;
+
+    NFBOpenXRow* openRow = gOpenRow;
+    if (!openRow || openRow.superview != host) {
+        [gOpenRow removeFromSuperview];
+        openRow = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenRow = openRow;
+        [host addSubview:openRow];
+    }
+    openRow.frame = CGRectMake(0, nsfwY - rowHeight, CGRectGetWidth(host.bounds), rowHeight);
+    openRow.iconView.frame =
+        CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openRow.label.frame = CGRectMake(
+        labelX, 0, MAX(CGRectGetWidth(openRow.bounds) - labelX - 12, 0), rowHeight);
+
     NFBSensitiveRow* row = gRow;
     if (!row || row.superview != host) {
         [gRow removeFromSuperview];
@@ -479,17 +554,17 @@ static void InstallRow(UIScrollView* list) {
         [host addSubview:row];
     }
     [row applyLabelColor];
-    CGFloat safeBottom = MAX(list.window.safeAreaInsets.bottom, host.safeAreaInsets.bottom);
-    row.frame = CGRectMake(0, CGRectGetHeight(host.bounds) - safeBottom - rowHeight - 12,
-                           CGRectGetWidth(host.bounds), rowHeight);
+    row.frame = CGRectMake(0, nsfwY, CGRectGetWidth(host.bounds), rowHeight);
     row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
     row.label.frame = CGRectMake(
         labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
     [row.icon applyState];
+    [host bringSubviewToFront:openRow];
     [host bringSubviewToFront:row];
 
-    // Room to scroll past the D-day group and the pinned row.
-    CGFloat needed = (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight + 24.0;
+    // Room to scroll past the D-day group and the two pinned rows.
+    CGFloat needed =
+        (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight * 2 + 24.0;
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
     if (fabs(added - needed) > 0.5) {
         UIEdgeInsets inset = list.contentInset;

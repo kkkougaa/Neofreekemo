@@ -507,20 +507,114 @@ static __weak NFBSensitiveRow* gRow;
 static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
+static const void* kDockInsetKey = &kDockInsetKey;
+static const NSInteger kDockTag = 0x4e464244;
+static const CGFloat kDockRowHeight = 52.0;
+
+// The two buttons are not part of the scrolling menu. They sit on the drawer
+// itself, at the bottom, and stay there while the menu (and D-day) scroll.
+static UIView* DrawerHost(UIView* start) {
+    UIView* ancestor = start;
+    for (int depth = 0; ancestor && depth < 14; depth++, ancestor = ancestor.superview) {
+        id responder = ancestor.nextResponder;
+        if ([NSStringFromClass([responder class]) containsString:@"DashHostingController"]) {
+            return ancestor;
+        }
+    }
+    return nil;
+}
+
+static void PinDrawerDock(UIView* host) {
+    if (!host.window) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(host.bounds);
+    CGFloat height = CGRectGetHeight(host.bounds);
+    if (width < 80.0 || height < 200.0) {
+        return;
+    }
+
+    CGFloat safe = host.safeAreaInsets.bottom;
+    if (safe < 1.0) {
+        CGRect inWindow = [host convertRect:host.bounds toView:nil];
+        CGFloat windowBottom =
+            CGRectGetHeight(host.window.bounds) - host.window.safeAreaInsets.bottom;
+        CGFloat overflow = CGRectGetMaxY(inWindow) - windowBottom;
+        if (overflow > 0.0) {
+            safe = overflow;
+        }
+    }
+
+    UIView* dock = [host viewWithTag:kDockTag];
+    if (!dock) {
+        dock = [UIView new];
+        dock.tag = kDockTag;
+        dock.backgroundColor = [UIColor systemBackgroundColor];
+        UIView* line = [UIView new];
+        line.tag = kDockTag + 1;
+        line.backgroundColor = [UIColor separatorColor];
+        line.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [dock addSubview:line];
+        [host addSubview:dock];
+    }
+
+    CGFloat iconX = 32.0;
+    CGFloat labelX = iconX + kIconSize + 16.0;
+    CGFloat dockHeight = kDockRowHeight * 2.0 + safe;
+    dock.frame = CGRectMake(0, height - dockHeight, width, dockHeight);
+    UIView* line = [dock viewWithTag:kDockTag + 1];
+    line.frame = CGRectMake(0, 0, width, 1.0 / UIScreen.mainScreen.scale);
+
+    NFBOpenXRow* openX = gOpenXRow;
+    if (!openX) {
+        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenXRow = openX;
+    }
+    if (openX.superview != dock) {
+        [openX removeFromSuperview];
+        [dock addSubview:openX];
+    }
+    openX.frame = CGRectMake(0, 0, width, kDockRowHeight);
+    openX.icon.frame =
+        CGRectMake(iconX, (kDockRowHeight - kIconSize) / 2.0, kIconSize, kIconSize);
+    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12.0, 0), kDockRowHeight);
+    openX.backgroundColor = dock.backgroundColor;
+
+    NFBSensitiveRow* row = gRow;
+    if (!row) {
+        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
+        gRow = row;
+        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        row.baseTextColor = [UIColor labelColor];
+    }
+    if (row.superview != dock) {
+        [row removeFromSuperview];
+        [dock addSubview:row];
+    }
+    [row applyLabelColor];
+    row.frame = CGRectMake(0, kDockRowHeight, width, kDockRowHeight);
+    row.icon.frame =
+        CGRectMake(iconX, (kDockRowHeight - kIconSize) / 2.0, kIconSize, kIconSize);
+    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12.0, 0), kDockRowHeight);
+    [row.icon applyState];
+    row.backgroundColor = dock.backgroundColor;
+    [host bringSubviewToFront:dock];
+}
 
 static void InstallRow(UIScrollView* list) {
     if (!list.window || !IsDrawerList(list)) {
         return;
     }
 
-    CGFloat rowHeight = 52.0;
-    CGFloat iconX = 32.0;
-    CGFloat labelX = iconX + kIconSize + 16.0;
-    CGFloat width = CGRectGetWidth(list.bounds);
+    UIView* host = DrawerHost(list);
+    if (host) {
+        PinDrawerDock(host);
+    }
 
-    // Sit at the end of the menu and scroll with it. A pinned row covers the D-day lines.
+    CGFloat iconX = 32.0;
+    CGFloat width = CGRectGetWidth(list.bounds);
     CGFloat anchor = list.contentSize.height;
-    if (anchor < 1) {
+    if (anchor < 1.0) {
         return;
     }
 
@@ -532,47 +626,20 @@ static void InstallRow(UIScrollView* list) {
         [list addSubview:events];
     }
     CGFloat eventsHeight = [events reloadWithIconX:iconX width:width];
-    CGFloat y = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
-    events.frame = CGRectMake(0, y, width, eventsHeight);
+    CGFloat eventsY = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
+    events.frame = CGRectMake(0, eventsY, width, eventsHeight);
     events.hidden = eventsHeight == 0;
-    if (eventsHeight > 0) {
-        y += eventsHeight;
-    }
 
-    NFBOpenXRow* openX = gOpenXRow;
-    if (!openX || openX.superview != list) {
-        [gOpenXRow removeFromSuperview];
-        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
-        gOpenXRow = openX;
-        [list addSubview:openX];
-    }
-    openX.frame = CGRectMake(0, y + 8, width, rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame =
-        CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
-
-    NFBSensitiveRow* row = gRow;
-    if (!row || row.superview != list) {
-        [gRow removeFromSuperview];
-        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
-        gRow = row;
-        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-        row.baseTextColor = [UIColor labelColor];
-        [list addSubview:row];
-    }
-    [row applyLabelColor];
-    row.frame = CGRectMake(0, CGRectGetMaxY(openX.frame), width, rowHeight);
-    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
-    [row.icon applyState];
-
-    CGFloat needed = CGRectGetMaxY(row.frame) - anchor + 16.0;
-    CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-    if (fabs(added - needed) > 0.5) {
+    CGFloat eventsInset = eventsHeight > 0 ? kEventGroupGap + eventsHeight + 16.0 : 0;
+    CGFloat eventsAdded = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
+    CGFloat dockInset = kDockRowHeight * 2.0;
+    CGFloat dockAdded = [objc_getAssociatedObject(list, kDockInsetKey) doubleValue];
+    if (fabs(eventsAdded - eventsInset) > 0.5 || fabs(dockAdded - dockInset) > 0.5) {
         UIEdgeInsets inset = list.contentInset;
-        inset.bottom += needed - added;
+        inset.bottom += (eventsInset - eventsAdded) + (dockInset - dockAdded);
         list.contentInset = inset;
-        objc_setAssociatedObject(list, kInsetAddedKey, @(needed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(list, kInsetAddedKey, @(eventsInset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(list, kDockInsetKey, @(dockInset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 
@@ -592,6 +659,15 @@ static void CheckList(UIScrollView* list) {
     objc_setAssociatedObject(list, kCheckedAtKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     InstallRow(list);
 }
+
+%hook _TtC11TwitterDash21DashHostingController
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    PinDrawerDock(((UIViewController*)self).view);
+}
+
+%end
 
 %hook UITableView
 

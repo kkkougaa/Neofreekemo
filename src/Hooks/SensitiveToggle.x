@@ -566,7 +566,38 @@ static CGFloat SpacesInsertY(UICollectionView* list) {
             return CGRectGetMaxY(attr.frame);
         }
     }
-    return -1;
+
+    // The menu titles are drawn by SwiftUI, not UILabels. On screen the first
+    // group is 프로필, 커뮤니티, 리스트, 스페이스, then a gap, then 설정.
+    NSMutableArray<UIView*>* rows = [NSMutableArray array];
+    for (UICollectionViewCell* cell in list.visibleCells) {
+        CGFloat height = CGRectGetHeight(cell.frame);
+        if (height < 44.0 || height > 80.0 || CGRectGetWidth(cell.frame) < 200.0) {
+            continue;
+        }
+        [rows addObject:cell];
+    }
+    [rows sortUsingComparator:^NSComparisonResult(UIView* a, UIView* b) {
+        CGFloat ay = CGRectGetMinY(a.frame);
+        CGFloat by = CGRectGetMinY(b.frame);
+        return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+    }];
+    if (rows.count < 4) {
+        return -1;
+    }
+    CGFloat bestGap = 12.0;
+    UIView* beforeGap = nil;
+    for (NSUInteger i = 1; i < rows.count; i++) {
+        CGFloat gap = CGRectGetMinY(rows[i].frame) - CGRectGetMaxY(rows[i - 1].frame);
+        if (gap > bestGap) {
+            bestGap = gap;
+            beforeGap = rows[i - 1];
+        }
+    }
+    if (!beforeGap) {
+        beforeGap = rows[3];
+    }
+    return CGRectGetMaxY(beforeGap.frame);
 }
 
 static void ShiftContentBelow(UIScrollView* list, CGFloat insertY, CGFloat shift, UIView* events,

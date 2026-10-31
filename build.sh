@@ -29,11 +29,20 @@ strip_plugins() {
 
     # SideStore compares this to the source. Keep it on the tweak version
     # (7.3.2, then 7.3.3, ...) instead of the bundled X version, which is
-    # numerically higher and blocks the update.
+    # numerically higher and blocks the update. The original strings are kept
+    # so the running app can still tell X it is 12.38.1. Announcing 7.3.x
+    # makes X Chat refuse the connection.
     local app_plist="$tmp/Payload/Twitter.app/Info.plist"
     local tweak_version
     tweak_version="$(awk '/^Version:/ {print $2; exit}' "$SCRIPT_DIR/control")"
     if [[ -n "$tweak_version" && -f "$app_plist" ]]; then
+        if ! /usr/libexec/PlistBuddy -c 'Print :NFBOriginalShortVersion' "$app_plist" >/dev/null 2>&1; then
+            local orig_short orig_build
+            orig_short="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_plist")"
+            orig_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_plist")"
+            /usr/libexec/PlistBuddy -c "Add :NFBOriginalShortVersion string ${orig_short}" "$app_plist"
+            /usr/libexec/PlistBuddy -c "Add :NFBOriginalBundleVersion string ${orig_build}" "$app_plist"
+        fi
         /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $tweak_version" "$app_plist"
         /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${tweak_version##*.}" "$app_plist"
     fi

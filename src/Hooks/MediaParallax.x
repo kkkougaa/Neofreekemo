@@ -390,6 +390,9 @@ static void NotePhotoImage(UIImageView* image) {
 %end
 
 %ctor {
+    // A custom constructor replaces Logos's, which is the only thing that installs the hooks above.
+    %init;
+
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
     void (^reset)(NSNotification*) = ^(NSNotification* note) {
         (void)note;

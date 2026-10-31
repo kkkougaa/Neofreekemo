@@ -140,9 +140,20 @@ static UIColor* LikeTint(UIView* source) {
     return [UIColor colorWithRed:0.973 green:0.114 blue:0.498 alpha:1];
 }
 
-static BOOL ControlIsSelected(UIView* view) {
-    if ([view isKindOfClass:[UIControl class]]) {
-        return ((UIControl*)view).isSelected;
+// The favorite control is a UIView. The liked state lives on its inner button
+// (TTAStatusInlineActionButton.button), not on the view itself.
+static BOOL ActionLooksSelected(UIView* view) {
+    if (!view) {
+        return NO;
+    }
+    if ([view isKindOfClass:[UIControl class]] && ((UIControl*)view).isSelected) {
+        return YES;
+    }
+    if ([view respondsToSelector:@selector(button)]) {
+        id inner = ((id (*)(id, SEL))objc_msgSend)(view, @selector(button));
+        if ([inner isKindOfClass:[UIControl class]] && ((UIControl*)inner).isSelected) {
+            return YES;
+        }
     }
     for (UIView* sub in view.subviews) {
         if ([sub isKindOfClass:[UIControl class]] && ((UIControl*)sub).isSelected) {
@@ -168,10 +179,11 @@ static void SpawnHeartsAt(CGPoint center, UIWindow* window, UIColor* color) {
     host.accessibilityElementsHidden = YES;
     host.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [window addSubview:host];
+    [window bringSubviewToFront:host];
 
-    static const NSInteger kCount = 6;
+    static const NSInteger kCount = 8;
     for (NSInteger i = 0; i < kCount; i++) {
-        CGFloat side = 7 + (i % 3) * 2;
+        CGFloat side = 12 + (i % 3) * 3;
         UIImageView* heart = [[UIImageView alloc] initWithImage:glyph];
         heart.userInteractionEnabled = NO;
         heart.isAccessibilityElement = NO;
@@ -184,7 +196,7 @@ static void SpawnHeartsAt(CGPoint center, UIWindow* window, UIColor* color) {
         heart.transform = CGAffineTransformMakeScale(0.45, 0.45);
         [host addSubview:heart];
 
-        CGFloat rise = 26.0 + (i % 3) * 7.0;
+        CGFloat rise = 36.0 + (i % 3) * 8.0;
         NSTimeInterval duration = 0.62 + (i % 4) * 0.07;
         NSTimeInterval delay = i * 0.025;
         CGPoint end = CGPointMake(center.x + spread, center.y - rise);
@@ -231,6 +243,21 @@ static void SpawnFromView(UIView* source) {
     SpawnHeartsAt(center, source.window, LikeTint(source));
 }
 
+// Same burst, without the "armed by a tap" flag. Used by the real like paths below.
+static void SpawnHeartsOnce(UIView* source) {
+    if (!source.window || !HeartsOn()) {
+        return;
+    }
+    NSDate* last = objc_getAssociatedObject(source, kBurstAtKey);
+    if (last && -[last timeIntervalSinceNow] < 0.45) {
+        return;
+    }
+    objc_setAssociatedObject(source, kBurstAtKey, [NSDate date], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CGPoint center = [source convertPoint:CGPointMake(CGRectGetMidX(source.bounds), CGRectGetMidY(source.bounds))
+                                 toView:source.window];
+    SpawnHeartsAt(center, source.window, LikeTint(source));
+}
+
 static void NoteFavoriteTap(UIView* button, BOOL selectedBefore, UIImage* imageBefore) {
     UIView* host = FavoriteHost(button) ?: button;
     if (!IsFavoriteView(host) && !IsFavoriteView(button)) {
@@ -245,7 +272,7 @@ static void NoteFavoriteTap(UIView* button, BOOL selectedBefore, UIImage* imageB
         return;
     }
     ArmHost(host);
-    BOOL selectedNow = ControlIsSelected(button) || ControlIsSelected(host);
+    BOOL selectedNow = ActionLooksSelected(button) || ActionLooksSelected(host);
     BOOL imageChanged = [button isKindOfClass:[UIButton class]] &&
                         ((UIButton*)button).imageView.image != imageBefore;
     if (selectedNow || imageChanged) {
@@ -286,33 +313,90 @@ static void NoteFavoriteTap(UIView* button, BOOL selectedBefore, UIImage* imageB
 
 - (void)didTapInlineActionButton:(UIView*)button {
     BOOL favorite = IsFavoriteView(button);
-    BOOL selectedBefore = favorite && ControlIsSelected(button);
-    if (favorite && !selectedBefore && HeartsOn()) {
-        ArmHost(button);
-    } else if (favorite && selectedBefore) {
+    // Liked state is read before the tap. The button is not a UIControl, so
+    // waiting for isSelected to flip never happens and the burst was skipped.
+    BOOL liked = favorite && ActionLooksSelected(button);
+    if (favorite && liked) {
         DisarmHost(button);
     }
     %orig;
-    if (favorite && !selectedBefore && ControlIsSelected(button)) {
-        SpawnFromView(button);
+    if (favorite && !liked) {
+        SpawnHeartsOnce(button);
     }
 }
 
 %end
 
-%hook T1SlideshowStatusView
+// 12.38.1: the timeline like button is TTAStatusInlineFavoriteButton, and the
+// tap lands on TTAStatusInlineActionButton's -didTap (the subclass does not
+// override it). T1SlideshowStatusView is not in this build.
+@interface TTAStatusInlineActionButton : UIView
+- (void)didTap;
+@end
 
-- (void)_favoriteAction:(id)sender {
-    UIView* view = [sender isKindOfClass:[UIView class]] ? sender : nil;
-    BOOL selectedBefore = [view isKindOfClass:[UIControl class]] && ((UIControl*)view).isSelected;
-    if (view && !selectedBefore && HeartsOn()) {
-        ArmHost(view);
-    }
+%hook TTAStatusInlineActionButton
+
+- (void)didTap {
+    UIView* view = (UIView*)self;
+    BOOL favorite = IsFavoriteView(view);
+    BOOL liked = favorite && ActionLooksSelected(view);
     %orig;
-    if (view && !selectedBefore && [view isKindOfClass:[UIControl class]] &&
-        ((UIControl*)view).isSelected) {
-        SpawnFromView(view);
+    if (favorite && !liked) {
+        SpawnHeartsOnce(view);
     }
+}
+
+%end
+
+// The status row adapter is what 12.38.1 actually calls for an inline-bar tap.
+// The reply composer's action bar uses the same selector on its own controller.
+static void NoteInlineLike(id actionsView, NSUInteger type, void (^original)(void)) {
+    UIView* button = nil;
+    if ([actionsView respondsToSelector:@selector(viewForInlineActionWithType:)]) {
+        id found = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            actionsView, @selector(viewForInlineActionWithType:), type);
+        if ([found isKindOfClass:[UIView class]]) {
+            button = IsFavoriteView((UIView*)found) ? (UIView*)found : FavoriteHost((UIView*)found);
+        }
+    }
+    BOOL favorite = button != nil;
+    BOOL liked = favorite && ActionLooksSelected(button);
+    original();
+    if (favorite && !liked) {
+        SpawnHeartsOnce(button);
+    }
+}
+
+%hook T1StandardStatusInlineActionsViewAdapter
+
+- (void)inlineActionsView:(id)actionsView didTapInlineActionWithType:(NSUInteger)type {
+    NoteInlineLike(actionsView, type, ^{
+        %orig;
+    });
+}
+
+%end
+
+%hook T1PersistentComposeInlineActionsViewController
+
+- (void)inlineActionsView:(id)actionsView didTapInlineActionWithType:(NSUInteger)type {
+    NoteInlineLike(actionsView, type, ^{
+        %orig;
+    });
+}
+
+%end
+
+// Double tap on a timeline photo or video likes; it does not unlike.
+%hook T1InlineMediaView
+
+- (void)_t1_doubleTapAction {
+    %orig;
+    UIView* view = (UIView*)self;
+    if (!view.window) {
+        return;
+    }
+    SpawnHeartsOnce(view);
 }
 
 %end

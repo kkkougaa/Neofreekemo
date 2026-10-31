@@ -283,6 +283,73 @@ static UIImage* ToggleImage(NSString* name) {
 
 @end
 
+// MARK: Open original X app row
+// A plain button above the NSFW row that hands the user over to the original X app.
+// This build is re-signed without the app's associated domains, so a universal link to
+// x.com is not claimed by it and iOS gives it to the original X app. Universal-links-only
+// keeps it from falling into Safari when X is not installed; then the plain URL is tried.
+
+static const NSInteger kOpenXRowTag = 0x4e464232;
+
+@interface NFBOpenXRow : UIControl
+@property (nonatomic, strong) UIImageView* icon;
+@property (nonatomic, strong) UILabel* label;
+@end
+
+@implementation NFBOpenXRow
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.tag = kOpenXRowTag;
+        self.isAccessibilityElement = YES;
+        self.accessibilityTraits = UIAccessibilityTraitButton;
+        self.accessibilityLabel =
+            [[BHTBundle sharedBundle] localizedStringForKey:@"OPEN_ORIGINAL_X_TITLE"];
+
+        UIImageSymbolConfiguration* config =
+            [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightSemibold];
+        _icon = [[UIImageView alloc]
+            initWithImage:[UIImage systemImageNamed:@"arrow.up.forward.app" withConfiguration:config]];
+        _icon.contentMode = UIViewContentModeCenter;
+        _icon.tintColor = [UIColor systemGrayColor];
+        _icon.userInteractionEnabled = NO;
+        [self addSubview:_icon];
+
+        _label = [UILabel new];
+        _label.text = self.accessibilityLabel;
+        _label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        _label.textColor = [UIColor labelColor];
+        _label.userInteractionEnabled = NO;
+        [self addSubview:_label];
+
+        [self addTarget:self
+                      action:@selector(rowTapped)
+            forControlEvents:UIControlEventTouchUpInside];
+    }
+    return self;
+}
+
+- (void)rowTapped {
+    [[[UIImpactFeedbackGenerator alloc]
+        initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    NSURL* url = [NSURL URLWithString:@"https://x.com/home"];
+    UIApplication* app = [UIApplication sharedApplication];
+    [app openURL:url
+                  options:@{UIApplicationOpenURLOptionUniversalLinksOnly : @YES}
+        completionHandler:^(BOOL success) {
+            if (!success) {
+                [app openURL:url options:@{} completionHandler:nil];
+            }
+        }];
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    self.alpha = highlighted ? 0.6 : 1.0;
+}
+
+@end
+
 // MARK: Locating the drawer list
 
 static BOOL IsDrawerList(UIScrollView* list) {
@@ -437,6 +504,7 @@ static const NSUInteger kMaxEventRows = 4;
 @end
 
 static __weak NFBSensitiveRow* gRow;
+static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
@@ -488,8 +556,21 @@ static void InstallRow(UIScrollView* list) {
     [row.icon applyState];
     [host bringSubviewToFront:row];
 
-    // Room to scroll past the D-day group and the pinned row.
-    CGFloat needed = (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight + 24.0;
+    // The original X app button sits right above the NSFW row.
+    NFBOpenXRow* openX = gOpenXRow;
+    if (!openX || openX.superview != host) {
+        [gOpenXRow removeFromSuperview];
+        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenXRow = openX;
+        [host addSubview:openX];
+    }
+    openX.frame = CGRectOffset(row.frame, 0, -rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame = row.label.frame;
+    [host bringSubviewToFront:openX];
+
+    // Room to scroll past the D-day group and the two pinned rows.
+    CGFloat needed = (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight * 2 + 24.0;
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
     if (fabs(added - needed) > 0.5) {
         UIEdgeInsets inset = list.contentInset;

@@ -467,6 +467,7 @@
 "KEMO_KEEP_POSITION_TITLE" = "Keep my place when refreshing";
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
+"OPEN_ORIGINAL_X_TITLE" = "Open original X app";
 "KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
 "KEMO_HEADER_BUBBLE_TITLE" = "Logo speech bubble";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "Bubble when the Spotify song changes";

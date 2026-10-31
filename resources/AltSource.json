@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.15",
+      "subtitle": "NeoFreeBird version 7.3.16",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.16",
+          "buildVersion": "16",
+          "date": "2026-10-31T19:11:26Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.16/NeoFreeBird-Twitter-sideloaded_7.3.16_12.38.1.ipa",
+          "size": 266119217,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Version 7.3.16\n\nFixes\n- Fixed like hearts, header glow, post-sent burst and media parallax not working at all on X 12.38.1\n- Header glow is a bit more visible\n- Like hearts now also work on photo double-tap\n- Post-sent burst now triggers for replies and inline compose too"
+        },
         {
           "version": "7.3.15",
           "buildVersion": "15",

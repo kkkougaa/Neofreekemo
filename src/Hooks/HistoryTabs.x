@@ -7,52 +7,41 @@
 
 // MARK: - Activity history tabs
 
-// The history screen's pages come from LegacySegmentedViewController
-// -pagingViewController:viewControllerAt:. The articles tab keeps its place.
-// That page is the recently viewed list, and the tab title becomes "이전내역".
+// The on-screen history controller is T1TwitterSwift's private
+// T1ActivityHistoryContainerViewController. Its child is a LegacySegmentedViewController.
+// The tabs are 북마크, 동영상, 아티클, 마음에 들어요. The 아티클 page is the recently
+// viewed list, and that tab's label becomes "이전내역".
 
 extern UIViewController* NFBMakeRecentViewController(void);
 
 static const void* kRecentPageKey = &kRecentPageKey;
 static const void* kReloadedKey = &kReloadedKey;
 
-static NSString* ArticlesTabTitle(void) {
-    static NSString* title;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        for (NSBundle* bundle in [NSBundle allBundles]) {
-            NSString* value = [bundle localizedStringForKey:@"ACTIVITY_HISTORY_CONTENT_TYPE_ARTICLES"
-                                                       value:@"__missing"
-                                                       table:nil];
-            if (value.length > 0 && ![value isEqualToString:@"__missing"] &&
-                ![value isEqualToString:@"ACTIVITY_HISTORY_CONTENT_TYPE_ARTICLES"]) {
-                title = value;
-                return;
-            }
+static BOOL IsHistorySegment(UIViewController* controller) {
+    if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !controller) {
+        return NO;
+    }
+    UIResponder* cursor = controller;
+    for (int depth = 0; cursor && depth < 8; depth++, cursor = cursor.nextResponder) {
+        if ([NSStringFromClass([cursor class]) containsString:@"ActivityHistory"]) {
+            return YES;
         }
-        title = @"아티클";
-    });
-    return title;
+    }
+    return NO;
 }
 
-static BOOL IsHistorySegment(id controller) {
-    if (![BHTSettings boolForKey:@"kemo_history_tabs"]) {
-        return NO;
+static UIView* HistoryTabBar(UIViewController* controller) {
+    if ([controller respondsToSelector:@selector(tabBarView)]) {
+        id bar = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(tabBarView));
+        if ([bar isKindOfClass:[UIView class]]) {
+            return bar;
+        }
     }
-    if (![controller respondsToSelector:@selector(dataSource)]) {
-        return NO;
-    }
-    id source = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(dataSource));
-    return source && [NSStringFromClass([source class]) containsString:@"ActivityHistory"];
+    return nil;
 }
 
-static void ReplaceArticlesTabTitle(UIView* root) {
+static void CollectTabLabels(UIView* root, NSMutableArray<UILabel*>* labels) {
     if (!root) {
-        return;
-    }
-    NSString* articles = ArticlesTabTitle();
-    NSString* title = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
-    if (articles.length == 0 || title.length == 0) {
         return;
     }
     EnumerateSubviewsRecursively(root, ^(UIView* view) {
@@ -60,45 +49,69 @@ static void ReplaceArticlesTabTitle(UIView* root) {
             return;
         }
         UILabel* label = (UILabel*)view;
-        if (![label.text isEqualToString:articles]) {
+        if (label.text.length == 0 || label.text.length > 20) {
             return;
+        }
+        [labels addObject:label];
+    });
+}
+
+static NSArray<UILabel*>* HistoryTabLabels(UIViewController* controller) {
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    CollectTabLabels(HistoryTabBar(controller), labels);
+    if (labels.count < 2) {
+        [labels removeAllObjects];
+        UIView* window = controller.view.window;
+        if (window) {
+            EnumerateSubviewsRecursively(window, ^(UIView* view) {
+                if (![NSStringFromClass(view.class) containsString:@"SegmentedTabCell"]) {
+                    return;
+                }
+                CGRect onScreen = [view convertRect:view.bounds toView:window];
+                CGRect page = [controller.view convertRect:controller.view.bounds toView:window];
+                if (!CGRectIntersectsRect(onScreen, page)) {
+                    return;
+                }
+                CollectTabLabels(view, labels);
+            });
+        }
+    }
+    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
+        UIView* root = controller.view.window ?: controller.view;
+        CGFloat ax = CGRectGetMinX([a convertRect:a.bounds toView:root]);
+        CGFloat bx = CGRectGetMinX([b convertRect:b.bounds toView:root]);
+        return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
+    }];
+    return labels;
+}
+
+static NSInteger ArticlesTabIndex(UIViewController* controller) {
+    NSArray<UILabel*>* labels = HistoryTabLabels(controller);
+    NSString* ours = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
+    for (NSUInteger i = 0; i < labels.count; i++) {
+        NSString* text = labels[i].text;
+        if ([text isEqualToString:@"아티클"] || [text isEqualToString:ours] ||
+            [text isEqualToString:@"Articles"]) {
+            return (NSInteger)i;
+        }
+    }
+    return NSNotFound;
+}
+
+static void ReplaceArticlesTabTitle(UIViewController* controller) {
+    NSString* title = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
+    if (title.length == 0) {
+        return;
+    }
+    for (UILabel* label in HistoryTabLabels(controller)) {
+        if (![label.text isEqualToString:@"아티클"] && ![label.text isEqualToString:@"Articles"]) {
+            continue;
         }
         CGPoint center = label.center;
         label.text = title;
         [label sizeToFit];
         label.center = center;
-    });
-}
-
-// Left-to-right tab labels. The articles one is titled "아티클" until renamed "이전내역".
-static NSInteger ArticlesTabIndex(UIViewController* controller) {
-    if (![controller respondsToSelector:@selector(tabBarView)]) {
-        return NSNotFound;
     }
-    UIView* bar = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(tabBarView));
-    if (![bar isKindOfClass:[UIView class]]) {
-        return NSNotFound;
-    }
-    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
-    EnumerateSubviewsRecursively(bar, ^(UIView* view) {
-        if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length > 0) {
-            [labels addObject:(UILabel*)view];
-        }
-    });
-    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
-        CGFloat ax = CGRectGetMinX([bar convertRect:a.bounds fromView:a]);
-        CGFloat bx = CGRectGetMinX([bar convertRect:b.bounds fromView:b]);
-        return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
-    }];
-    NSString* ours = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
-    NSString* articles = ArticlesTabTitle();
-    for (NSUInteger i = 0; i < labels.count; i++) {
-        NSString* text = labels[i].text;
-        if ([text isEqualToString:ours] || [text isEqualToString:articles]) {
-            return (NSInteger)i;
-        }
-    }
-    return NSNotFound;
 }
 
 static UIViewController* RecentPage(id controller) {
@@ -110,10 +123,34 @@ static UIViewController* RecentPage(id controller) {
     return page;
 }
 
+static BOOL IsRecentController(id controller) {
+    return [NSStringFromClass([controller class]) containsString:@"NFBRecent"];
+}
+
+static void CoverPage(UIViewController* page, id owner) {
+    if (!page.isViewLoaded) {
+        return;
+    }
+    UIViewController* recent = RecentPage(owner);
+    if (recent.parentViewController != page) {
+        if (recent.parentViewController) {
+            [recent willMoveToParentViewController:nil];
+            [recent.view removeFromSuperview];
+            [recent removeFromParentViewController];
+        }
+        [page addChildViewController:recent];
+        recent.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [page.view addSubview:recent.view];
+        [recent didMoveToParentViewController:page];
+    }
+    recent.view.frame = page.view.bounds;
+}
+
 %hook _TtC10TFNUISwift29LegacySegmentedViewController
 
 - (id)pagingViewController:(id)pager viewControllerAt:(long long)index {
-    if (IsHistorySegment(self) && index == ArticlesTabIndex((UIViewController*)self)) {
+    UIViewController* controller = (UIViewController*)self;
+    if (IsHistorySegment(controller) && index == ArticlesTabIndex(controller)) {
         return RecentPage(self);
     }
     return %orig;
@@ -121,20 +158,33 @@ static UIViewController* RecentPage(id controller) {
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    if (!IsHistorySegment(self)) {
-        return;
-    }
     UIViewController* controller = (UIViewController*)self;
-    ReplaceArticlesTabTitle(controller.view);
-    if (objc_getAssociatedObject(self, kReloadedKey)) {
+    if (!IsHistorySegment(controller)) {
         return;
     }
+    ReplaceArticlesTabTitle(controller);
     NSInteger articles = ArticlesTabIndex(controller);
-    if (articles == NSNotFound || ![controller respondsToSelector:@selector(reloadTabContentAt:)]) {
+    if (articles == NSNotFound) {
         return;
     }
-    objc_setAssociatedObject(self, kReloadedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ((void (*)(id, SEL, long long))objc_msgSend)(controller, @selector(reloadTabContentAt:), articles);
+    id selected = [controller respondsToSelector:@selector(selectedViewController)]
+                       ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(selectedViewController))
+                       : nil;
+    if (IsRecentController(selected)) {
+        return;
+    }
+    long long selectedIndex = [controller respondsToSelector:@selector(selectedIndex)]
+                                  ? ((long long (*)(id, SEL))objc_msgSend)(controller, @selector(selectedIndex))
+                                  : -1;
+    if (!objc_getAssociatedObject(self, kReloadedKey) &&
+        [controller respondsToSelector:@selector(reloadTabContentAt:)]) {
+        objc_setAssociatedObject(self, kReloadedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        ((void (*)(id, SEL, long long))objc_msgSend)(controller, @selector(reloadTabContentAt:), articles);
+        return;
+    }
+    if (selectedIndex == articles && [selected isKindOfClass:[UIViewController class]]) {
+        CoverPage((UIViewController*)selected, self);
+    }
 }
 
 %end

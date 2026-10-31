@@ -507,17 +507,22 @@ static __weak NFBSensitiveRow* gRow;
 static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
+static const void* kDashPinnedKey = &kDashPinnedKey;
 
 // The two rows belong in the official menu, directly under Spaces. Cells below
 // that row are pushed down. D-day stays at the end. Until Spaces has been seen,
 // the rows stay at the end so they never cover a menu item.
 
 static BOOL TextIsSpaces(NSString* text) {
-    if (text.length == 0 || text.length > 20) {
+    if (text.length == 0 || text.length > 24) {
         return NO;
     }
     NSString* trimmed =
         [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed hasSuffix:@", 버튼"] || [trimmed hasSuffix:@", Button"]) {
+        trimmed = [trimmed substringToIndex:trimmed.length - 4];
+        trimmed = [trimmed stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
     for (NSString* name in @[ @"스페이스", @"Spaces", @"Space", @"スペース", @"Espacios", @"Espaces" ]) {
         if ([trimmed caseInsensitiveCompare:name] == NSOrderedSame) {
             return YES;
@@ -627,7 +632,13 @@ static void InstallRow(UIScrollView* list) {
     if ([list isKindOfClass:[UICollectionView class]]) {
         insertY = SpacesInsertY((UICollectionView*)list);
     }
+    // The dash hosting view already pinned these under Spaces. Leave them there
+    // unless this list itself has the Spaces row.
+    if (insertY < 0 && objc_getAssociatedObject(gOpenXRow, kDashPinnedKey)) {
+        return;
+    }
     if (insertY >= 0) {
+        objc_setAssociatedObject(gOpenXRow, kDashPinnedKey, nil, OBJC_ASSOCIATION_ASSIGN);
         shift = rowHeight * 2;
     }
 
@@ -683,6 +694,89 @@ static void CheckList(UIScrollView* list) {
     InstallRow(list);
     gInstallDepth--;
 }
+
+static UIView* FindSpacesView(UIView* root) {
+    __block UIView* found = nil;
+    EnumerateSubviewsRecursively(root, ^(UIView* view) {
+        if (found || view == gOpenXRow || view == gRow || view == gEventRows) {
+            return;
+        }
+        if ([view isKindOfClass:[UILabel class]] && TextIsSpaces(((UILabel*)view).text)) {
+            found = view;
+            return;
+        }
+        if (TextIsSpaces(view.accessibilityLabel)) {
+            found = view;
+        }
+    });
+    return found;
+}
+
+static void PlaceRowsUnderSpaces(UIView* root) {
+    if (!root.window) {
+        return;
+    }
+    UIView* spaces = FindSpacesView(root);
+    if (!spaces) {
+        return;
+    }
+    UIView* rowView = spaces;
+    while (rowView.superview && rowView.superview != root && CGRectGetHeight(rowView.bounds) < 48.0) {
+        rowView = rowView.superview;
+    }
+    CGRect spot = [rowView convertRect:rowView.bounds toView:root];
+    if (CGRectIsEmpty(spot)) {
+        return;
+    }
+
+    CGFloat rowHeight = 52.0;
+    CGFloat width = CGRectGetWidth(root.bounds);
+    CGFloat iconX = 32.0;
+    CGFloat labelX = iconX + kIconSize + 16.0;
+
+    NFBOpenXRow* openX = gOpenXRow;
+    if (!openX) {
+        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenXRow = openX;
+    }
+    NFBSensitiveRow* row = gRow;
+    if (!row) {
+        row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
+        gRow = row;
+        row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+        row.baseTextColor = [UIColor labelColor];
+    }
+    if (openX.superview != root) {
+        [root addSubview:openX];
+    }
+    if (row.superview != root) {
+        [root addSubview:row];
+    }
+    objc_setAssociatedObject(openX, kDashPinnedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    CGFloat y = CGRectGetMaxY(spot);
+    openX.frame = CGRectMake(0, y, width, rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
+    row.frame = CGRectMake(0, y + rowHeight, width, rowHeight);
+    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
+    [row applyLabelColor];
+    [row.icon applyState];
+    openX.backgroundColor = root.backgroundColor ?: [UIColor systemBackgroundColor];
+    row.backgroundColor = openX.backgroundColor;
+    [root bringSubviewToFront:openX];
+    [root bringSubviewToFront:row];
+}
+
+%hook _TtC11TwitterDash21DashHostingController
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    PlaceRowsUnderSpaces(((UIViewController*)self).view);
+}
+
+%end
 
 %hook UITableView
 

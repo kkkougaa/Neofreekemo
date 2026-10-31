@@ -483,6 +483,29 @@ static void PerformDump(UIWindow* window) {
 
     [out appendFormat:@"== TIMELINE ITEM PROBE ==%c%@%c", 10, BHTMediaProbeSummary(), 10];
 
+    UIView* dash = FindViewOfController(window, @"DashHostingController");
+    if (dash) {
+        [out appendFormat:@"== DRAWER ==%c", 10];
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:dash];
+        NSUInteger seen = 0;
+        while (queue.count > 0 && seen < 250) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            seen++;
+            NSString* text = [view isKindOfClass:[UILabel class]] ? ((UILabel*)view).text : nil;
+            NSString* ax = view.accessibilityLabel;
+            if (text.length > 0 || ax.length > 0) {
+                [out appendFormat:@"%@ %@ text=%@ ax=%@%c", NSStringFromClass(view.class),
+                                  NSStringFromCGRect([window convertRect:view.bounds fromView:view]), text, ax, 10];
+            }
+            if ([view isKindOfClass:[UIScrollView class]]) {
+                [out appendFormat:@"SCROLL %@ visible=%lu%c", NSStringFromClass(view.class),
+                                  (unsigned long)view.subviews.count, 10];
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
+    }
+
     // Last, because it is the longest and the least specific.
     [out appendFormat:@"== TREE (no drawer) ==%c", 10];
     NSUInteger lines = 0;

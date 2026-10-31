@@ -7,16 +7,14 @@
 
 // MARK: - Activity history tabs
 
-// The history screen is XActivityHistory's container. It asks its data source
-// (itself) for each page with segmentedViewController:pageViewControllerAtIndex:.
-// The articles page is the generic ActivityHistoryPageViewController. That page
-// becomes the recently viewed list, and its tab title becomes "이전내역".
-// Bookmark, video and likes pages are different classes and stay as they are.
+// The history screen's pages come from LegacySegmentedViewController
+// -pagingViewController:viewControllerAt:. The articles tab keeps its place.
+// That page is the recently viewed list, and the tab title becomes "이전내역".
 
 extern UIViewController* NFBMakeRecentViewController(void);
 
 static const void* kRecentPageKey = &kRecentPageKey;
-static NSString* const kArticlesPageClass = @"_TtC16XActivityHistory33ActivityHistoryPageViewController";
+static const void* kReloadedKey = &kReloadedKey;
 
 static NSString* ArticlesTabTitle(void) {
     static NSString* title;
@@ -32,13 +30,24 @@ static NSString* ArticlesTabTitle(void) {
                 return;
             }
         }
-        title = @"Articles";
+        title = @"아티클";
     });
     return title;
 }
 
+static BOOL IsHistorySegment(id controller) {
+    if (![BHTSettings boolForKey:@"kemo_history_tabs"]) {
+        return NO;
+    }
+    if (![controller respondsToSelector:@selector(dataSource)]) {
+        return NO;
+    }
+    id source = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(dataSource));
+    return source && [NSStringFromClass([source class]) containsString:@"ActivityHistory"];
+}
+
 static void ReplaceArticlesTabTitle(UIView* root) {
-    if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !root) {
+    if (!root) {
         return;
     }
     NSString* articles = ArticlesTabTitle();
@@ -61,31 +70,71 @@ static void ReplaceArticlesTabTitle(UIView* root) {
     });
 }
 
-static UIViewController* RecentPage(id container) {
-    UIViewController* page = objc_getAssociatedObject(container, kRecentPageKey);
+// Left-to-right tab labels. The articles one is titled "아티클" until renamed "이전내역".
+static NSInteger ArticlesTabIndex(UIViewController* controller) {
+    if (![controller respondsToSelector:@selector(tabBarView)]) {
+        return NSNotFound;
+    }
+    UIView* bar = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(tabBarView));
+    if (![bar isKindOfClass:[UIView class]]) {
+        return NSNotFound;
+    }
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    EnumerateSubviewsRecursively(bar, ^(UIView* view) {
+        if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length > 0) {
+            [labels addObject:(UILabel*)view];
+        }
+    });
+    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
+        CGFloat ax = CGRectGetMinX([bar convertRect:a.bounds fromView:a]);
+        CGFloat bx = CGRectGetMinX([bar convertRect:b.bounds fromView:b]);
+        return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
+    }];
+    NSString* ours = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
+    NSString* articles = ArticlesTabTitle();
+    for (NSUInteger i = 0; i < labels.count; i++) {
+        NSString* text = labels[i].text;
+        if ([text isEqualToString:ours] || [text isEqualToString:articles]) {
+            return (NSInteger)i;
+        }
+    }
+    return NSNotFound;
+}
+
+static UIViewController* RecentPage(id controller) {
+    UIViewController* page = objc_getAssociatedObject(controller, kRecentPageKey);
     if (!page) {
         page = NFBMakeRecentViewController();
-        objc_setAssociatedObject(container, kRecentPageKey, page, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(controller, kRecentPageKey, page, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return page;
 }
 
-%hook _TtC16XActivityHistory38ActivityHistoryContainerViewController
+%hook _TtC10TFNUISwift29LegacySegmentedViewController
 
-- (id)segmentedViewController:(id)controller pageViewControllerAtIndex:(long long)index {
-    id page = %orig;
-    if (![BHTSettings boolForKey:@"kemo_history_tabs"]) {
-        return page;
-    }
-    if ([NSStringFromClass([page class]) isEqualToString:kArticlesPageClass]) {
+- (id)pagingViewController:(id)pager viewControllerAt:(long long)index {
+    if (IsHistorySegment(self) && index == ArticlesTabIndex((UIViewController*)self)) {
         return RecentPage(self);
     }
-    return page;
+    return %orig;
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    ReplaceArticlesTabTitle(((UIViewController*)self).view);
+    if (!IsHistorySegment(self)) {
+        return;
+    }
+    UIViewController* controller = (UIViewController*)self;
+    ReplaceArticlesTabTitle(controller.view);
+    if (objc_getAssociatedObject(self, kReloadedKey)) {
+        return;
+    }
+    NSInteger articles = ArticlesTabIndex(controller);
+    if (articles == NSNotFound || ![self respondsToSelector:@selector(reloadTabContentAt:)]) {
+        return;
+    }
+    objc_setAssociatedObject(self, kReloadedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    ((void (*)(id, SEL, long long))objc_msgSend)(self, @selector(reloadTabContentAt:), articles);
 }
 
 %end

@@ -284,12 +284,16 @@ static void WatchTimeline(void) {
     }
     NSString* tweetID = self.items[indexPath.row][@"id"];
     NSURL* url = [NSURL URLWithString:[@"twitter://status?id=" stringByAppendingString:tweetID]];
-    [self dismissViewControllerAnimated:YES
-                             completion:^{
-                                 if (url) {
-                                     [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-                                 }
-                             }];
+    void (^open)(void) = ^{
+        if (url) {
+            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+        }
+    };
+    if (self.presentingViewController) {
+        [self dismissViewControllerAnimated:YES completion:open];
+    } else {
+        open();
+    }
 }
 
 @end

@@ -508,8 +508,6 @@ static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 static const void* kDashPinnedKey = &kDashPinnedKey;
-static const void* kAppliedShiftKey = &kAppliedShiftKey;
-static const void* kSizeExtraKey = &kSizeExtraKey;
 
 // The two rows belong in the official menu, directly under Spaces. Cells below
 // that row are pushed down. D-day stays at the end. Until Spaces has been seen,
@@ -602,31 +600,99 @@ static CGFloat SpacesInsertY(UICollectionView* list) {
     return CGRectGetMaxY(beforeGap.frame);
 }
 
-static void ShiftContentBelow(UIScrollView* list, CGFloat insertY, CGFloat shift, UIView* events,
-                              UIView* openX, UIView* row) {
-    // Undo the previous nudge first. Otherwise every layout pushes the same
-    // row down another 104pt and settings, help and follow requests leave the screen.
-    for (UIView* sub in list.subviews) {
-        if (sub == events || sub == openX || sub == row) {
-            continue;
-        }
-        if (![sub isKindOfClass:[UICollectionReusableView class]]) {
-            continue;
-        }
-        CGFloat applied = [objc_getAssociatedObject(sub, kAppliedShiftKey) doubleValue];
-        CGRect frame = sub.frame;
-        frame.origin.y -= applied;
-        CGFloat next = 0;
-        if (frame.origin.y + 0.5 >= insertY) {
-            frame.origin.y += shift;
-            next = shift;
-        }
-        if (fabs(applied - next) > 0.5 || fabs(sub.frame.origin.y - frame.origin.y) > 0.5) {
-            sub.frame = frame;
-            objc_setAssociatedObject(sub, kAppliedShiftKey, next > 0 ? @(next) : nil,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+static const void* kLayoutInsertKey = &kLayoutInsertKey;
+static const void* kMenuFailedKey = &kMenuFailedKey;
+static const void* kLayoutHookedKey = &kLayoutHookedKey;
+static const void* kOrigElementsKey = &kOrigElementsKey;
+static const void* kOrigItemKey = &kOrigItemKey;
+static const void* kOrigSizeKey = &kOrigSizeKey;
+static const CGFloat kMenuShift = 104.0;
+
+typedef NSArray* (*NFBElementsIMP)(id, SEL, CGRect);
+typedef UICollectionViewLayoutAttributes* (*NFBItemIMP)(id, SEL, NSIndexPath*);
+typedef CGSize (*NFBSizeIMP)(id, SEL);
+
+static CGFloat LayoutInsertY(id layout) {
+    UICollectionView* list = ((UICollectionViewLayout*)layout).collectionView;
+    NSNumber* mark = objc_getAssociatedObject(list, kLayoutInsertKey);
+    return mark ? mark.doubleValue : -1;
+}
+
+static UICollectionViewLayoutAttributes* ShiftedAttribute(UICollectionViewLayoutAttributes* attr, CGFloat insertY) {
+    if (CGRectGetMidY(attr.frame) <= insertY + 0.5) {
+        return attr;
+    }
+    UICollectionViewLayoutAttributes* copy = [attr copy];
+    CGRect frame = copy.frame;
+    frame.origin.y += kMenuShift;
+    copy.frame = frame;
+    return copy;
+}
+
+static NSArray* NFBLayoutElements(id self, SEL cmd, CGRect rect) {
+    NFBElementsIMP orig = (NFBElementsIMP)[objc_getAssociatedObject([self class], kOrigElementsKey) pointerValue];
+    NSArray* attrs = orig ? orig(self, cmd, rect) : nil;
+    CGFloat insertY = LayoutInsertY(self);
+    if (insertY < 0 || attrs.count == 0) {
+        return attrs;
+    }
+    NSMutableArray* shifted = [NSMutableArray arrayWithCapacity:attrs.count];
+    for (UICollectionViewLayoutAttributes* attr in attrs) {
+        [shifted addObject:ShiftedAttribute(attr, insertY)];
+    }
+    return shifted;
+}
+
+static UICollectionViewLayoutAttributes* NFBLayoutItem(id self, SEL cmd, NSIndexPath* path) {
+    NFBItemIMP orig = (NFBItemIMP)[objc_getAssociatedObject([self class], kOrigItemKey) pointerValue];
+    UICollectionViewLayoutAttributes* attr = orig ? orig(self, cmd, path) : nil;
+    CGFloat insertY = LayoutInsertY(self);
+    if (insertY < 0 || !attr) {
+        return attr;
+    }
+    return ShiftedAttribute(attr, insertY);
+}
+
+static CGSize NFBLayoutSize(id self, SEL cmd) {
+    NFBSizeIMP orig = (NFBSizeIMP)[objc_getAssociatedObject([self class], kOrigSizeKey) pointerValue];
+    CGSize size = orig ? orig(self, cmd) : CGSizeZero;
+    if (LayoutInsertY(self) >= 0) {
+        size.height += kMenuShift;
+    }
+    return size;
+}
+
+static void HookOne(Class cls, SEL sel, IMP hook, const void* store) {
+    Method method = class_getInstanceMethod(cls, sel);
+    if (!method || objc_getAssociatedObject(cls, store)) {
+        return;
+    }
+    IMP orig = method_getImplementation(method);
+    objc_setAssociatedObject(cls, store, [NSValue valueWithPointer:orig], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!class_addMethod(cls, sel, hook, method_getTypeEncoding(method))) {
+        method_setImplementation(method, hook);
+    }
+}
+
+static void HookDrawerLayout(UICollectionView* list) {
+    Class cls = list.collectionViewLayout.class;
+    if (!cls || objc_getAssociatedObject(cls, kLayoutHookedKey)) {
+        return;
+    }
+    objc_setAssociatedObject(cls, kLayoutHookedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    HookOne(cls, @selector(layoutAttributesForElementsInRect:), (IMP)NFBLayoutElements, kOrigElementsKey);
+    HookOne(cls, @selector(layoutAttributesForItemAtIndexPath:), (IMP)NFBLayoutItem, kOrigItemKey);
+    HookOne(cls, @selector(collectionViewContentSize), (IMP)NFBLayoutSize, kOrigSizeKey);
+}
+
+static BOOL RowsCoverCells(UICollectionView* list, CGRect top, CGRect bottom) {
+    CGRect band = CGRectInset(CGRectUnion(top, bottom), 8, 8);
+    for (UICollectionViewCell* cell in list.visibleCells) {
+        if (CGRectIntersectsRect(cell.frame, band)) {
+            return YES;
         }
     }
+    return NO;
 }
 
 static void InstallRow(UIScrollView* list) {
@@ -638,8 +704,7 @@ static void InstallRow(UIScrollView* list) {
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
     CGFloat width = CGRectGetWidth(list.bounds);
-    CGFloat sizeExtra = [objc_getAssociatedObject(list, kSizeExtraKey) doubleValue];
-    CGFloat anchor = list.contentSize.height - sizeExtra;
+    CGFloat anchor = list.contentSize.height;
     if (anchor < 1) {
         return;
     }
@@ -671,9 +736,13 @@ static void InstallRow(UIScrollView* list) {
     }
 
     CGFloat insertY = -1;
-    CGFloat shift = 0;
     if ([list isKindOfClass:[UICollectionView class]]) {
-        insertY = SpacesInsertY((UICollectionView*)list);
+        HookDrawerLayout((UICollectionView*)list);
+        if (objc_getAssociatedObject(list, kMenuFailedKey)) {
+            insertY = -1;
+        } else {
+            insertY = SpacesInsertY((UICollectionView*)list);
+        }
     }
     // The dash hosting view already pinned these under Spaces. Leave them there
     // unless this list itself has the Spaces row.
@@ -682,45 +751,41 @@ static void InstallRow(UIScrollView* list) {
     }
     if (insertY >= 0) {
         objc_setAssociatedObject(gOpenXRow, kDashPinnedKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        shift = rowHeight * 2;
     }
 
+    BOOL slotReady = insertY >= 0 && objc_getAssociatedObject(list, kLayoutInsertKey) != nil;
     CGFloat menuY = insertY >= 0 ? insertY : anchor;
     if (insertY < 0 && eventsHeight > 0) {
         menuY += kEventGroupGap + eventsHeight;
     }
+    CGRect topSlot = CGRectMake(0, menuY, width, rowHeight);
+    CGRect bottomSlot = CGRectMake(0, menuY + rowHeight, width, rowHeight);
+    if (slotReady && [list isKindOfClass:[UICollectionView class]] &&
+        RowsCoverCells((UICollectionView*)list, topSlot, bottomSlot)) {
+        // The menu did not make room. Drop back under D-day instead of covering it.
+        objc_setAssociatedObject(list, kMenuFailedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(list, kLayoutInsertKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        [[(UICollectionView*)list collectionViewLayout] invalidateLayout];
+        insertY = -1;
+        menuY = anchor + (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0);
+    } else if (insertY >= 0) {
+        NSNumber* previous = objc_getAssociatedObject(list, kLayoutInsertKey);
+        if (!previous || fabs(previous.doubleValue - insertY) > 0.5) {
+            objc_setAssociatedObject(list, kLayoutInsertKey, @(insertY), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [[(UICollectionView*)list collectionViewLayout] invalidateLayout];
+        }
+    }
 
-    CGFloat eventsY = anchor + shift + (eventsHeight > 0 ? kEventGroupGap : 0);
     CGFloat eventsExtra = eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0;
-    CGFloat tail = (insertY >= 0 ? shift : rowHeight * 2) + eventsExtra + 16.0;
+    CGFloat tail = rowHeight * 2 + eventsExtra + 16.0;
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
     if (fabs(added - tail) > 0.5) {
         UIEdgeInsets inset = list.contentInset;
         inset.bottom += tail - added;
         list.contentInset = inset;
         objc_setAssociatedObject(list, kInsetAddedKey, @(tail), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // Changing the inset lays the list out again and puts the cells back.
-        // Place the rows after that, below.
-        if ([list isKindOfClass:[UICollectionView class]]) {
-            CGFloat again = SpacesInsertY((UICollectionView*)list);
-            if (again >= 0) {
-                insertY = again;
-                shift = rowHeight * 2;
-                menuY = insertY;
-            }
-        }
-        eventsY = anchor + shift + (eventsHeight > 0 ? kEventGroupGap : 0);
     }
 
-    if (insertY >= 0) {
-        ShiftContentBelow(list, insertY, shift, events, openX, row);
-        if (fabs(sizeExtra - shift) > 0.5) {
-            CGSize size = list.contentSize;
-            size.height += shift - sizeExtra;
-            list.contentSize = size;
-            objc_setAssociatedObject(list, kSizeExtraKey, @(shift), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-    }
     openX.frame = CGRectMake(0, menuY, width, rowHeight);
     openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
     openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
@@ -729,6 +794,13 @@ static void InstallRow(UIScrollView* list) {
     row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
     row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
     [row.icon applyState];
+    CGFloat eventsY = CGRectGetMaxY(row.frame);
+    if ([list isKindOfClass:[UICollectionView class]]) {
+        for (UICollectionViewCell* cell in ((UICollectionView*)list).visibleCells) {
+            eventsY = MAX(eventsY, CGRectGetMaxY(cell.frame));
+        }
+    }
+    eventsY += eventsHeight > 0 ? kEventGroupGap : 0;
     events.frame = CGRectMake(0, eventsY, width, eventsHeight);
     events.hidden = eventsHeight == 0;
 }

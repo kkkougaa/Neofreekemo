@@ -92,10 +92,10 @@ static void BurstDots(UIImageView* logo) {
     CGPoint mid = CGPointMake(CGRectGetMidX(logo.bounds), CGRectGetMidY(logo.bounds));
     CGPoint at = [logo.layer convertPoint:mid toLayer:window.layer];
     UIColor* color = CurrentAccentColor();
-    static const NSInteger kCount = 8;
+    static const NSInteger kCount = 12;
     for (NSInteger i = 0; i < kCount; i++) {
         CGFloat angle = (M_PI * 2 / kCount) * i + 0.35;
-        CGFloat size = (i % 2) ? 3.5 : 5;
+        CGFloat size = (i % 2) ? 6.0 : 8.0;
         UIView* dot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
         dot.userInteractionEnabled = NO;
         dot.backgroundColor = color;
@@ -103,7 +103,7 @@ static void BurstDots(UIImageView* logo) {
         dot.center = at;
         dot.alpha = 0.9;
         [window addSubview:dot];
-        CGFloat distance = 16 + (i % 3) * 8;
+        CGFloat distance = 22 + (i % 4) * 8;
         [UIView animateWithDuration:0.8
                               delay:0
                             options:UIViewAnimationOptionCurveEaseOut
@@ -136,7 +136,7 @@ static void PlayBurst(UIImageView* logo) {
         [control.layer insertSublayer:flash atIndex:0];
         CABasicAnimation* fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
         fade.fromValue = @0;
-        fade.toValue = reduce ? @0.28 : @0.55;
+        fade.toValue = reduce ? @0.45 : @0.9;
         fade.duration = 0.22;
         fade.autoreverses = YES;
         fade.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
@@ -189,8 +189,51 @@ void NFBNoteTweetPosted(void) {
         return;
     }
     gLastPostNote = now;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.32 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
                        PlayWhenReady(0);
                    });
 }
+
+// 12.38.1 still has _t1_didTapSendButton: on T1TweetComposeViewController (Confirmations
+// calls NFBNoteTweetPosted from there) and on T1ComposeViewController. The redesigned
+// toolbar calls composerToolbarDidTapPost:, and the compositions actually leave through
+// _t1_sendCompositions:. Inline compose reports success with didSendComposition:.
+// The one-second guard in NFBNoteTweetPosted collapses these into a single burst.
+
+%hook T1TweetComposeViewController
+
+- (void)composerToolbarDidTapPost:(id)sender {
+    %orig;
+    NFBNoteTweetPosted();
+}
+
+- (void)_t1_sendCompositions:(id)compositions {
+    %orig;
+    NFBNoteTweetPosted();
+}
+
+%end
+
+%hook T1ComposeViewController
+
+- (void)_t1_didTapSendButton:(id)sender {
+    %orig;
+    NFBNoteTweetPosted();
+}
+
+%end
+
+%hook T1MediaInlineComposeController
+
+- (void)composeBarViewController:(id)controller didSendComposition:(id)composition {
+    %orig;
+    NFBNoteTweetPosted();
+}
+
+- (void)_t1_didSendInlineCompose:(id)note {
+    %orig;
+    NFBNoteTweetPosted();
+}
+
+%end

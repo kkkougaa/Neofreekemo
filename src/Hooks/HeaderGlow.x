@@ -77,8 +77,8 @@ static UIImageView* LogoInControl(UIView* control) {
 
 static void TintHalo(CAGradientLayer* halo, UIColor* color) {
     halo.colors = @[
-        (id)[color colorWithAlphaComponent:0.32].CGColor,
-        (id)[color colorWithAlphaComponent:0.10].CGColor,
+        (id)[color colorWithAlphaComponent:0.50].CGColor,
+        (id)[color colorWithAlphaComponent:0.18].CGColor,
         (id)[color colorWithAlphaComponent:0.0].CGColor
     ];
 }
@@ -122,14 +122,14 @@ static void EnsureBreath(CAGradientLayer* halo) {
         halo.speed = 1;
         halo.timeOffset = 0;
         halo.beginTime = 0;
-        halo.opacity = 0.24;
+        halo.opacity = 0.45;
         return;
     }
     if (![halo animationForKey:@"breathe"]) {
-        halo.opacity = 0.28;
+        halo.opacity = 0.55;
         CABasicAnimation* breath = [CABasicAnimation animationWithKeyPath:@"opacity"];
-        breath.fromValue = @0.15;
-        breath.toValue = @0.40;
+        breath.fromValue = @0.32;
+        breath.toValue = @0.78;
         breath.duration = 3.0;
         breath.autoreverses = YES;
         breath.repeatCount = HUGE_VALF;
@@ -230,6 +230,9 @@ static void SetHalosPaused(BOOL paused) {
 %end
 
 %ctor {
+    // A custom constructor replaces Logos's, which is the only thing that installs the hooks above.
+    %init;
+
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
     [center addObserverForName:UIApplicationDidEnterBackgroundNotification
                         object:nil

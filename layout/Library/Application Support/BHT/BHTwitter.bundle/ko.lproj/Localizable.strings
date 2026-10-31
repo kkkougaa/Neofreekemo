@@ -504,6 +504,12 @@
 "KEMO_RECENT_EMPTY" = "아직 기록이 없어요";
 "NSFW_ANIME_THRESHOLD_TITLE" = "애니 그림 판별 기준";
 "KEMO_RECENT_LIST_TITLE" = "방금 본 트윗 보기";
-"KEMO_HISTORY_TABS_TITLE" = "이전 내역 탭 정리 (최근 본 트윗, 마음에 들어요, 북마크)";
+"KEMO_HISTORY_TABS_TITLE" = "아티클 탭을 이전내역으로";
 
 "OPEN_ORIGINAL_X_TITLE" = "X로 이동";
+
+"KEMO_MEDIA_PAGE_TITLE" = "미디어";
+"KEMO_MEDIA_PAGE_SUBTITLE" = "가림막, 미디어만, 장수 배지";
+"KEMO_HISTORY_PAGE_TITLE" = "기록";
+"KEMO_HISTORY_PAGE_SUBTITLE" = "이전내역과 새로고침 위치";
+"KEMO_HISTORY_TAB_TITLE" = "이전내역";

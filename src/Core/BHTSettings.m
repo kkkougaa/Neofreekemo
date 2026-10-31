@@ -286,30 +286,22 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                 @"subtitleKey": @"KEMO_PAGE_SUBTITLE",
                 @"settings": @[
                     @{
-                        @"key": @"nsfw_ai_blur",
-                        @"default": @NO,
-                        @"type": @"toggle"
+                        @"type": @"compactButton",
+                        @"key": @"kemo_bubble",
+                        @"titleKey": @"KEMO_BUBBLE_MENU_TITLE",
+                        @"action": @"openBubbleSettings:"
                     },
                     @{
-                        @"key": @"nsfw_ai_threshold",
-                        @"default": @70,
-                        @"type": @"slider",
-                        @"min": @40,
-                        @"max": @95,
-                        @"parentKey": @"nsfw_ai_blur"
+                        @"type": @"compactButton",
+                        @"key": @"kemo_media_page",
+                        @"titleKey": @"KEMO_MEDIA_PAGE_TITLE",
+                        @"action": @"openKemoMedia:"
                     },
                     @{
-                        @"key": @"nsfw_anime_threshold",
-                        @"default": @50,
-                        @"type": @"slider",
-                        @"min": @30,
-                        @"max": @90,
-                        @"parentKey": @"nsfw_ai_blur"
-                    },
-                    @{
-                        @"key": @"kemo_media_only",
-                        @"default": @NO,
-                        @"type": @"toggle"
+                        @"type": @"compactButton",
+                        @"key": @"kemo_history_page",
+                        @"titleKey": @"KEMO_HISTORY_PAGE_TITLE",
+                        @"action": @"openKemoHistory:"
                     },
                     @{
                         @"type": @"compactButton",
@@ -350,59 +342,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openEventEditor:"
                     },
                     @{
-                        @"key": @"kemo_media_count_badge",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_keep_position",
-                        @"default": @NO,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"type": @"compactButton",
-                        @"key": @"kemo_bubble",
-                        @"titleKey": @"KEMO_BUBBLE_MENU_TITLE",
-                        @"action": @"openBubbleSettings:"
-                    },
-                    @{
                         @"key": @"kemo_draft_autosave",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
                     @{
                         @"key": @"kemo_haptics",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_paw_loading",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_bookmark_wiggle",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_image_reveal",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_history_tabs",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"type": @"compactButton",
-                        @"key": @"kemo_recent_list",
-                        @"titleKey": @"KEMO_RECENT_LIST_TITLE",
-                        @"action": @"openRecentTweets:"
-                    },
-                    @{
-                        @"key": @"kemo_recent_tweets",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
@@ -457,6 +402,85 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{
                         @"key": @"kemo_logo_loading",
                         @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_paw_loading",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_bookmark_wiggle",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    }
+                ]
+            },
+            @"kemo_media": @{
+                @"titleKey": @"KEMO_MEDIA_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_MEDIA_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"nsfw_ai_blur",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"nsfw_ai_threshold",
+                        @"default": @70,
+                        @"type": @"slider",
+                        @"min": @40,
+                        @"max": @95,
+                        @"parentKey": @"nsfw_ai_blur"
+                    },
+                    @{
+                        @"key": @"nsfw_anime_threshold",
+                        @"default": @50,
+                        @"type": @"slider",
+                        @"min": @30,
+                        @"max": @90,
+                        @"parentKey": @"nsfw_ai_blur"
+                    },
+                    @{
+                        @"key": @"kemo_media_only",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_media_count_badge",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_image_reveal",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    }
+                ]
+            },
+            @"kemo_history": @{
+                @"titleKey": @"KEMO_HISTORY_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_HISTORY_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"kemo_history_tabs",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_recent_tweets",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_recent_list",
+                        @"titleKey": @"KEMO_RECENT_LIST_TITLE",
+                        @"action": @"openRecentTweets:"
+                    },
+                    @{
+                        @"key": @"kemo_keep_position",
+                        @"default": @NO,
                         @"type": @"toggle"
                     }
                 ]

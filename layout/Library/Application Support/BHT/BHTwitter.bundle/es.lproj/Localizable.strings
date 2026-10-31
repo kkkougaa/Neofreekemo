@@ -534,3 +534,9 @@
 "KEMO_HISTORY_TABS_TITLE" = "Tidy the history tabs (recent, likes, bookmarks)";
 
 "OPEN_ORIGINAL_X_TITLE" = "Open in X";
+
+"KEMO_MEDIA_PAGE_TITLE" = "Media";
+"KEMO_MEDIA_PAGE_SUBTITLE" = "Covers, media-only, and the count badge";
+"KEMO_HISTORY_PAGE_TITLE" = "History";
+"KEMO_HISTORY_PAGE_SUBTITLE" = "Recently viewed, and keeping your place";
+"KEMO_HISTORY_TAB_TITLE" = "History";

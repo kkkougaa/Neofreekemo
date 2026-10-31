@@ -513,17 +513,17 @@ static void InstallRow(UIScrollView* list) {
         return;
     }
 
-    // Just under the last menu row.
-    NSArray<UIView*>* cells = [(id)list performSelector:@selector(visibleCells)];
-    CGFloat bottom = 0;
-    for (UIView* cell in cells) {
-        bottom = MAX(bottom, CGRectGetMaxY(cell.frame));
-    }
     CGFloat rowHeight = 52.0;
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
+    CGFloat width = CGRectGetWidth(list.bounds);
 
-    // The D-day group scrolls with the list.
+    // Sit at the end of the menu and scroll with it. A pinned row covers the D-day lines.
+    CGFloat anchor = list.contentSize.height;
+    if (anchor < 1) {
+        return;
+    }
+
     NFBEventRows* events = gEventRows;
     if (!events || events.superview != list) {
         [gEventRows removeFromSuperview];
@@ -531,48 +531,42 @@ static void InstallRow(UIScrollView* list) {
         gEventRows = events;
         [list addSubview:events];
     }
-    CGFloat eventsHeight = [events reloadWithIconX:iconX width:CGRectGetWidth(list.bounds)];
-    events.frame = CGRectMake(0, bottom + kEventGroupGap, CGRectGetWidth(list.bounds), eventsHeight);
+    CGFloat eventsHeight = [events reloadWithIconX:iconX width:width];
+    CGFloat y = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
+    events.frame = CGRectMake(0, y, width, eventsHeight);
     events.hidden = eventsHeight == 0;
+    if (eventsHeight > 0) {
+        y += eventsHeight;
+    }
 
-    // X로 이동 sits directly above NSFW mode. Both stay pinned to the drawer bottom.
-    UIView* host = list.superview;
-    CGFloat safeBottom = MAX(list.window.safeAreaInsets.bottom, host.safeAreaInsets.bottom);
-    CGFloat nsfwY = CGRectGetHeight(host.bounds) - safeBottom - rowHeight - 12;
+    NFBOpenXRow* openX = gOpenXRow;
+    if (!openX || openX.superview != list) {
+        [gOpenXRow removeFromSuperview];
+        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenXRow = openX;
+        [list addSubview:openX];
+    }
+    openX.frame = CGRectMake(0, y + 8, width, rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame =
+        CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
 
     NFBSensitiveRow* row = gRow;
-    if (!row || row.superview != host) {
+    if (!row || row.superview != list) {
         [gRow removeFromSuperview];
         row = [[NFBSensitiveRow alloc] initWithFrame:CGRectZero];
         gRow = row;
         row.label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
         row.baseTextColor = [UIColor labelColor];
-        [host addSubview:row];
+        [list addSubview:row];
     }
     [row applyLabelColor];
-    row.frame = CGRectMake(0, nsfwY, CGRectGetWidth(host.bounds), rowHeight);
+    row.frame = CGRectMake(0, CGRectGetMaxY(openX.frame), width, rowHeight);
     row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(
-        labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
+    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
     [row.icon applyState];
-    [host bringSubviewToFront:row];
 
-    // The original X app button sits right above the NSFW row.
-    NFBOpenXRow* openX = gOpenXRow;
-    if (!openX || openX.superview != host) {
-        [gOpenXRow removeFromSuperview];
-        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
-        gOpenXRow = openX;
-        [host addSubview:openX];
-    }
-    openX.frame = CGRectOffset(row.frame, 0, -rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame = row.label.frame;
-    [host bringSubviewToFront:openX];
-
-    // Room to scroll past the D-day group and the two pinned rows.
-    CGFloat needed =
-        (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0) + rowHeight * 2 + 24.0;
+    CGFloat needed = CGRectGetMaxY(row.frame) - anchor + 16.0;
     CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
     if (fabs(added - needed) > 0.5) {
         UIEdgeInsets inset = list.contentInset;

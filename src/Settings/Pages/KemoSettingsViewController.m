@@ -13,11 +13,10 @@
 #import "Settings/ModernSettingsCells.h"
 #import "Settings/Pages/KemoAliasListViewController.h"
 #import "Settings/Pages/KemoBubbleSettingsViewController.h"
+#import "Settings/Pages/KemoHistorySettingsViewController.h"
+#import "Settings/Pages/KemoMediaSettingsViewController.h"
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
-
-extern UIViewController* NFBMakeRecentViewController(void);
-extern NSUInteger NFBRecentCount(void);
 
 static NSString* const kClientIDKey = @"spotify_client_id";
 static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
@@ -46,14 +45,6 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                         subtitle:status.length > 0
                                      ? [NSString stringWithFormat:@"%@ · %@", [self localized:state], status]
                                      : [self localized:state]];
-        return cell;
-    }
-    if ([data[@"key"] isEqualToString:@"kemo_recent_list"]) {
-        ModernSettingsCompactButtonCell* cell =
-            [tableView dequeueReusableCellWithIdentifier:@"CompactButtonCell"
-                                            forIndexPath:indexPath];
-        [cell configureWithTitle:[self localized:data[@"titleKey"]]
-                        subtitle:[NSString stringWithFormat:@"%lu", (unsigned long)NFBRecentCount()]];
         return cell;
     }
     if ([data[@"key"] isEqualToString:@"kemo_events"]) {
@@ -99,8 +90,14 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
     }
 }
 
-- (void)openRecentTweets:(NSDictionary*)sender {
-    [self.navigationController pushViewController:NFBMakeRecentViewController() animated:YES];
+- (void)openKemoMedia:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[[KemoMediaSettingsViewController alloc] initWithAccount:self.account]
+                                         animated:YES];
+}
+
+- (void)openKemoHistory:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[[KemoHistorySettingsViewController alloc] initWithAccount:self.account]
+                                         animated:YES];
 }
 
 - (void)openBubbleSettings:(NSDictionary*)sender {

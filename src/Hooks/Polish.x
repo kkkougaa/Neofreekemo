@@ -45,8 +45,32 @@ static void PawStop(UIActivityIndicatorView* spinner) {
     objc_setAssociatedObject(spinner, kPawColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+static BOOL PawRefreshOnHome(UIActivityIndicatorView* spinner) {
+    BOOL refresh = NO;
+    for (UIView* view = spinner; view; view = view.superview) {
+        NSString* name = NSStringFromClass(view.class);
+        if ([name containsString:@"PullToRefresh"] || [name containsString:@"RefreshControl"]) {
+            refresh = YES;
+            break;
+        }
+    }
+    if (!refresh) {
+        return NO;
+    }
+    for (UIResponder* responder = spinner; responder; responder = responder.nextResponder) {
+        if (![responder isKindOfClass:[UIViewController class]]) {
+            continue;
+        }
+        if ([NSStringFromClass([(UIViewController*)responder class]) containsString:@"HomeTimeline"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 static void PawStart(UIActivityIndicatorView* spinner) {
-    if (![BHTSettings boolForKey:@"kemo_paw_loading"] || [spinner viewWithTag:kPawTag]) {
+    if (![BHTSettings boolForKey:@"kemo_paw_loading"] || [spinner viewWithTag:kPawTag] ||
+        !PawRefreshOnHome(spinner)) {
         return;
     }
     objc_setAssociatedObject(spinner, kPawColorKey, spinner.color ?: (id)[NSNull null],

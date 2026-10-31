@@ -7,17 +7,14 @@
 
 // MARK: - Activity history tabs
 
-// The history screen has four tabs: bookmarks, videos, articles, likes. Here they become
-// three: recently viewed tweets (in the articles' place), likes, bookmarks. The tab bar and
-// the pager both ask the segmented controller (LegacySegmentedViewController) how many
-// tabs there are and what is at each index, so that is where the order is changed: index 0
-// is the recently viewed list, 1 and 2 are the old tabs 3 and 0, and the videos tab is never
-// asked for. It only applies when the controller's data source is the history screen and it
-// reports exactly four tabs, so any other layout is left alone.
+// The history screen has four tabs: bookmarks, videos, articles, likes. Articles (index 2)
+// becomes the recently viewed list, titled "이전내역". The other three tabs stay where
+// they are. It only applies when the controller's data source is the history screen and
+// it reports exactly four tabs, so any other layout is left alone.
 
 extern UIViewController* NFBMakeRecentViewController(void);
 
-static const NSInteger kHistoryMap[3] = {2, 3, 0}; // new index -> old index (0 stands for the recent list)
+static const NSInteger kArticlesTabIndex = 2;
 
 static const void* kActiveKey = &kActiveKey;
 static const void* kRecentPageKey = &kRecentPageKey;
@@ -41,8 +38,8 @@ static void SetActive(id controller, BOOL active) {
     objc_setAssociatedObject(controller, kActiveKey, @(active), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-// The articles label becomes "recently viewed": the leftmost label in the tab bar.
-static void FixFirstTabTitle(UIViewController* controller) {
+// The third tab is articles. Replace that label, not whichever label happens to be leftmost.
+static void FixArticlesTabTitle(UIViewController* controller) {
     if (![controller respondsToSelector:@selector(tabBarView)]) {
         return;
     }
@@ -50,85 +47,60 @@ static void FixFirstTabTitle(UIViewController* controller) {
     if (![bar isKindOfClass:[UIView class]]) {
         return;
     }
-    __block UILabel* first = nil;
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
     EnumerateSubviewsRecursively(bar, ^(UIView* view) {
-        if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length > 0 &&
-            (!first || CGRectGetMinX([bar convertRect:view.bounds fromView:view]) <
-                           CGRectGetMinX([bar convertRect:first.bounds fromView:first]))) {
-            first = (UILabel*)view;
+        if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length > 0) {
+            [labels addObject:(UILabel*)view];
         }
     });
-    NSString* title = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_MENU_RECENT"];
-    if (first && ![first.text isEqualToString:title]) {
-        CGPoint center = first.center;
-        first.text = title;
-        [first sizeToFit];
-        first.center = center;
+    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
+        CGFloat ax = CGRectGetMinX([bar convertRect:a.bounds fromView:a]);
+        CGFloat bx = CGRectGetMinX([bar convertRect:b.bounds fromView:b]);
+        return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
+    }];
+    if (labels.count <= kArticlesTabIndex) {
+        return;
     }
+    UILabel* articles = labels[kArticlesTabIndex];
+    NSString* title = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
+    if ([articles.text isEqualToString:title]) {
+        return;
+    }
+    CGPoint center = articles.center;
+    articles.text = title;
+    [articles sizeToFit];
+    articles.center = center;
 }
 
 %hook _TtC10TFNUISwift29LegacySegmentedViewController
 
 - (long long)numberOfTabsIn:(id)tabBar {
     long long count = %orig;
-    BOOL active = IsHistoryController(self) && count == 4;
-    SetActive(self, active);
-    return active ? 3 : count;
+    SetActive(self, IsHistoryController(self) && count == 4);
+    return count;
 }
 
 - (long long)numberOfPagesIn:(id)pager {
     long long count = %orig;
-    BOOL active = IsHistoryController(self) && count == 4;
-    SetActive(self, active);
-    return active ? 3 : count;
-}
-
-- (id)tabBarView:(id)tabBar descriptorAtIndex:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        return %orig(tabBar, kHistoryMap[index]);
-    }
-    return %orig;
-}
-
-- (id)tabBarView:(id)tabBar tabGroupAtIndex:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        return %orig(tabBar, kHistoryMap[index]);
-    }
-    return %orig;
-}
-
-- (id)tabBarView:(id)tabBar menuForTabAtIndex:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        return %orig(tabBar, kHistoryMap[index]);
-    }
-    return %orig;
-}
-
-- (BOOL)tabBarView:(id)tabBar isUnreadIndicatorTabAt:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        return %orig(tabBar, kHistoryMap[index]);
-    }
-    return %orig;
+    SetActive(self, IsHistoryController(self) && count == 4);
+    return count;
 }
 
 - (id)pagingViewController:(id)pager viewControllerAt:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        if (index == 0) {
-            UIViewController* page = objc_getAssociatedObject(self, kRecentPageKey);
-            if (!page) {
-                page = NFBMakeRecentViewController();
-                objc_setAssociatedObject(self, kRecentPageKey, page, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-            return page;
+    if (IsActive(self) && index == kArticlesTabIndex) {
+        UIViewController* page = objc_getAssociatedObject(self, kRecentPageKey);
+        if (!page) {
+            page = NFBMakeRecentViewController();
+            objc_setAssociatedObject(self, kRecentPageKey, page, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        return %orig(pager, kHistoryMap[index]);
+        return page;
     }
     return %orig;
 }
 
 - (BOOL)pagingViewController:(id)pager isPrewarmableAt:(long long)index {
-    if (IsActive(self) && index >= 0 && index < 3) {
-        return index == 0 ? NO : %orig(pager, kHistoryMap[index]);
+    if (IsActive(self) && index == kArticlesTabIndex) {
+        return NO;
     }
     return %orig;
 }
@@ -136,7 +108,7 @@ static void FixFirstTabTitle(UIViewController* controller) {
 - (void)viewDidLayoutSubviews {
     %orig;
     if (IsActive(self)) {
-        FixFirstTabTitle((UIViewController*)self);
+        FixArticlesTabTitle((UIViewController*)self);
     }
 }
 

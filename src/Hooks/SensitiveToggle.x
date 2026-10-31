@@ -4,7 +4,6 @@
 //
 
 #import "HookHelpers.h"
-#import "DrawerLayout.h"
 #import "Core/BHTAvatars.h"
 #import "Core/BHTEvents.h"
 #import "Settings/ModernSettingsPageViewController.h"
@@ -508,98 +507,6 @@ static __weak NFBSensitiveRow* gRow;
 static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
-static const void* kDashPinnedKey = &kDashPinnedKey;
-
-// The two rows belong in the official menu, directly under Spaces. Cells below
-// that row are pushed down. D-day stays at the end. Until Spaces has been seen,
-// the rows stay at the end so they never cover a menu item.
-
-static BOOL TextIsSpaces(NSString* text) {
-    if (text.length == 0 || text.length > 24) {
-        return NO;
-    }
-    NSString* trimmed =
-        [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([trimmed hasSuffix:@", 버튼"] || [trimmed hasSuffix:@", Button"]) {
-        trimmed = [trimmed substringToIndex:trimmed.length - 4];
-        trimmed = [trimmed stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    }
-    for (NSString* name in @[ @"스페이스", @"Spaces", @"Space", @"スペース", @"Espacios", @"Espaces" ]) {
-        if ([trimmed caseInsensitiveCompare:name] == NSOrderedSame) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-static BOOL ViewIsSpaces(UIView* view) {
-    if ([view isKindOfClass:[UILabel class]] && TextIsSpaces(((UILabel*)view).text)) {
-        return YES;
-    }
-    if (TextIsSpaces(view.accessibilityLabel)) {
-        return YES;
-    }
-    for (UIView* sub in view.subviews) {
-        if (ViewIsSpaces(sub)) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-static const void* kSpacesPathKey = &kSpacesPathKey;
-
-static CGFloat SpacesInsertY(UICollectionView* list) {
-    for (UICollectionViewCell* cell in list.visibleCells) {
-        if (!ViewIsSpaces(cell)) {
-            continue;
-        }
-        NSIndexPath* path = [list indexPathForCell:cell];
-        if (path) {
-            objc_setAssociatedObject(list, kSpacesPathKey, path, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        return CGRectGetMaxY(cell.frame);
-    }
-    NSIndexPath* saved = objc_getAssociatedObject(list, kSpacesPathKey);
-    if (saved) {
-        UICollectionViewLayoutAttributes* attr = [list layoutAttributesForItemAtIndexPath:saved];
-        if (attr) {
-            return CGRectGetMaxY(attr.frame);
-        }
-    }
-
-    // The menu titles are drawn by SwiftUI, not UILabels. On screen the first
-    // group is 프로필, 커뮤니티, 리스트, 스페이스, then a gap, then 설정.
-    NSMutableArray<UIView*>* rows = [NSMutableArray array];
-    for (UICollectionViewCell* cell in list.visibleCells) {
-        CGFloat height = CGRectGetHeight(cell.frame);
-        if (height < 44.0 || height > 80.0 || CGRectGetWidth(cell.frame) < 200.0) {
-            continue;
-        }
-        [rows addObject:cell];
-    }
-    [rows sortUsingComparator:^NSComparisonResult(UIView* a, UIView* b) {
-        CGFloat ay = CGRectGetMinY(a.frame);
-        CGFloat by = CGRectGetMinY(b.frame);
-        return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
-    }];
-    if (rows.count < 4) {
-        return -1;
-    }
-    CGFloat bestGap = 12.0;
-    UIView* beforeGap = nil;
-    for (NSUInteger i = 1; i < rows.count; i++) {
-        CGFloat gap = CGRectGetMinY(rows[i].frame) - CGRectGetMaxY(rows[i - 1].frame);
-        if (gap > bestGap) {
-            bestGap = gap;
-            beforeGap = rows[i - 1];
-        }
-    }
-    if (!beforeGap) {
-        beforeGap = rows[3];
-    }
-    return CGRectGetMaxY(beforeGap.frame);
-}
 
 static void InstallRow(UIScrollView* list) {
     if (!list.window || !IsDrawerList(list)) {
@@ -610,6 +517,8 @@ static void InstallRow(UIScrollView* list) {
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
     CGFloat width = CGRectGetWidth(list.bounds);
+
+    // Sit at the end of the menu and scroll with it. A pinned row covers the D-day lines.
     CGFloat anchor = list.contentSize.height;
     if (anchor < 1) {
         return;
@@ -623,6 +532,12 @@ static void InstallRow(UIScrollView* list) {
         [list addSubview:events];
     }
     CGFloat eventsHeight = [events reloadWithIconX:iconX width:width];
+    CGFloat y = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
+    events.frame = CGRectMake(0, y, width, eventsHeight);
+    events.hidden = eventsHeight == 0;
+    if (eventsHeight > 0) {
+        y += eventsHeight;
+    }
 
     NFBOpenXRow* openX = gOpenXRow;
     if (!openX || openX.superview != list) {
@@ -631,6 +546,11 @@ static void InstallRow(UIScrollView* list) {
         gOpenXRow = openX;
         [list addSubview:openX];
     }
+    openX.frame = CGRectMake(0, y + 8, width, rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame =
+        CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
+
     NFBSensitiveRow* row = gRow;
     if (!row || row.superview != list) {
         [gRow removeFromSuperview];
@@ -640,136 +560,38 @@ static void InstallRow(UIScrollView* list) {
         row.baseTextColor = [UIColor labelColor];
         [list addSubview:row];
     }
-
-    UICollectionView* collection =
-        [list isKindOfClass:[UICollectionView class]] ? (UICollectionView*)list : nil;
-    NFBBox boxes[64];
-    UICollectionViewCell* boxedCells[64];
-    int boxCount = 0;
-    if (collection) {
-        for (UICollectionViewCell* cell in collection.visibleCells) {
-            if (boxCount >= 64) {
-                break;
-            }
-            NSIndexPath* path = [collection indexPathForCell:cell];
-            UICollectionViewLayoutAttributes* attr =
-                path ? [collection layoutAttributesForItemAtIndexPath:path] : nil;
-            CGRect home = attr ? attr.frame : cell.frame;
-            boxes[boxCount].y = (float)CGRectGetMinY(home);
-            boxes[boxCount].h = (float)CGRectGetHeight(home);
-            boxes[boxCount].w = (float)CGRectGetWidth(home);
-            boxedCells[boxCount] = cell;
-            boxCount++;
-        }
-    }
-    int footerIndex[2] = {0, 0};
-    int footerCount = NFBFooterIndices(boxes, boxCount, footerIndex);
-    NFBDrawerPlace place;
-    BOOL placed = NO;
-    if (footerCount == 2) {
-        NFBBox homes[2] = {boxes[footerIndex[0]], boxes[footerIndex[1]]};
-        placed = NFBPlaceDrawer((float)CGRectGetHeight(list.bounds), (float)list.contentOffset.y,
-                                (float)list.safeAreaInsets.bottom, homes, 2, (float)eventsHeight,
-                                &place);
-        if (placed) {
-            // Rows must sit in an empty slot. The fixed chrome is allowed to cover
-            // rows only while they scroll underneath it, so that check is at rest.
-            BOOL atRest = list.contentOffset.y <= 1.0;
-            for (int i = 0; i < boxCount; i++) {
-                if (i == footerIndex[0] || i == footerIndex[1]) {
-                    continue;
-                }
-                if (NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.rowY[0], place.rowH[0]) ||
-                    NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.rowY[1], place.rowH[1])) {
-                    placed = NO;
-                    break;
-                }
-                if (atRest && NFBBoxesOverlap(boxes[i].y, boxes[i].h, place.eventsY,
-                                              (place.pinY[1] + place.pinH[1]) - place.eventsY)) {
-                    placed = NO;
-                    break;
-                }
-            }
-        }
-    }
-
-    CGFloat menuY = anchor + (eventsHeight > 0 ? kEventGroupGap + eventsHeight : 0);
-    CGFloat eventsY = anchor + (eventsHeight > 0 ? kEventGroupGap : 0);
-    if (placed) {
-        CGFloat chrome = (place.pinY[1] + place.pinH[1]) - place.eventsY + 8.0;
-        CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
-        if (fabs(added - chrome) > 0.5) {
-            UIEdgeInsets inset = list.contentInset;
-            inset.bottom += chrome - added;
-            list.contentInset = inset;
-            objc_setAssociatedObject(list, kInsetAddedKey, @(chrome), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        menuY = place.rowY[0];
-        eventsY = place.eventsY;
-        for (int i = 0; i < 2; i++) {
-            UICollectionViewCell* cell = boxedCells[footerIndex[i]];
-            CGRect frame = cell.frame;
-            frame.origin.y = place.pinY[i];
-            frame.size.height = place.pinH[i];
-            cell.frame = frame;
-            [list bringSubviewToFront:cell];
-        }
-    }
-
-    openX.frame = CGRectMake(0, menuY, width, placed ? place.rowH[0] : rowHeight);
-    openX.icon.frame = CGRectMake(iconX, (CGRectGetHeight(openX.frame) - kIconSize) / 2, kIconSize, kIconSize);
-    openX.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), CGRectGetHeight(openX.frame));
     [row applyLabelColor];
-    row.frame = CGRectMake(0, placed ? place.rowY[1] : CGRectGetMaxY(openX.frame), width,
-                           placed ? place.rowH[1] : rowHeight);
-    row.icon.frame = CGRectMake(iconX, (CGRectGetHeight(row.frame) - kIconSize) / 2, kIconSize, kIconSize);
-    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), CGRectGetHeight(row.frame));
+    row.frame = CGRectMake(0, CGRectGetMaxY(openX.frame), width, rowHeight);
+    row.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    row.label.frame = CGRectMake(labelX, 0, MAX(width - labelX - 12, 0), rowHeight);
     [row.icon applyState];
-    events.frame = CGRectMake(0, eventsY, width, eventsHeight);
-    events.hidden = eventsHeight == 0;
-    [list bringSubviewToFront:events];
+
+    CGFloat needed = CGRectGetMaxY(row.frame) - anchor + 16.0;
+    CGFloat added = [objc_getAssociatedObject(list, kInsetAddedKey) doubleValue];
+    if (fabs(added - needed) > 0.5) {
+        UIEdgeInsets inset = list.contentInset;
+        inset.bottom += needed - added;
+        list.contentInset = inset;
+        objc_setAssociatedObject(list, kInsetAddedKey, @(needed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 }
 
-static NSInteger gInstallDepth;
+static const void* kCheckedAtKey = &kCheckedAtKey;
 
+// The drawer may be built long after launch and without any view controller
+// appearance, so watch the lists themselves; throttled per list.
 static void CheckList(UIScrollView* list) {
-    if (!list.window || gInstallDepth > 0) {
+    if (!list.window) {
         return;
     }
-    gInstallDepth++;
+    CFTimeInterval now = CACurrentMediaTime();
+    NSNumber* last = objc_getAssociatedObject(list, kCheckedAtKey);
+    if (last && now - last.doubleValue < 0.5) {
+        return;
+    }
+    objc_setAssociatedObject(list, kCheckedAtKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     InstallRow(list);
-    gInstallDepth--;
 }
-
-static UIView* FindSpacesView(UIView* root) {
-    __block UIView* found = nil;
-    EnumerateSubviewsRecursively(root, ^(UIView* view) {
-        if (found || view == gOpenXRow || view == gRow || view == gEventRows) {
-            return;
-        }
-        if ([view isKindOfClass:[UILabel class]] && TextIsSpaces(((UILabel*)view).text)) {
-            found = view;
-            return;
-        }
-        if (TextIsSpaces(view.accessibilityLabel)) {
-            found = view;
-        }
-    });
-    return found;
-}
-
-static void PlaceRowsUnderSpaces(UIView* root) {
-    (void)root;
-}
-
-%hook _TtC11TwitterDash21DashHostingController
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-    PlaceRowsUnderSpaces(((UIViewController*)self).view);
-}
-
-%end
 
 %hook UITableView
 

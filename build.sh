@@ -17,6 +17,25 @@ if [[ "$is_tty" -eq 1 ]]; then
   fi
 fi
 
+strip_plugins() {
+    local ipa
+    ipa="$(realpath "$1")"
+
+    local tmp
+    tmp=$(mktemp -d)
+
+    unzip -q "$ipa" -d "$tmp"
+    rm -rf "$tmp/Payload/Twitter.app/PlugIns" "$tmp/Payload/decrypt.day"
+    rm -f "$ipa"
+
+    (
+        cd "$tmp"
+        zip -qry "$ipa" Payload
+    )
+
+    rm -rf "$tmp"
+}
+
 inject_appex() {
     local ipa
     ipa="$(realpath "$1")"
@@ -151,8 +170,10 @@ case "$MODE" in
         cyan -i packages/com.atebits.Tweetie2.ipa -o packages/NeoFreeBird-sideloaded --ignore-encrypted \
           -uwf .theos/obj/debug/zxPluginsInject.dylib .theos/obj/debug/libbhFLEX.dylib \
           .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle
-        say "Injecting OpenTwitterSafariExtension.appex into the IPA."  
-        inject_appex packages/NeoFreeBird-sideloaded.ipa
+        # SideStore rejects this IPA when PlugIns are present: the widget path
+        # contains a space, and extension bundle IDs no longer match after
+        # SideStore appends the team id. The app itself does not need them.
+        strip_plugins packages/NeoFreeBird-sideloaded.ipa
       else
         say "Skipping cyan step because it is not installed."
       fi

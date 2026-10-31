@@ -21,11 +21,14 @@ static BOOL IsHistorySegment(UIViewController* controller) {
     if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !controller) {
         return NO;
     }
-    UIResponder* cursor = controller;
-    for (int depth = 0; cursor && depth < 8; depth++, cursor = cursor.nextResponder) {
+    // nextResponder only loops between a controller and its own view.
+    // The history container is the parent, as in the on-screen controller tree.
+    UIViewController* cursor = controller;
+    for (int depth = 0; cursor && depth < 8; depth++) {
         if ([NSStringFromClass([cursor class]) containsString:@"ActivityHistory"]) {
             return YES;
         }
+        cursor = cursor.parentViewController;
     }
     return NO;
 }
@@ -156,6 +159,14 @@ static void CoverPage(UIViewController* page, id owner) {
     return %orig;
 }
 
+- (id)viewControllerAtTabIndex:(long long)index {
+    UIViewController* controller = (UIViewController*)self;
+    if (IsHistorySegment(controller) && index == ArticlesTabIndex(controller)) {
+        return RecentPage(self);
+    }
+    return %orig;
+}
+
 - (void)viewDidLayoutSubviews {
     %orig;
     UIViewController* controller = (UIViewController*)self;
@@ -184,6 +195,66 @@ static void CoverPage(UIViewController* page, id owner) {
     }
     if (selectedIndex == articles && [selected isKindOfClass:[UIViewController class]]) {
         CoverPage((UIViewController*)selected, self);
+    }
+}
+
+%end
+
+// The articles page says "읽은 아티클이 여기에 표시됩니다" while it is empty.
+// Cover that page even if the pager already cached it.
+%hook _TtC16XActivityHistory33ActivityHistoryPageViewController
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !self.isViewLoaded) {
+        return;
+    }
+    __block BOOL articles = NO;
+    EnumerateSubviewsRecursively(self.view, ^(UIView* view) {
+        if (![view isKindOfClass:[UILabel class]]) {
+            return;
+        }
+        NSString* text = ((UILabel*)view).text;
+        if ([text containsString:@"아티클"] || [text containsString:@"Articles"]) {
+            articles = YES;
+        }
+    });
+    if (!articles) {
+        return;
+    }
+    UIViewController* page = (UIViewController*)self;
+    UIViewController* recent = RecentPage(page);
+    if (recent.parentViewController != page) {
+        if (recent.parentViewController) {
+            [recent willMoveToParentViewController:nil];
+            [recent.view removeFromSuperview];
+            [recent removeFromParentViewController];
+        }
+        [page addChildViewController:recent];
+        recent.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [page.view addSubview:recent.view];
+        [recent didMoveToParentViewController:page];
+    }
+    recent.view.frame = page.view.bounds;
+}
+
+%end
+
+%hook UILabel
+
+- (void)layoutSubviews {
+    %orig;
+    if (![BHTSettings boolForKey:@"kemo_history_tabs"]) {
+        return;
+    }
+    if (![self.text isEqualToString:@"아티클"] && ![self.text isEqualToString:@"Articles"]) {
+        return;
+    }
+    for (UIView* view = self.superview; view; view = view.superview) {
+        if ([NSStringFromClass(view.class) containsString:@"SegmentedTabCell"]) {
+            self.text = [[BHTBundle sharedBundle] localizedStringForKey:@"KEMO_HISTORY_TAB_TITLE"];
+            return;
+        }
     }
 }
 

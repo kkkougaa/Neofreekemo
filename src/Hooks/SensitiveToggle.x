@@ -283,10 +283,16 @@ static UIImage* ToggleImage(NSString* name) {
 
 @end
 
-// MARK: Open in X, pinned just above NSFW mode
+// MARK: Open original X app row
+// A plain button above the NSFW row that hands the user over to the original X app.
+// This build is re-signed without the app's associated domains, so a universal link to
+// x.com is not claimed by it and iOS gives it to the original X app. Universal-links-only
+// keeps it from falling into Safari when X is not installed; then the plain URL is tried.
+
+static const NSInteger kOpenXRowTag = 0x4e464232;
 
 @interface NFBOpenXRow : UIControl
-@property (nonatomic, strong) UIImageView* iconView;
+@property (nonatomic, strong) UIImageView* icon;
 @property (nonatomic, strong) UILabel* label;
 @end
 
@@ -294,21 +300,20 @@ static UIImage* ToggleImage(NSString* name) {
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
+        self.tag = kOpenXRowTag;
         self.isAccessibilityElement = YES;
         self.accessibilityTraits = UIAccessibilityTraitButton;
         self.accessibilityLabel =
-            [[BHTBundle sharedBundle] localizedStringForKey:@"OPEN_IN_X_TITLE"];
+            [[BHTBundle sharedBundle] localizedStringForKey:@"OPEN_ORIGINAL_X_TITLE"];
 
-        UIImageSymbolConfiguration* config = [UIImageSymbolConfiguration
-            configurationWithPointSize:22
-                                weight:UIImageSymbolWeightSemibold];
-        _iconView = [[UIImageView alloc]
-            initWithImage:[UIImage systemImageNamed:@"arrow.up.forward.app"
-                                    withConfiguration:config]];
-        _iconView.contentMode = UIViewContentModeScaleAspectFit;
-        _iconView.tintColor = [UIColor labelColor];
-        _iconView.userInteractionEnabled = NO;
-        [self addSubview:_iconView];
+        UIImageSymbolConfiguration* config =
+            [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightSemibold];
+        _icon = [[UIImageView alloc]
+            initWithImage:[UIImage systemImageNamed:@"arrow.up.forward.app" withConfiguration:config]];
+        _icon.contentMode = UIViewContentModeCenter;
+        _icon.tintColor = [UIColor systemGrayColor];
+        _icon.userInteractionEnabled = NO;
+        [self addSubview:_icon];
 
         _label = [UILabel new];
         _label.text = self.accessibilityLabel;
@@ -325,13 +330,17 @@ static UIImage* ToggleImage(NSString* name) {
 }
 
 - (void)rowTapped {
-    NSURL* url = [NSURL URLWithString:@"https://x.com"];
-    if (!url) {
-        return;
-    }
     [[[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
-    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    NSURL* url = [NSURL URLWithString:@"https://x.com/home"];
+    UIApplication* app = [UIApplication sharedApplication];
+    [app openURL:url
+                  options:@{UIApplicationOpenURLOptionUniversalLinksOnly : @YES}
+        completionHandler:^(BOOL success) {
+            if (!success) {
+                [app openURL:url options:@{} completionHandler:nil];
+            }
+        }];
 }
 
 - (void)setHighlighted:(BOOL)highlighted {
@@ -495,7 +504,7 @@ static const NSUInteger kMaxEventRows = 4;
 @end
 
 static __weak NFBSensitiveRow* gRow;
-static __weak NFBOpenXRow* gOpenRow;
+static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 
@@ -531,19 +540,6 @@ static void InstallRow(UIScrollView* list) {
     CGFloat safeBottom = MAX(list.window.safeAreaInsets.bottom, host.safeAreaInsets.bottom);
     CGFloat nsfwY = CGRectGetHeight(host.bounds) - safeBottom - rowHeight - 12;
 
-    NFBOpenXRow* openRow = gOpenRow;
-    if (!openRow || openRow.superview != host) {
-        [gOpenRow removeFromSuperview];
-        openRow = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
-        gOpenRow = openRow;
-        [host addSubview:openRow];
-    }
-    openRow.frame = CGRectMake(0, nsfwY - rowHeight, CGRectGetWidth(host.bounds), rowHeight);
-    openRow.iconView.frame =
-        CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
-    openRow.label.frame = CGRectMake(
-        labelX, 0, MAX(CGRectGetWidth(openRow.bounds) - labelX - 12, 0), rowHeight);
-
     NFBSensitiveRow* row = gRow;
     if (!row || row.superview != host) {
         [gRow removeFromSuperview];
@@ -559,8 +555,20 @@ static void InstallRow(UIScrollView* list) {
     row.label.frame = CGRectMake(
         labelX, 0, MAX(CGRectGetWidth(row.bounds) - labelX - 12, 0), rowHeight);
     [row.icon applyState];
-    [host bringSubviewToFront:openRow];
     [host bringSubviewToFront:row];
+
+    // The original X app button sits right above the NSFW row.
+    NFBOpenXRow* openX = gOpenXRow;
+    if (!openX || openX.superview != host) {
+        [gOpenXRow removeFromSuperview];
+        openX = [[NFBOpenXRow alloc] initWithFrame:CGRectZero];
+        gOpenXRow = openX;
+        [host addSubview:openX];
+    }
+    openX.frame = CGRectOffset(row.frame, 0, -rowHeight);
+    openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);
+    openX.label.frame = row.label.frame;
+    [host bringSubviewToFront:openX];
 
     // Room to scroll past the D-day group and the two pinned rows.
     CGFloat needed =

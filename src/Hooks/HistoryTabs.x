@@ -206,11 +206,12 @@ static void CoverPage(UIViewController* page, id owner) {
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !self.isViewLoaded) {
+    UIViewController* page = (UIViewController*)self;
+    if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !page.isViewLoaded) {
         return;
     }
     __block BOOL articles = NO;
-    EnumerateSubviewsRecursively(self.view, ^(UIView* view) {
+    EnumerateSubviewsRecursively(page.view, ^(UIView* view) {
         if (![view isKindOfClass:[UILabel class]]) {
             return;
         }
@@ -222,7 +223,6 @@ static void CoverPage(UIViewController* page, id owner) {
     if (!articles) {
         return;
     }
-    UIViewController* page = (UIViewController*)self;
     UIViewController* recent = RecentPage(page);
     if (recent.parentViewController != page) {
         if (recent.parentViewController) {

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.14",
+      "subtitle": "NeoFreeBird version 7.3.15",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.15",
+          "buildVersion": "15",
+          "date": "2026-10-31T18:49:54Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.15/NeoFreeBird-Twitter-sideloaded_7.3.15_12.38.1.ipa",
+          "size": 266116544,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Version 7.3.15\n\nNew Effects\n- Heart particles burst out when you like a post\n- Soft glow on the header in dark mode\n- Little burst animation when your post is sent\n- Very subtle parallax on photos while scrolling (off in Low Power Mode and Reduce Motion)\n\nAll four can be toggled in settings."
+        },
         {
           "version": "7.3.14",
           "buildVersion": "14",

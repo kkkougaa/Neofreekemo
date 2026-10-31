@@ -500,3 +500,12 @@
 "KEMO_HISTORY_PAGE_TITLE" = "History";
 "KEMO_HISTORY_PAGE_SUBTITLE" = "Recently viewed, and keeping your place";
 "KEMO_HISTORY_TAB_TITLE" = "History";
+
+"KEMO_LIKE_HEARTS_TITLE" = "Like heart particles";
+"KEMO_LIKE_HEARTS_DETAIL" = "Hearts float up from the like button, then fade.";
+"KEMO_HEADER_GLOW_TITLE" = "Dark mode header glow";
+"KEMO_HEADER_GLOW_DETAIL" = "A soft light breathes behind the home logo when it's dark.";
+"KEMO_POST_BURST_TITLE" = "Glow when a tweet is sent";
+"KEMO_POST_BURST_DETAIL" = "The header logo flashes once and sends out a small burst.";
+"KEMO_MEDIA_PARALLAX_TITLE" = "Media parallax";
+"KEMO_MEDIA_PARALLAX_DETAIL" = "Timeline photos shift a tiny bit as you scroll.";

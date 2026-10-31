@@ -513,3 +513,12 @@
 "KEMO_HISTORY_PAGE_TITLE" = "기록";
 "KEMO_HISTORY_PAGE_SUBTITLE" = "이전내역과 새로고침 위치";
 "KEMO_HISTORY_TAB_TITLE" = "이전내역";
+
+"KEMO_LIKE_HEARTS_TITLE" = "좋아요 하트 파티클";
+"KEMO_LIKE_HEARTS_DETAIL" = "좋아요를 누르면 하트가 버튼에서 떠올라 사라집니다.";
+"KEMO_HEADER_GLOW_TITLE" = "다크 모드 헤더 글로우";
+"KEMO_HEADER_GLOW_DETAIL" = "어두운 화면에서 홈 로고 뒤에 은은한 빛이 천천히 숨 쉽니다.";
+"KEMO_POST_BURST_TITLE" = "보낸 뒤 로고 반짝임";
+"KEMO_POST_BURST_DETAIL" = "트윗을 보내면 헤더 로고가 한 번 빛나고 작은 입자가 퍼집니다.";
+"KEMO_MEDIA_PARALLAX_TITLE" = "미디어 패럴랙스";
+"KEMO_MEDIA_PARALLAX_DETAIL" = "타임라인 사진이 스크롤에 맞춰 아주 살짝 움직입니다.";

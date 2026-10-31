@@ -47,6 +47,8 @@ static void ShowConfirmation(void (^confirmed)(void)) {
 
 // The draft autosave forgets the saved text once the tweet is really on its way.
 extern void NFBDraftNoteSent(UIViewController* composer);
+// The header logo plays its send burst from this same moment (PostSentBurst.x).
+extern void NFBNoteTweetPosted(void);
 
 // MARK: - Tweet confirm
 
@@ -58,12 +60,14 @@ extern void NFBDraftNoteSent(UIViewController* composer);
     if (![BHTSettings boolForKey:@"tweet_confirm"]) {
         PlayCustomSendSound();
         NFBDraftNoteSent((UIViewController*)self);
+        NFBNoteTweetPosted();
         return %orig;
     }
 
     ShowConfirmation(^{
         PlayCustomSendSound();
         NFBDraftNoteSent((UIViewController*)self);
+        NFBNoteTweetPosted();
         %orig;
     });
 }
@@ -74,11 +78,13 @@ extern void NFBDraftNoteSent(UIViewController* composer);
 - (void)_t1_sendReply {
     if (![BHTSettings boolForKey:@"tweet_confirm"]) {
         PlayCustomSendSound();
+        NFBNoteTweetPosted();
         return %orig;
     }
 
     ShowConfirmation(^{
         PlayCustomSendSound();
+        NFBNoteTweetPosted();
         %orig;
     });
 }

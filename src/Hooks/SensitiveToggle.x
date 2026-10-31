@@ -508,6 +508,8 @@ static __weak NFBOpenXRow* gOpenXRow;
 static __weak NFBEventRows* gEventRows;
 static const void* kInsetAddedKey = &kInsetAddedKey;
 static const void* kDashPinnedKey = &kDashPinnedKey;
+static const void* kAppliedShiftKey = &kAppliedShiftKey;
+static const void* kSizeExtraKey = &kSizeExtraKey;
 
 // The two rows belong in the official menu, directly under Spaces. Cells below
 // that row are pushed down. D-day stays at the end. Until Spaces has been seen,
@@ -602,6 +604,8 @@ static CGFloat SpacesInsertY(UICollectionView* list) {
 
 static void ShiftContentBelow(UIScrollView* list, CGFloat insertY, CGFloat shift, UIView* events,
                               UIView* openX, UIView* row) {
+    // Undo the previous nudge first. Otherwise every layout pushes the same
+    // row down another 104pt and settings, help and follow requests leave the screen.
     for (UIView* sub in list.subviews) {
         if (sub == events || sub == openX || sub == row) {
             continue;
@@ -609,12 +613,19 @@ static void ShiftContentBelow(UIScrollView* list, CGFloat insertY, CGFloat shift
         if (![sub isKindOfClass:[UICollectionReusableView class]]) {
             continue;
         }
-        if (CGRectGetMinY(sub.frame) + 0.5 < insertY) {
-            continue;
-        }
+        CGFloat applied = [objc_getAssociatedObject(sub, kAppliedShiftKey) doubleValue];
         CGRect frame = sub.frame;
-        frame.origin.y += shift;
-        sub.frame = frame;
+        frame.origin.y -= applied;
+        CGFloat next = 0;
+        if (frame.origin.y + 0.5 >= insertY) {
+            frame.origin.y += shift;
+            next = shift;
+        }
+        if (fabs(applied - next) > 0.5 || fabs(sub.frame.origin.y - frame.origin.y) > 0.5) {
+            sub.frame = frame;
+            objc_setAssociatedObject(sub, kAppliedShiftKey, next > 0 ? @(next) : nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
     }
 }
 
@@ -627,7 +638,8 @@ static void InstallRow(UIScrollView* list) {
     CGFloat iconX = 32.0;
     CGFloat labelX = iconX + kIconSize + 16.0;
     CGFloat width = CGRectGetWidth(list.bounds);
-    CGFloat anchor = list.contentSize.height;
+    CGFloat sizeExtra = [objc_getAssociatedObject(list, kSizeExtraKey) doubleValue];
+    CGFloat anchor = list.contentSize.height - sizeExtra;
     if (anchor < 1) {
         return;
     }
@@ -702,6 +714,12 @@ static void InstallRow(UIScrollView* list) {
 
     if (insertY >= 0) {
         ShiftContentBelow(list, insertY, shift, events, openX, row);
+        if (fabs(sizeExtra - shift) > 0.5) {
+            CGSize size = list.contentSize;
+            size.height += shift - sizeExtra;
+            list.contentSize = size;
+            objc_setAssociatedObject(list, kSizeExtraKey, @(shift), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
     }
     openX.frame = CGRectMake(0, menuY, width, rowHeight);
     openX.icon.frame = CGRectMake(iconX, (rowHeight - kIconSize) / 2, kIconSize, kIconSize);

@@ -179,14 +179,22 @@ static NSError* BHTTransferError(BHTSettingsTransferErrorCode code, NSString* me
 
 #pragma mark - Import
 
-+ (NSInteger)importSettingsFromFileAtURL:(NSURL*)url error:(NSError**)error {
-    // Files handed over by the document picker live outside our sandbox until
-    // the copy is made.
-    BOOL scoped = [url startAccessingSecurityScopedResource];
-    NSData* data = [NSData dataWithContentsOfURL:url];
-    if (scoped) {
-        [url stopAccessingSecurityScopedResource];
++ (NSString*)exportBase64String:(NSError**)error {
+    NSError* serializationError = nil;
+    NSData* data = [NSJSONSerialization dataWithJSONObject:[self exportPayload]
+                                                   options:NSJSONWritingSortedKeys
+                                                     error:&serializationError];
+    if (!data) {
+        if (error) {
+            *error = BHTTransferError(BHTSettingsTransferErrorWriteFailed,
+                                      @"SETTINGS_EXPORT_WRITE_FAILED");
+        }
+        return nil;
     }
+    return [data base64EncodedStringWithOptions:0];
+}
+
++ (NSInteger)importSettingsFromData:(NSData*)data error:(NSError**)error {
     if (!data) {
         if (error) {
             *error = BHTTransferError(BHTSettingsTransferErrorUnreadableFile,
@@ -234,6 +242,39 @@ static NSError* BHTTransferError(BHTSettingsTransferErrorCode code, NSString* me
     [defaults synchronize];
     [self applySideEffectsForImportedKeys:applied];
     return (NSInteger)applied.count;
+}
+
++ (NSInteger)importSettingsFromFileAtURL:(NSURL*)url error:(NSError**)error {
+    // Files handed over by the document picker live outside our sandbox until
+    // the copy is made.
+    BOOL scoped = [url startAccessingSecurityScopedResource];
+    NSData* data = [NSData dataWithContentsOfURL:url];
+    if (scoped) {
+        [url stopAccessingSecurityScopedResource];
+    }
+    return [self importSettingsFromData:data error:error];
+}
+
++ (NSInteger)importSettingsFromBase64String:(NSString*)string error:(NSError**)error {
+    if (string.length == 0) {
+        if (error) {
+            *error = BHTTransferError(BHTSettingsTransferErrorMalformedFile,
+                                      @"SETTINGS_TRANSFER_MALFORMED_FILE");
+        }
+        return -1;
+    }
+    NSString* trimmed =
+        [string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSData* data = [[NSData alloc] initWithBase64EncodedString:trimmed
+                                                      options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    if (!data) {
+        if (error) {
+            *error = BHTTransferError(BHTSettingsTransferErrorMalformedFile,
+                                      @"SETTINGS_TRANSFER_MALFORMED_FILE");
+        }
+        return -1;
+    }
+    return [self importSettingsFromData:data error:error];
 }
 
 // Most preferences are read straight from NSUserDefaults on use, but the accent

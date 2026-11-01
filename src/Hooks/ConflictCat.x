@@ -24,6 +24,7 @@ static const void* kInApply = &kInApply;
 
 static NSString* const kHuffAnim = @"nfb.huff";
 static NSString* const kPuffAnim = @"nfb.puff";
+static NSString* const kShiverAnim = @"nfb.shiver";
 static const CGFloat kBadgeWidth = 20.0;
 static const CGFloat kBadgeGap = 4.0;
 static const CFTimeInterval kHuffDuration = 2.1;
@@ -56,6 +57,10 @@ static UIImage* ConflictCatImage(void) {
 static CATransform3D HuffTransform(CGFloat scaleX, CGFloat scaleY, CGFloat degrees) {
     CATransform3D transform = CATransform3DMakeScale(scaleX, scaleY, 1);
     return CATransform3DRotate(transform, degrees * (CGFloat)M_PI / 180.0, 0, 0, 1);
+}
+
+static CATransform3D ShiverTransform(CGFloat scale, CGFloat dx) {
+    return CATransform3DTranslate(CATransform3DMakeScale(scale, scale, 1), dx, 0, 0);
 }
 
 static CAAnimationGroup* HuffGroup(void) {
@@ -117,6 +122,7 @@ static CAAnimationGroup* PuffGroup(CGFloat driftX) {
 @property (nonatomic, assign) BOOL hasPhase;
 - (void)applyHuff;
 - (void)stopHuff;
+- (void)playShiver;
 @end
 
 @implementation NFBConflictBadge
@@ -170,8 +176,33 @@ static CAAnimationGroup* PuffGroup(CGFloat driftX) {
     [self.cat.layer removeAnimationForKey:kHuffAnim];
     [self.puffA removeAnimationForKey:kPuffAnim];
     [self.puffB removeAnimationForKey:kPuffAnim];
+    [self.layer removeAnimationForKey:kShiverAnim];
     self.puffA.opacity = 0;
     self.puffB.opacity = 0;
+}
+
+// A short bristle on the badge itself. The huff keeps running on the cat layer.
+- (void)playShiver {
+    if (UIAccessibilityIsReduceMotionEnabled()) {
+        return;
+    }
+    if ([self.layer animationForKey:kShiverAnim]) {
+        return;
+    }
+    CAMediaTimingFunction* ease =
+        [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    CAKeyframeAnimation* bristle = [CAKeyframeAnimation animationWithKeyPath:@"transform"];
+    bristle.values = @[
+        [NSValue valueWithCATransform3D:ShiverTransform(1.0, 0)],
+        [NSValue valueWithCATransform3D:ShiverTransform(1.12, -3)],
+        [NSValue valueWithCATransform3D:ShiverTransform(1.06, 3)],
+        [NSValue valueWithCATransform3D:ShiverTransform(1.03, -1.5)],
+        [NSValue valueWithCATransform3D:ShiverTransform(1.0, 0)]
+    ];
+    bristle.keyTimes = @[ @0, @0.22, @0.48, @0.72, @1 ];
+    bristle.timingFunctions = @[ ease, ease, ease, ease ];
+    bristle.duration = 0.3;
+    [self.layer addAnimation:bristle forKey:kShiverAnim];
 }
 
 - (void)applyHuff {
@@ -207,7 +238,7 @@ static NSCache<NSString*, NSNumber*>* ConflictCache(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         cache = [NSCache new];
-        cache.countLimit = 400;
+        cache.countLimit = 500;
     });
     return cache;
 }
@@ -360,7 +391,70 @@ static NSString* ConflictTweetText(UIView* root) {
     return nil;
 }
 
-static void ConflictPlace(UIView* root, BOOL divisive) {
+// Tweet id when the view model exposes one. Quoted cards are keyed apart from
+// the outer post so they do not share a result. Text hash is only a fallback.
+static NSString* ConflictNumberID(id object, NSString* selectorName) {
+    if (!object) {
+        return nil;
+    }
+    SEL selector = NSSelectorFromString(selectorName);
+    if (![object respondsToSelector:selector]) {
+        return nil;
+    }
+    NSMethodSignature* signature = [object methodSignatureForSelector:selector];
+    const char* returnType = signature.methodReturnType;
+    if (!returnType) {
+        return nil;
+    }
+    if (strcmp(returnType, @encode(long long)) == 0 || strcmp(returnType, "q") == 0) {
+        long long value = ((long long (*)(id, SEL))objc_msgSend)(object, selector);
+        return value > 0 ? [NSString stringWithFormat:@"%lld", value] : nil;
+    }
+    return ConflictObjectString(object, selectorName);
+}
+
+static NSString* ConflictIdentity(UIView* root, NSString* text) {
+    id viewModel = nil;
+    if ([root respondsToSelector:@selector(viewModel)]) {
+        viewModel = ((id (*)(id, SEL))objc_msgSend)(root, @selector(viewModel));
+    }
+    NSString* statusID = ConflictNumberID(viewModel, @"statusID");
+    if (statusID.length == 0) {
+        id status = nil;
+        if (viewModel && [viewModel respondsToSelector:@selector(status)]) {
+            NSMethodSignature* signature = [viewModel methodSignatureForSelector:@selector(status)];
+            if (signature && strcmp(signature.methodReturnType, @encode(id)) == 0) {
+                status = ((id (*)(id, SEL))objc_msgSend)(viewModel, @selector(status));
+            }
+        }
+        statusID = ConflictNumberID(status, @"statusID");
+    }
+    if (statusID.length == 0) {
+        statusID = ConflictObjectString(viewModel, @"entryID");
+    }
+    if (statusID.length > 0) {
+        BOOL quoted = [NSStringFromClass(root.class) containsString:@"Quoted"];
+        return [NSString stringWithFormat:@"%@:%@", quoted ? @"q" : @"s", statusID];
+    }
+    return [NSString stringWithFormat:@"t:%lu:%lu", (unsigned long)text.length, (unsigned long)text.hash];
+}
+
+static NSCache<NSString*, NSNumber*>* ShiverCache(void) {
+    static NSCache* cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSCache new];
+        cache.countLimit = 500;
+    });
+    return cache;
+}
+
+static void ConflictClearCaches(void) {
+    [ConflictCache() removeAllObjects];
+    [ShiverCache() removeAllObjects];
+}
+
+static void ConflictPlace(UIView* root, BOOL divisive, NSString* identity) {
     if (!divisive || CGRectIsEmpty(root.bounds)) {
         NFBConflictBadge* existing = objc_getAssociatedObject(root, kBadgeKey);
         existing.hidden = YES;
@@ -393,6 +487,11 @@ static void ConflictPlace(UIView* root, BOOL divisive) {
     }
     badge.hidden = NO;
     [badge applyHuff];
+    // One bristle per tweet. Reuse of the same cell must not shake it again.
+    if (identity.length > 0 && [ShiverCache() objectForKey:identity] == nil) {
+        [ShiverCache() setObject:@YES forKey:identity];
+        [badge playShiver];
+    }
     [root bringSubviewToFront:badge];
 }
 
@@ -465,20 +564,19 @@ static void ConflictApply(UIView* root) {
             text = nil;
         }
         if (text.length == 0) {
-            ConflictPlace(root, NO);
+            ConflictPlace(root, NO, nil);
             objc_setAssociatedObject(root, kAppliedKey, @"", OBJC_ASSOCIATION_COPY_NONATOMIC);
             ConflictApplyQuotes(root, YES);
             return;
         }
-        NSString* cacheKey =
-            [NSString stringWithFormat:@"%lu:%lu", (unsigned long)text.length, (unsigned long)text.hash];
+        NSString* cacheKey = ConflictIdentity(root, text);
         NSString* applied = objc_getAssociatedObject(root, kAppliedKey);
         BOOL sameTweet = [applied isEqualToString:cacheKey];
         NSNumber* cached = [ConflictCache() objectForKey:cacheKey];
         if (cached) {
             objc_setAssociatedObject(root, kPendingKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
             objc_setAssociatedObject(root, kAppliedKey, cacheKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
-            ConflictPlace(root, cached.boolValue);
+            ConflictPlace(root, cached.boolValue, cacheKey);
             ConflictApplyQuotes(root, YES);
             return;
         }
@@ -490,7 +588,7 @@ static void ConflictApply(UIView* root) {
         // A new tweet must not keep the previous cat. The same tweet keeps its
         // badge while a dropped cache entry is scored again.
         if (!sameTweet) {
-            ConflictPlace(root, NO);
+            ConflictPlace(root, NO, nil);
         }
         objc_setAssociatedObject(root, kPendingKey, cacheKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
         __weak UIView* weakRoot = root;
@@ -512,7 +610,7 @@ static void ConflictApply(UIView* root) {
                     return;
                 }
                 objc_setAssociatedObject(strongRoot, kAppliedKey, cacheKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
-                ConflictPlace(strongRoot, divisive);
+                ConflictPlace(strongRoot, divisive, cacheKey);
             });
         });
         ConflictApplyQuotes(root, YES);
@@ -531,3 +629,14 @@ static void ConflictApply(UIView* root) {
 }
 
 %end
+
+%ctor {
+    %init;
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(__unused NSNotification* note) {
+                    ConflictClearCaches();
+                }];
+}

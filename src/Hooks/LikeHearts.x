@@ -4,6 +4,7 @@
 //
 
 #import "HookHelpers.h"
+#import "Core/NFBKemoHaptics.h"
 
 // MARK: - Like heart particles
 
@@ -213,7 +214,9 @@ static void SpawnHeartsAt(CGPoint center, UIWindow* window, UIColor* color) {
                          }];
     }
 
-    if ([BHTSettings boolForKey:@"kemo_haptics"]) {
+    if ([BHTSettings boolForKey:@"kemo_effect_haptics"]) {
+        NFBKemoPlayBurstHaptic();
+    } else if ([BHTSettings boolForKey:@"kemo_haptics"]) {
         UIImpactFeedbackGenerator* haptic =
             [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft];
         [haptic impactOccurred];

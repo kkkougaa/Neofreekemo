@@ -21,6 +21,10 @@
 //  7.3.23: profile pictures (from X's on-screen avatars, or any getter giving a
 //  profile_images address), an unread badge per account, and circles pushed
 //  apart so five or more never overlap near a corner.
+//
+//  7.3.24: one even arc (quarter circle from a corner) that slides as a whole
+//  to stay on screen; unread badges read off X's own account list rows; the
+//  name tag sits above the arc, away from the thumb.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -364,6 +368,72 @@ static NSInteger AccountUnreadCount(id account) {
     return -1;
 }
 
+// Unread counts read off X's own account list (T1PickableAccountEntryCell:
+// a TUIAvatarImageView.<user id> plus a TFNBadgeView with the number).
+static NSMutableDictionary<NSString*, NSNumber*>* gSheetCounts = nil;
+
+static NSInteger HarvestSheetCounts(UIView* root) {
+    if (!root) {
+        return 0;
+    }
+    NSInteger cells = 0;
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:root];
+    NSInteger budget = 3000;
+    while (queue.count > 0 && budget-- > 0) {
+        UIView* view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (![view isKindOfClass:[UITableViewCell class]] ||
+            ![NSStringFromClass(view.class) containsString:@"AccountEntryCell"]) {
+            [queue addObjectsFromArray:view.subviews];
+            continue;
+        }
+        NSString* key = nil;
+        NSInteger count = 0;
+        NSMutableArray<UIView*>* inner = [NSMutableArray arrayWithObject:view];
+        while (inner.count > 0) {
+            UIView* sub = inner.firstObject;
+            [inner removeObjectAtIndex:0];
+            NSString* identifier = sub.accessibilityIdentifier;
+            if (!key && [identifier hasPrefix:@"TUIAvatarImageView."]) {
+                key = [identifier substringFromIndex:@"TUIAvatarImageView.".length];
+            }
+            if (!sub.hidden && sub.alpha > 0.01 && [NSStringFromClass(sub.class) containsString:@"BadgeView"]) {
+                NSMutableArray<UIView*>* labels = [NSMutableArray arrayWithObject:sub];
+                while (labels.count > 0) {
+                    UIView* label = labels.firstObject;
+                    [labels removeObjectAtIndex:0];
+                    if ([label isKindOfClass:[UILabel class]] && ((UILabel*)label).text.integerValue > 0) {
+                        count = ((UILabel*)label).text.integerValue;
+                        break;
+                    }
+                    [labels addObjectsFromArray:label.subviews];
+                }
+            }
+            [inner addObjectsFromArray:sub.subviews];
+        }
+        if (key.length > 0) {
+            if (!gSheetCounts) {
+                gSheetCounts = [NSMutableDictionary dictionary];
+            }
+            gSheetCounts[key] = @(count);
+            cells++;
+        }
+    }
+    if (cells > 0) {
+        ProbeNote([NSString stringWithFormat:@"badge: read %ld rows of X's account list", (long)cells]);
+    }
+    return cells;
+}
+
+static NSInteger BadgeCountFor(id account) {
+    NSString* key = AccountKey(account);
+    NSNumber* seen = key ? gSheetCounts[key] : nil;
+    if (seen) {
+        return seen.integerValue;
+    }
+    return AccountUnreadCount(account);
+}
+
 static NSCache<NSString*, UIImage*>* AvatarCache(void) {
     static NSCache* cache;
     static dispatch_once_t once;
@@ -502,7 +572,11 @@ static void Tick(void) {
 @property (nonatomic, strong) UIView* dim;
 @property (nonatomic, strong) UILabel* nameTag;
 @property (nonatomic, assign) BOOL closing;
+@property (nonatomic, assign) CGPoint tagAnchor;
+- (void)refreshCounts;
 @end
+
+static __weak NFBAccountFan* gLiveFan = nil;
 
 @implementation NFBAccountFan
 
@@ -527,58 +601,51 @@ static void Tick(void) {
         id current = CurrentAccount();
         NSInteger count = MIN((NSInteger)accounts.count, kBubbleLimit);
 
-        // Fan toward the middle of the screen, so a corner avatar opens down and
-        // to the side instead of off screen.
-        CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
-        CGFloat aim = atan2(middle.y - origin.y, middle.x - origin.x);
-        CGFloat spread = MIN((CGFloat)M_PI * 0.55, (CGFloat)(count - 1) * 0.42);
-        CGFloat radius = MAX(110.0, count > 1 ? (kBubbleSize + 16.0) / (spread / (count - 1)) : 110.0);
-        radius = MIN(radius, 260.0);
+        // One even arc around the finger. From a corner it is a quarter circle
+        // pointing into the screen; elsewhere it opens toward the middle. The
+        // radius grows until neighbours are a full circle apart, then the whole
+        // arc slides (never squashes) to stay on screen.
         CGFloat pad = kBubbleSize / 2.0 + 8.0;
         CGRect allowed = UIEdgeInsetsInsetRect(frame, UIEdgeInsetsMake(safe.top + pad, safe.left + pad,
                                                                         safe.bottom + pad, safe.right + pad));
+        CGFloat width = CGRectGetWidth(frame);
+        CGFloat height = CGRectGetHeight(frame);
+        BOOL nearLeft = origin.x < width * 0.3, nearRight = origin.x > width * 0.7;
+        BOOL nearTop = origin.y < height * 0.3, nearBottom = origin.y > height * 0.7;
+        BOOL corner = (nearLeft || nearRight) && (nearTop || nearBottom);
+        CGPoint pivot = CGPointMake(MAX(CGRectGetMinX(allowed) + 8, MIN(origin.x, CGRectGetMaxX(allowed) - 8)),
+                                    MAX(CGRectGetMinY(allowed) + 8, MIN(origin.y, CGRectGetMaxY(allowed) - 8)));
+        CGFloat aim, spread;
+        if (corner) {
+            aim = atan2(nearTop ? 1.0 : -1.0, nearLeft ? 1.0 : -1.0);
+            spread = MIN((CGFloat)M_PI_2, (CGFloat)(count - 1) * (CGFloat)(M_PI / 6.0));
+        } else {
+            aim = atan2(CGRectGetMidY(frame) - pivot.y, CGRectGetMidX(frame) - pivot.x);
+            spread = MIN((CGFloat)(M_PI * 5.0 / 6.0), (CGFloat)(count - 1) * (CGFloat)(M_PI * 35.0 / 180.0));
+        }
+        CGFloat gap = kBubbleSize + 16.0;
+        CGFloat step = count > 1 ? spread / (CGFloat)(count - 1) : 0;
+        CGFloat radius = count > 1 ? MAX(120.0, gap / (2.0 * sin(step / 2.0))) : 120.0;
 
-        // Slots on an arc, kept on screen, then pushed apart so pulling them in
-        // from a corner never stacks two circles.
         CGPoint slots[kBubbleLimit];
+        CGFloat minX = CGFLOAT_MAX, maxX = -CGFLOAT_MAX, minY = CGFLOAT_MAX, maxY = -CGFLOAT_MAX;
         for (NSInteger i = 0; i < count; i++) {
-            CGFloat t = count == 1 ? 0.5 : (CGFloat)i / (CGFloat)(count - 1);
-            CGFloat angle = aim - spread / 2.0 + spread * t;
-            slots[i] = CGPointMake(origin.x + cos(angle) * radius, origin.y + sin(angle) * radius);
+            CGFloat angle = aim - spread / 2.0 + step * (CGFloat)i;
+            slots[i] = CGPointMake(pivot.x + cos(angle) * radius, pivot.y + sin(angle) * radius);
+            minX = MIN(minX, slots[i].x);
+            maxX = MAX(maxX, slots[i].x);
+            minY = MIN(minY, slots[i].y);
+            maxY = MAX(maxY, slots[i].y);
         }
-        CGFloat gap = kBubbleSize + 14.0;
-        for (NSInteger pass = 0; pass < 60; pass++) {
-            BOOL clear = YES;
-            for (NSInteger i = 0; i < count; i++) {
-                slots[i].x = MAX(CGRectGetMinX(allowed), MIN(slots[i].x, CGRectGetMaxX(allowed)));
-                slots[i].y = MAX(CGRectGetMinY(allowed), MIN(slots[i].y, CGRectGetMaxY(allowed)));
-            }
-            for (NSInteger i = 0; i < count; i++) {
-                for (NSInteger j = i + 1; j < count; j++) {
-                    CGFloat dx = slots[j].x - slots[i].x;
-                    CGFloat dy = slots[j].y - slots[i].y;
-                    CGFloat distance = hypot(dx, dy);
-                    if (distance >= gap) {
-                        continue;
-                    }
-                    clear = NO;
-                    if (distance < 0.5) {
-                        // Same spot: separate along the direction toward the middle.
-                        dx = cos(aim + (j % 2 ? 1.0 : -1.0) * M_PI_2);
-                        dy = sin(aim + (j % 2 ? 1.0 : -1.0) * M_PI_2);
-                        distance = 1.0;
-                    }
-                    CGFloat push = (gap - distance) / 2.0 + 0.5;
-                    slots[i].x -= dx / distance * push;
-                    slots[i].y -= dy / distance * push;
-                    slots[j].x += dx / distance * push;
-                    slots[j].y += dy / distance * push;
-                }
-            }
-            if (clear) {
-                break;
-            }
+        CGFloat shiftX = MAX(0, CGRectGetMinX(allowed) - minX) - MAX(0, maxX - CGRectGetMaxX(allowed));
+        CGFloat shiftY = MAX(0, CGRectGetMinY(allowed) - minY) - MAX(0, maxY - CGRectGetMaxY(allowed));
+        for (NSInteger i = 0; i < count; i++) {
+            slots[i].x += shiftX;
+            slots[i].y += shiftY;
         }
+        // The name tag sits above the whole arc: clear of the circles, and of
+        // the thumb, which always comes from below.
+        _tagAnchor = CGPointMake((minX + maxX) / 2.0 + shiftX, minY + shiftY - kBubbleSize / 2.0 - 26);
 
         NSMutableArray* bubbles = [NSMutableArray array];
         for (NSInteger i = 0; i < count; i++) {
@@ -606,21 +673,29 @@ static void Tick(void) {
                     bubble.settled = YES;
                 }];
             [self loadImageForBubble:bubble];
-            [bubble setCount:SameAccount(account, current) ? 0 : AccountUnreadCount(account)];
+            [bubble setCount:bubble.current ? 0 : BadgeCountFor(account)];
         }
         _bubbles = bubbles;
 
+        gLiveFan = self;
+
         _nameTag = [UILabel new];
-        _nameTag.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        _nameTag.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         _nameTag.textColor = [UIColor whiteColor];
         _nameTag.backgroundColor = [UIColor colorWithWhite:0 alpha:0.62];
         _nameTag.textAlignment = NSTextAlignmentCenter;
-        _nameTag.layer.cornerRadius = 13;
+        _nameTag.layer.cornerRadius = 14;
         _nameTag.clipsToBounds = YES;
         _nameTag.alpha = 0;
         [self addSubview:_nameTag];
     }
     return self;
+}
+
+- (void)refreshCounts {
+    for (NFBAccountBubble* bubble in self.bubbles) {
+        [bubble setCount:bubble.current ? 0 : BadgeCountFor(bubble.account)];
+    }
 }
 
 - (void)loadImageForBubble:(NFBAccountBubble*)bubble {
@@ -691,9 +766,16 @@ static void Tick(void) {
     [self.nameTag sizeToFit];
     CGRect frame = self.nameTag.frame;
     frame.size.width = MIN(frame.size.width + 24, CGRectGetWidth(self.bounds) - 32);
-    frame.size.height = 26;
+    frame.size.height = 28;
     self.nameTag.frame = frame;
-    CGPoint center = CGPointMake(bubble.slot.x, bubble.slot.y + kBubbleSize / 2.0 + 22);
+    // Above the arc (see tagAnchor). If that is off the top, above the circle.
+    CGPoint center = self.tagAnchor;
+    if (center.y - 14 < self.safeAreaInsets.top + 8) {
+        center = CGPointMake(bubble.slot.x, bubble.slot.y - kBubbleSize / 2.0 - 30);
+        if (center.y - 14 < self.safeAreaInsets.top + 8) {
+            center.y = bubble.slot.y + kBubbleSize / 2.0 + 30;
+        }
+    }
     CGFloat half = frame.size.width / 2.0;
     center.x = MAX(16 + half, MIN(center.x, CGRectGetWidth(self.bounds) - 16 - half));
     self.nameTag.center = center;
@@ -1086,6 +1168,47 @@ static BOOL OpenCaughtFan(UIWindow* window) {
     return YES;
 }
 
+// The sheet X wanted to show is never presented, but its view can still be
+// built off screen so its rows (and their unread badges) can be read.
+static UIViewController* gOffscreenSheet = nil;
+
+static void LayoutTree(UIView* view, NSInteger depth) {
+    if (depth > 30) {
+        return;
+    }
+    [view layoutIfNeeded];
+    for (UIView* sub in view.subviews) {
+        LayoutTree(sub, depth + 1);
+    }
+}
+
+static void ReadCountsOffscreen(UIViewController* sheet, CGRect bounds) {
+    if (!sheet || gOffscreenSheet) {
+        return;
+    }
+    gOffscreenSheet = sheet;
+    @try {
+        sheet.view.frame = bounds;
+        LayoutTree(sheet.view, 0);
+        HarvestSheetCounts(sheet.view);
+    } @catch (__unused NSException* exception) {
+        ProbeNote(@"badge: building X's list off screen threw");
+    }
+    [gLiveFan refreshCounts];
+    // Rows may fill in a moment later.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @try {
+            LayoutTree(sheet.view, 0);
+            if (HarvestSheetCounts(sheet.view) == 0) {
+                ProbeNote(@"badge: X's list had no rows off screen");
+            }
+        } @catch (__unused NSException* exception) {
+        }
+        [gLiveFan refreshCounts];
+        gOffscreenSheet = nil;
+    });
+}
+
 static void TrackTouches(UIWindow* window, UIEvent* event) {
     for (UITouch* touch in event.allTouches) {
         if (touch.phase == UITouchPhaseBegan && !gTouchDown) {
@@ -1159,6 +1282,7 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
         if (held) {
             UIWindow* window = self.view.window ?: UIApplication.sharedApplication.keyWindow;
             if (OpenCaughtFan(window)) {
+                ReadCountsOffscreen(controller, window.bounds);
                 gBubbleLog = [NSString stringWithFormat:@"sheet replaced by circles (from %@)",
                                                         NSStringFromClass(self.class)];
                 return;
@@ -1176,7 +1300,14 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
     if (!BubblesOn() || ![NSStringFromClass(self.class) containsString:@"AccountSwitcherTrayContent"]) {
         return;
     }
+    // Whenever X's list is on screen, remember its unread numbers.
+    HarvestSheetCounts(self.view);
     if (FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
+        __weak UIView* weakView = self.view;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            HarvestSheetCounts(weakView);
+            [gLiveFan refreshCounts];
+        });
         return;
     }
     UIViewController* top = self;

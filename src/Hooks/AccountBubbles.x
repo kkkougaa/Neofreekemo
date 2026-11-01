@@ -17,6 +17,10 @@
 //  7.3.22: on iOS 26 the avatar sits in a SwiftUI platter and X's sheet still
 //  won. Now X's sheet itself is caught when it is presented after a held
 //  finger, and the circles open in its place, following that finger.
+//
+//  7.3.23: profile pictures (from X's on-screen avatars, or any getter giving a
+//  profile_images address), an unread badge per account, and circles pushed
+//  apart so five or more never overlap near a corner.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -165,6 +169,8 @@ static NSString* AccountTitle(id account) {
     return @"";
 }
 
+static NSString* ProbedImageString(id account);
+
 static NSURL* AccountImageURL(id account) {
     id user = ObjectProp(account, @"user");
     for (id source in @[ user ?: [NSNull null], account ]) {
@@ -194,7 +200,168 @@ static NSURL* AccountImageURL(id account) {
             }
         }
     }
+    // Names differ between X builds: look for any getter giving a profile_images address.
+    NSString* probed = ProbedImageString(account);
+    if (probed.length > 0) {
+        probed = [probed stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
+        if ([probed hasPrefix:@"http://"]) {
+            probed = [@"https://" stringByAppendingString:[probed substringFromIndex:7]];
+        }
+        return [NSURL URLWithString:probed];
+    }
     return nil;
+}
+
+// What the last probe found, for the shake dump.
+static NSMutableArray<NSString*>* gProbeLog = nil;
+
+static void ProbeNote(NSString* line) {
+    if (!gProbeLog) {
+        gProbeLog = [NSMutableArray array];
+    }
+    if (![gProbeLog containsObject:line]) {
+        [gProbeLog addObject:line];
+        if (gProbeLog.count > 24) {
+            [gProbeLog removeObjectAtIndex:0];
+        }
+    }
+}
+
+// Zero-argument getters on the class chain (stopping at NSObject) whose name
+// contains one of the words.
+static NSArray<NSString*>* GettersMatching(id object, NSArray<NSString*>* words) {
+    NSMutableArray* names = [NSMutableArray array];
+    for (Class cls = object_getClass(object); cls && cls != [NSObject class]; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Method* methods = class_copyMethodList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            NSString* name = NSStringFromSelector(method_getName(methods[i]));
+            if ([name containsString:@":"] || [name hasPrefix:@"set"] || [name hasPrefix:@"_"] ||
+                [names containsObject:name]) {
+                continue;
+            }
+            NSString* lower = name.lowercaseString;
+            for (NSString* word in words) {
+                if ([lower containsString:word]) {
+                    [names addObject:name];
+                    break;
+                }
+            }
+        }
+        free(methods);
+    }
+    return names;
+}
+
+static NSString* ProfileImageString(id value) {
+    NSString* string = nil;
+    if ([value isKindOfClass:[NSURL class]]) {
+        string = [value absoluteString];
+    } else if ([value isKindOfClass:[NSString class]]) {
+        string = value;
+    }
+    return [string containsString:@"profile_images"] ? string : nil;
+}
+
+// Any getter on the user or account that hands back a pbs.twimg.com
+// profile_images address.
+static NSString* ProbedImageString(id account) {
+    id user = ObjectProp(account, @"user");
+    for (id source in @[ user ?: [NSNull null], account ]) {
+        if (source == [NSNull null]) {
+            continue;
+        }
+        for (NSString* name in GettersMatching(source, @[ @"image", @"avatar" ])) {
+            NSString* string = ProfileImageString(ObjectProp(source, name));
+            if (string) {
+                ProbeNote([NSString stringWithFormat:@"image: -[%@ %@]", NSStringFromClass([source class]), name]);
+                return string;
+            }
+        }
+    }
+    ProbeNote([NSString stringWithFormat:@"image: none on %@ / %@", NSStringFromClass([user class]),
+                                         NSStringFromClass([account class])]);
+    return nil;
+}
+
+// X's own avatar views carry the user ID: "TUIAvatarImageView.<id>".
+static UIImage* OnScreenAvatar(NSString* key) {
+    if (key.length == 0) {
+        return nil;
+    }
+    NSString* wanted = [@"TUIAvatarImageView." stringByAppendingString:key];
+    for (UIWindow* window in UIApplication.sharedApplication.windows) {
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
+        NSInteger budget = 6000;
+        while (queue.count > 0 && budget-- > 0) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if ([view isKindOfClass:[UIImageView class]] && [view.accessibilityIdentifier isEqualToString:wanted]) {
+                UIImage* image = ((UIImageView*)view).image;
+                if (image) {
+                    return image;
+                }
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
+    }
+    return nil;
+}
+
+static NSInteger NumberFromGetter(id object, NSString* name) {
+    SEL selector = NSSelectorFromString(name);
+    if (![object respondsToSelector:selector]) {
+        return -1;
+    }
+    NSMethodSignature* signature = [object methodSignatureForSelector:selector];
+    const char* type = signature.methodReturnType;
+    if (!type) {
+        return -1;
+    }
+    @try {
+        switch (type[0]) {
+            case 'q':
+                return (NSInteger)((long long (*)(id, SEL))objc_msgSend)(object, selector);
+            case 'Q':
+                return (NSInteger)((unsigned long long (*)(id, SEL))objc_msgSend)(object, selector);
+            case 'i': case 'l':
+                return (NSInteger)((int (*)(id, SEL))objc_msgSend)(object, selector);
+            case 'I': case 'L':
+                return (NSInteger)((unsigned int (*)(id, SEL))objc_msgSend)(object, selector);
+            case '@': {
+                id value = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+                return [value isKindOfClass:[NSNumber class]] ? [value integerValue] : -1;
+            }
+            default:
+                return -1;
+        }
+    } @catch (__unused NSException* exception) {
+        return -1;
+    }
+}
+
+// Unread notifications for an account, from whatever count getter it has.
+// Prefers notification counts over other unread counts; -1 when none found.
+static NSInteger AccountUnreadCount(id account) {
+    for (NSArray<NSString*>* words in @[ @[ @"unreadnotification", @"notificationsunread", @"notificationbadge",
+                                            @"notificationcount", @"notificationscount" ],
+                                         @[ @"unread", @"badge" ] ]) {
+        for (NSString* name in GettersMatching(account, words)) {
+            NSString* lower = name.lowercaseString;
+            if ([lower containsString:@"dm"] || [lower containsString:@"message"] ||
+                [lower containsString:@"enabled"] || [lower containsString:@"should"] ||
+                [lower hasPrefix:@"is"] || [lower hasPrefix:@"has"]) {
+                continue;
+            }
+            NSInteger value = NumberFromGetter(account, name);
+            if (value >= 0) {
+                ProbeNote([NSString stringWithFormat:@"badge: -[%@ %@]", NSStringFromClass([account class]), name]);
+                return value;
+            }
+        }
+    }
+    ProbeNote([NSString stringWithFormat:@"badge: none on %@", NSStringFromClass([account class])]);
+    return -1;
 }
 
 static NSCache<NSString*, UIImage*>* AvatarCache(void) {
@@ -202,7 +369,7 @@ static NSCache<NSString*, UIImage*>* AvatarCache(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         cache = [NSCache new];
-        cache.countLimit = 16;
+        cache.countLimit = 40;
     });
     return cache;
 }
@@ -247,6 +414,8 @@ static void Tick(void) {
 @property (nonatomic, assign) BOOL current;
 @property (nonatomic, strong) UIImageView* avatar;
 @property (nonatomic, strong) UILabel* initial;
+@property (nonatomic, strong) UILabel* badge;
+- (void)setCount:(NSInteger)count;
 @end
 
 @implementation NFBAccountBubble
@@ -288,10 +457,36 @@ static void Tick(void) {
         _avatar.contentMode = UIViewContentModeScaleAspectFill;
         [self addSubview:_avatar];
 
+        // Unread notifications, top right, like X's own badge.
+        _badge = [UILabel new];
+        _badge.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
+        _badge.textColor = [UIColor whiteColor];
+        _badge.textAlignment = NSTextAlignmentCenter;
+        _badge.backgroundColor = AccentColor();
+        _badge.layer.borderColor = [UIColor systemBackgroundColor].CGColor;
+        _badge.layer.borderWidth = 2;
+        _badge.clipsToBounds = YES;
+        _badge.hidden = YES;
+        [self addSubview:_badge];
+
         self.isAccessibilityElement = YES;
         self.accessibilityLabel = title;
     }
     return self;
+}
+
+- (void)setCount:(NSInteger)count {
+    if (count <= 0) {
+        self.badge.hidden = YES;
+        return;
+    }
+    self.badge.text = count > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)count];
+    CGFloat height = 22;
+    CGFloat width = MAX(height, [self.badge.text sizeWithAttributes:@{NSFontAttributeName : self.badge.font}].width + 12);
+    self.badge.frame = CGRectMake(kBubbleSize - width + 6, -4, width, height);
+    self.badge.layer.cornerRadius = height / 2.0;
+    self.badge.hidden = NO;
+    self.accessibilityValue = self.badge.text;
 }
 
 - (void)setImage:(UIImage*)image {
@@ -336,23 +531,61 @@ static void Tick(void) {
         // to the side instead of off screen.
         CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
         CGFloat aim = atan2(middle.y - origin.y, middle.x - origin.x);
-        CGFloat spread = MIN((CGFloat)M_PI * 0.8, (CGFloat)(count - 1) * 0.42);
-        CGFloat radius = MAX(96.0, count > 1 ? (kBubbleSize + 10.0) / (spread / (count - 1)) : 96.0);
-        radius = MIN(radius, 230.0);
+        CGFloat spread = MIN((CGFloat)M_PI * 0.55, (CGFloat)(count - 1) * 0.42);
+        CGFloat radius = MAX(110.0, count > 1 ? (kBubbleSize + 16.0) / (spread / (count - 1)) : 110.0);
+        radius = MIN(radius, 260.0);
         CGFloat pad = kBubbleSize / 2.0 + 8.0;
         CGRect allowed = UIEdgeInsetsInsetRect(frame, UIEdgeInsetsMake(safe.top + pad, safe.left + pad,
                                                                         safe.bottom + pad, safe.right + pad));
+
+        // Slots on an arc, kept on screen, then pushed apart so pulling them in
+        // from a corner never stacks two circles.
+        CGPoint slots[kBubbleLimit];
+        for (NSInteger i = 0; i < count; i++) {
+            CGFloat t = count == 1 ? 0.5 : (CGFloat)i / (CGFloat)(count - 1);
+            CGFloat angle = aim - spread / 2.0 + spread * t;
+            slots[i] = CGPointMake(origin.x + cos(angle) * radius, origin.y + sin(angle) * radius);
+        }
+        CGFloat gap = kBubbleSize + 14.0;
+        for (NSInteger pass = 0; pass < 60; pass++) {
+            BOOL clear = YES;
+            for (NSInteger i = 0; i < count; i++) {
+                slots[i].x = MAX(CGRectGetMinX(allowed), MIN(slots[i].x, CGRectGetMaxX(allowed)));
+                slots[i].y = MAX(CGRectGetMinY(allowed), MIN(slots[i].y, CGRectGetMaxY(allowed)));
+            }
+            for (NSInteger i = 0; i < count; i++) {
+                for (NSInteger j = i + 1; j < count; j++) {
+                    CGFloat dx = slots[j].x - slots[i].x;
+                    CGFloat dy = slots[j].y - slots[i].y;
+                    CGFloat distance = hypot(dx, dy);
+                    if (distance >= gap) {
+                        continue;
+                    }
+                    clear = NO;
+                    if (distance < 0.5) {
+                        // Same spot: separate along the direction toward the middle.
+                        dx = cos(aim + (j % 2 ? 1.0 : -1.0) * M_PI_2);
+                        dy = sin(aim + (j % 2 ? 1.0 : -1.0) * M_PI_2);
+                        distance = 1.0;
+                    }
+                    CGFloat push = (gap - distance) / 2.0 + 0.5;
+                    slots[i].x -= dx / distance * push;
+                    slots[i].y -= dy / distance * push;
+                    slots[j].x += dx / distance * push;
+                    slots[j].y += dy / distance * push;
+                }
+            }
+            if (clear) {
+                break;
+            }
+        }
 
         NSMutableArray* bubbles = [NSMutableArray array];
         for (NSInteger i = 0; i < count; i++) {
             id account = accounts[i];
             NFBAccountBubble* bubble = [[NFBAccountBubble alloc] initWithAccount:account
                                                                          current:SameAccount(account, current)];
-            CGFloat t = count == 1 ? 0.5 : (CGFloat)i / (CGFloat)(count - 1);
-            CGFloat angle = aim - spread / 2.0 + spread * t;
-            CGPoint slot = CGPointMake(origin.x + cos(angle) * radius, origin.y + sin(angle) * radius);
-            slot.x = MAX(CGRectGetMinX(allowed), MIN(slot.x, CGRectGetMaxX(allowed)));
-            slot.y = MAX(CGRectGetMinY(allowed), MIN(slot.y, CGRectGetMaxY(allowed)));
+            CGPoint slot = slots[i];
             bubble.slot = slot;
             bubble.center = origin;
             bubble.transform = CGAffineTransformMakeScale(0.15, 0.15);
@@ -373,6 +606,7 @@ static void Tick(void) {
                     bubble.settled = YES;
                 }];
             [self loadImageForBubble:bubble];
+            [bubble setCount:SameAccount(account, current) ? 0 : AccountUnreadCount(account)];
         }
         _bubbles = bubbles;
 
@@ -390,6 +624,17 @@ static void Tick(void) {
 }
 
 - (void)loadImageForBubble:(NFBAccountBubble*)bubble {
+    NSString* key = AccountKey(bubble.account);
+    UIImage* known = key ? [AvatarCache() objectForKey:key] : nil;
+    if (!known) {
+        known = OnScreenAvatar(key);
+        if (known) {
+            [AvatarCache() setObject:known forKey:key];
+        }
+    }
+    if (known) {
+        [bubble setImage:known];
+    }
     NSURL* url = AccountImageURL(bubble.account);
     if (!url) {
         return;
@@ -405,9 +650,17 @@ static void Tick(void) {
         completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
             UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
             if (!image) {
+                NSString* line = [NSString stringWithFormat:@"download failed %@: %@", url.host,
+                                                            error.localizedDescription ?: @"no image data"];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    ProbeNote(line);
+                });
                 return;
             }
             [AvatarCache() setObject:image forKey:url.absoluteString];
+            if (key) {
+                [AvatarCache() setObject:image forKey:key];
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakBubble setImage:image];
             });
@@ -756,9 +1009,10 @@ NSString* NFBAccountBubblesDebugText(void) {
             [queue addObjectsFromArray:view.subviews];
         }
     }
-    return [NSString stringWithFormat:@"on=%d accounts=%lu pressHost=%@ last=%@", BubblesOn(),
+    return [NSString stringWithFormat:@"on=%d accounts=%lu pressHost=%@ last=%@%c%@", BubblesOn(),
                                       (unsigned long)TwitterAccounts().count,
-                                      known.view ? NSStringFromClass(known.view.class) : @"(none)", gBubbleLog];
+                                      known.view ? NSStringFromClass(known.view.class) : @"(none)", gBubbleLog, 10,
+                                      gProbeLog.count ? [gProbeLog componentsJoinedByString:@"\n"] : @"(no probes yet)"];
 }
 
 static BOOL IsAccountSheet(UIViewController* controller, NSInteger depth) {

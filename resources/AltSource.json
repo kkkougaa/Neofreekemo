@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.18",
+      "subtitle": "NeoFreeBird version 7.3.19",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.19",
+          "buildVersion": "19",
+          "date": "2026-11-01T05:40:46Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.19/NeoFreeBird-Twitter-sideloaded_7.3.19_12.38.1.ipa",
+          "size": 266275040,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Version 7.3.19\n\nChanged\n- Removed the 6-level Mood Thermometer and all blur/hide overlays\n- New: Conflict Cat badge, a small huffing angry cat under the avatar of divisive or bait tweets (off by default, animation toggle, respects Reduce Motion)"
+        },
         {
           "version": "7.3.18",
           "buildVersion": "18",

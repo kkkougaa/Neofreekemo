@@ -305,6 +305,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
+                        @"key": @"kemo_mood_page",
+                        @"titleKey": @"KEMO_MOOD_PAGE_TITLE",
+                        @"action": @"openKemoMood:"
+                    },
+                    @{
+                        @"type": @"compactButton",
                         @"key": @"spotify_client_id",
                         @"titleKey": @"SPOTIFY_CLIENT_ID_TITLE",
                         @"prefKeyForSubtitle": @"spotify_client_id",
@@ -502,6 +508,73 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_keep_position",
                         @"default": @NO,
                         @"type": @"toggle"
+                    }
+                ]
+            },
+            @"kemo_mood": @{
+                @"titleKey": @"KEMO_MOOD_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_MOOD_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"kemo_mood",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_mood_sensitivity",
+                        @"default": @50,
+                        @"type": @"slider",
+                        @"min": @0,
+                        @"max": @100,
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_mood_rage",
+                        @"default": @1,
+                        @"action": @"pickMoodRage:",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_1",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_2",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_3",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_4",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_5",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"key": @"kemo_mood_level_6",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_mood"
+                    },
+                    @{
+                        @"type": @"legend",
+                        @"key": @"kemo_mood_legend",
+                        @"parentKey": @"kemo_mood"
                     }
                 ]
             },

@@ -2,9 +2,17 @@
 //  AccountBubbles.x
 //  NeoFreeBird
 //
-//  Long-pressing the Home dash button normally opens X's account list. When this
-//  is on, the accounts pop out as circles instead. Releasing on one calls X's
-//  own viewAccount:animated:. Any failure leaves the stock sheet in place.
+//  Long-pressing the profile picture at the top left normally opens X's account
+//  list. When this is on, the accounts pop out as circles instead: drag onto one
+//  and let go to switch, or let go first and tap one. Switching uses X's own
+//  -[T1HostViewController viewAccount:animated:].
+//
+//  7.3.20 hooked -[T1TabNavigationController _t1_action_didLongPressDashButton:],
+//  which this X build never calls, and fanned the circles upward from the top
+//  left corner, off screen. This version puts its own long press on the avatar
+//  button in the navigation bar, makes X's own long press wait for it, and fans
+//  the circles toward the middle of the screen. With fewer than two accounts the
+//  press stands aside and X's sheet opens as before.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -12,10 +20,13 @@
 
 static const NSInteger kBubbleLimit = 8;
 static const CGFloat kBubbleSize = 56.0;
+static const CGFloat kHitRadius = 44.0;
 
 static BOOL BubblesOn(void) {
     return [BHTSettings boolForKey:@"kemo_account_bubbles"];
 }
+
+// MARK: - Account data
 
 static id ObjectProp(id object, NSString* selectorName) {
     if (!object) {
@@ -27,10 +38,14 @@ static id ObjectProp(id object, NSString* selectorName) {
     }
     NSMethodSignature* signature = [object methodSignatureForSelector:selector];
     const char* returnType = signature.methodReturnType;
-    if (!returnType || strcmp(returnType, @encode(id)) != 0) {
+    if (!returnType || returnType[0] != '@') {
         return nil;
     }
-    return ((id (*)(id, SEL))objc_msgSend)(object, selector);
+    @try {
+        return ((id (*)(id, SEL))objc_msgSend)(object, selector);
+    } @catch (__unused NSException* exception) {
+        return nil;
+    }
 }
 
 static NSString* StringProp(id object, NSString* selectorName) {
@@ -51,32 +66,96 @@ static NSArray* TwitterAccounts(void) {
     return accounts;
 }
 
-static BOOL SwitchToAccount(id account, id tabController) {
+static id HostController(void) {
     Class hostClass = objc_getClass("T1HostViewController");
-    if (hostClass && [hostClass respondsToSelector:@selector(sharedHostViewController)]) {
-        id host = ((id (*)(id, SEL))objc_msgSend)(hostClass, @selector(sharedHostViewController));
-        SEL selector = @selector(viewAccount:animated:);
-        if (host && [host respondsToSelector:selector]) {
-            ((void (*)(id, SEL, id, BOOL))objc_msgSend)(host, selector, account, YES);
-            return YES;
+    if (!hostClass || ![hostClass respondsToSelector:@selector(sharedHostViewController)]) {
+        return nil;
+    }
+    return ((id (*)(id, SEL))objc_msgSend)(hostClass, @selector(sharedHostViewController));
+}
+
+static id CurrentAccount(void) {
+    return ObjectProp(HostController(), @"currentAccount");
+}
+
+static NSString* AccountKey(id account) {
+    id user = ObjectProp(account, @"user");
+    for (id source in @[ account ?: [NSNull null], user ?: [NSNull null] ]) {
+        if (source == [NSNull null]) {
+            continue;
+        }
+        for (NSString* name in @[ @"userID", @"userId", @"userIDString", @"username", @"screenName" ]) {
+            SEL selector = NSSelectorFromString(name);
+            if (![source respondsToSelector:selector]) {
+                continue;
+            }
+            NSMethodSignature* signature = [source methodSignatureForSelector:selector];
+            const char* type = signature.methodReturnType;
+            if (!type) {
+                continue;
+            }
+            if (type[0] == '@') {
+                id value = ObjectProp(source, name);
+                if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+                    return [value lowercaseString];
+                }
+                if ([value isKindOfClass:[NSNumber class]]) {
+                    return [value stringValue];
+                }
+            } else if (type[0] == 'q' || type[0] == 'Q' || type[0] == 'l' || type[0] == 'L') {
+                long long value = ((long long (*)(id, SEL))objc_msgSend)(source, selector);
+                if (value != 0) {
+                    return [NSString stringWithFormat:@"%lld", value];
+                }
+            }
         }
     }
-    id presenter = ObjectProp(tabController, @"dashPresenter");
-    SEL fallback = NSSelectorFromString(@"switchAccountTo:");
-    if (presenter && [presenter respondsToSelector:fallback]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(presenter, fallback, account);
+    return nil;
+}
+
+static BOOL SameAccount(id a, id b) {
+    if (!a || !b) {
+        return NO;
+    }
+    if (a == b) {
         return YES;
     }
-    return NO;
+    NSString* keyA = AccountKey(a);
+    NSString* keyB = AccountKey(b);
+    return keyA && keyB && [keyA isEqualToString:keyB];
+}
+
+static BOOL SwitchToAccount(id account) {
+    id host = HostController();
+    SEL selector = @selector(viewAccount:animated:);
+    if (!account || !host || ![host respondsToSelector:selector]) {
+        return NO;
+    }
+    @try {
+        ((void (*)(id, SEL, id, BOOL))objc_msgSend)(host, selector, account, YES);
+        return YES;
+    } @catch (__unused NSException* exception) {
+        return NO;
+    }
 }
 
 static NSString* AccountTitle(id account) {
     id user = ObjectProp(account, @"user");
-    id source = user ?: account;
-    for (NSString* name in @[ @"displayUsername", @"username", @"fullName", @"displayFullName" ]) {
-        NSString* value = StringProp(source, name);
-        if (value.length > 0) {
-            return value;
+    for (id source in @[ user ?: [NSNull null], account ]) {
+        if (source == [NSNull null]) {
+            continue;
+        }
+        for (NSString* name in @[ @"username", @"screenName", @"displayUsername" ]) {
+            NSString* value = StringProp(source, name);
+            if (value.length > 0) {
+                return [value hasPrefix:@"@"] ? value : [@"@" stringByAppendingString:value];
+            }
+        }
+        for (NSString* name in @[ @"fullName", @"displayFullName", @"name" ]) {
+            NSString* value = StringProp(source, name);
+            if (value.length > 0) {
+                return value;
+            }
         }
     }
     return @"";
@@ -88,17 +167,40 @@ static NSURL* AccountImageURL(id account) {
         if (source == [NSNull null]) {
             continue;
         }
-        for (NSString* name in @[ @"profileImageURL", @"profileImageUrl", @"profileImageURLString" ]) {
+        for (NSString* name in @[ @"profileImageURL", @"profileImageUrl", @"profileImageURLString",
+                                  @"profileImageURLHTTPS", @"avatarURL", @"avatarImageURL" ]) {
             id value = ObjectProp(source, name);
+            NSString* string = nil;
             if ([value isKindOfClass:[NSURL class]]) {
-                return value;
+                string = [value absoluteString];
+            } else if ([value isKindOfClass:[NSString class]]) {
+                string = value;
             }
-            if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
-                return [NSURL URLWithString:value];
+            if (string.length == 0) {
+                continue;
+            }
+            // The stored URL is usually the 48px "_normal" size.
+            string = [string stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
+            if ([string hasPrefix:@"http://"]) {
+                string = [@"https://" stringByAppendingString:[string substringFromIndex:7]];
+            }
+            NSURL* url = [NSURL URLWithString:string];
+            if (url) {
+                return url;
             }
         }
     }
     return nil;
+}
+
+static NSCache<NSString*, UIImage*>* AvatarCache(void) {
+    static NSCache* cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSCache new];
+        cache.countLimit = 16;
+    });
+    return cache;
 }
 
 static UIVisualEffect* BubbleEffect(void) {
@@ -119,83 +221,166 @@ static UIVisualEffect* BubbleEffect(void) {
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
 }
 
+static UIColor* AccentColor(void) {
+    UIWindow* window = UIApplication.sharedApplication.windows.firstObject;
+    return window.tintColor ?: [UIColor systemBlueColor];
+}
+
+static void Tick(void) {
+    if (NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        return;
+    }
+    UISelectionFeedbackGenerator* tap = [UISelectionFeedbackGenerator new];
+    [tap selectionChanged];
+}
+
+// MARK: - Bubble views
+
 @interface NFBAccountBubble : UIView
 @property (nonatomic, strong) id account;
 @property (nonatomic, assign) CGPoint slot;
 @property (nonatomic, assign) BOOL settled;
+@property (nonatomic, assign) BOOL current;
 @property (nonatomic, strong) UIImageView* avatar;
+@property (nonatomic, strong) UILabel* initial;
 @end
 
 @implementation NFBAccountBubble
 
-- (instancetype)initWithAccount:(id)account {
+- (instancetype)initWithAccount:(id)account current:(BOOL)current {
     if ((self = [super initWithFrame:CGRectMake(0, 0, kBubbleSize, kBubbleSize)])) {
         _account = account;
+        _current = current;
         self.userInteractionEnabled = NO;
-        UIVisualEffectView* glass =
-            [[UIVisualEffectView alloc] initWithEffect:BubbleEffect()];
+        self.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.layer.shadowOpacity = 0.22;
+        self.layer.shadowRadius = 8;
+        self.layer.shadowOffset = CGSizeMake(0, 3);
+
+        UIVisualEffectView* glass = [[UIVisualEffectView alloc] initWithEffect:BubbleEffect()];
         glass.frame = self.bounds;
         glass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         glass.layer.cornerRadius = kBubbleSize / 2.0;
         glass.clipsToBounds = YES;
-        glass.layer.borderWidth = 1.0;
-        glass.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.35].CGColor;
+        glass.layer.borderWidth = current ? 2.5 : 1.0;
+        glass.layer.borderColor =
+            current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.35].CGColor;
         [self addSubview:glass];
 
-        _avatar = [[UIImageView alloc] initWithFrame:CGRectInset(self.bounds, 3, 3)];
+        NSString* title = AccountTitle(account);
+        _initial = [[UILabel alloc] initWithFrame:self.bounds];
+        _initial.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _initial.textAlignment = NSTextAlignmentCenter;
+        _initial.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+        _initial.textColor = [UIColor labelColor];
+        NSString* letters = [title stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"@"]];
+        _initial.text = letters.length > 0 ? [[letters substringToIndex:1] uppercaseString] : @"?";
+        [self addSubview:_initial];
+
+        _avatar = [[UIImageView alloc] initWithFrame:CGRectInset(self.bounds, 4, 4)];
         _avatar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _avatar.layer.cornerRadius = CGRectGetWidth(_avatar.bounds) / 2.0;
         _avatar.clipsToBounds = YES;
         _avatar.contentMode = UIViewContentModeScaleAspectFill;
-        _avatar.backgroundColor = [UIColor colorWithWhite:0.75 alpha:0.45];
         [self addSubview:_avatar];
-        self.accessibilityLabel = AccountTitle(account);
+
+        self.isAccessibilityElement = YES;
+        self.accessibilityLabel = title;
     }
     return self;
+}
+
+- (void)setImage:(UIImage*)image {
+    self.avatar.image = image;
+    self.initial.hidden = image != nil;
 }
 
 @end
 
 @interface NFBAccountFan : UIView
-@property (nonatomic, copy) void (^onSwitch)(id account);
 @property (nonatomic, strong) NSArray<NFBAccountBubble*>* bubbles;
 @property (nonatomic, weak) NFBAccountBubble* hovered;
+@property (nonatomic, strong) UIView* dim;
+@property (nonatomic, strong) UILabel* nameTag;
+@property (nonatomic, assign) BOOL closing;
 @end
 
 @implementation NFBAccountFan
 
-- (instancetype)initWithAccounts:(NSArray*)accounts origin:(CGPoint)origin {
-    if ((self = [super initWithFrame:CGRectZero])) {
+- (instancetype)initWithFrame:(CGRect)frame
+                     accounts:(NSArray*)accounts
+                       origin:(CGPoint)origin
+                         safe:(UIEdgeInsets)safe {
+    if ((self = [super initWithFrame:frame])) {
         self.userInteractionEnabled = NO;
         self.backgroundColor = [UIColor clearColor];
+        self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        _dim = [[UIView alloc] initWithFrame:self.bounds];
+        _dim.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _dim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
+        _dim.alpha = 0;
+        [self addSubview:_dim];
+        [UIView animateWithDuration:0.2 animations:^{
+            self.dim.alpha = 1;
+        }];
+
+        id current = CurrentAccount();
         NSInteger count = MIN((NSInteger)accounts.count, kBubbleLimit);
+
+        // Fan toward the middle of the screen, so a corner avatar opens down and
+        // to the side instead of off screen.
+        CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        CGFloat aim = atan2(middle.y - origin.y, middle.x - origin.x);
+        CGFloat spread = MIN((CGFloat)M_PI * 0.8, (CGFloat)(count - 1) * 0.42);
+        CGFloat radius = MAX(96.0, count > 1 ? (kBubbleSize + 10.0) / (spread / (count - 1)) : 96.0);
+        radius = MIN(radius, 230.0);
+        CGFloat pad = kBubbleSize / 2.0 + 8.0;
+        CGRect allowed = UIEdgeInsetsInsetRect(frame, UIEdgeInsetsMake(safe.top + pad, safe.left + pad,
+                                                                        safe.bottom + pad, safe.right + pad));
+
         NSMutableArray* bubbles = [NSMutableArray array];
-        CGFloat start = (CGFloat)M_PI * 1.08;
-        CGFloat end = (CGFloat)M_PI * 1.92;
         for (NSInteger i = 0; i < count; i++) {
-            NFBAccountBubble* bubble = [[NFBAccountBubble alloc] initWithAccount:accounts[i]];
+            id account = accounts[i];
+            NFBAccountBubble* bubble = [[NFBAccountBubble alloc] initWithAccount:account
+                                                                         current:SameAccount(account, current)];
             CGFloat t = count == 1 ? 0.5 : (CGFloat)i / (CGFloat)(count - 1);
-            CGFloat angle = start + (end - start) * t;
-            bubble.slot = CGPointMake(origin.x + cos(angle) * 112.0, origin.y + sin(angle) * 112.0);
+            CGFloat angle = aim - spread / 2.0 + spread * t;
+            CGPoint slot = CGPointMake(origin.x + cos(angle) * radius, origin.y + sin(angle) * radius);
+            slot.x = MAX(CGRectGetMinX(allowed), MIN(slot.x, CGRectGetMaxX(allowed)));
+            slot.y = MAX(CGRectGetMinY(allowed), MIN(slot.y, CGRectGetMaxY(allowed)));
+            bubble.slot = slot;
             bubble.center = origin;
             bubble.transform = CGAffineTransformMakeScale(0.15, 0.15);
+            bubble.alpha = 0;
             [self addSubview:bubble];
             [bubbles addObject:bubble];
-            [UIView animateWithDuration:0.48
-                                  delay:i * 0.055
-                 usingSpringWithDamping:0.62
-                  initialSpringVelocity:0.7
-                                options:UIViewAnimationOptionAllowUserInteraction
-                             animations:^{
-                                 bubble.center = bubble.slot;
-                                 bubble.transform = CGAffineTransformIdentity;
-                             }
-                             completion:^(BOOL finished) {
-                                 bubble.settled = YES;
-                             }];
+            [UIView animateWithDuration:0.46
+                delay:i * 0.04
+                usingSpringWithDamping:0.64
+                initialSpringVelocity:0.7
+                options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+                animations:^{
+                    bubble.center = bubble.slot;
+                    bubble.alpha = 1;
+                    bubble.transform = CGAffineTransformIdentity;
+                }
+                completion:^(BOOL finished) {
+                    bubble.settled = YES;
+                }];
             [self loadImageForBubble:bubble];
         }
         _bubbles = bubbles;
+
+        _nameTag = [UILabel new];
+        _nameTag.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        _nameTag.textColor = [UIColor whiteColor];
+        _nameTag.backgroundColor = [UIColor colorWithWhite:0 alpha:0.62];
+        _nameTag.textAlignment = NSTextAlignmentCenter;
+        _nameTag.layer.cornerRadius = 13;
+        _nameTag.clipsToBounds = YES;
+        _nameTag.alpha = 0;
+        [self addSubview:_nameTag];
     }
     return self;
 }
@@ -205,28 +390,31 @@ static UIVisualEffect* BubbleEffect(void) {
     if (!url) {
         return;
     }
+    UIImage* cached = [AvatarCache() objectForKey:url.absoluteString];
+    if (cached) {
+        [bubble setImage:cached];
+        return;
+    }
     __weak NFBAccountBubble* weakBubble = bubble;
     [[[NSURLSession sharedSession]
-        dataTaskWithURL:url
-      completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
-          if (error || data.length == 0) {
-              return;
-          }
-          UIImage* image = [UIImage imageWithData:data];
-          if (!image) {
-              return;
-          }
-          dispatch_async(dispatch_get_main_queue(), ^{
-              weakBubble.avatar.image = image;
-          });
-      }] resume];
+          dataTaskWithURL:url
+        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+            UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
+            if (!image) {
+                return;
+            }
+            [AvatarCache() setObject:image forKey:url.absoluteString];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakBubble setImage:image];
+            });
+        }] resume];
 }
 
 - (NFBAccountBubble*)bubbleNear:(CGPoint)point {
     NFBAccountBubble* best = nil;
-    CGFloat bestDistance = 40;
+    CGFloat bestDistance = kHitRadius;
     for (NFBAccountBubble* bubble in self.bubbles) {
-        CGFloat distance = hypot(point.x - bubble.center.x, point.y - bubble.center.y);
+        CGFloat distance = hypot(point.x - bubble.slot.x, point.y - bubble.slot.y);
         if (distance < bestDistance) {
             bestDistance = distance;
             best = bubble;
@@ -235,135 +423,309 @@ static UIVisualEffect* BubbleEffect(void) {
     return best;
 }
 
+- (void)showName:(NFBAccountBubble*)bubble {
+    if (!bubble) {
+        [UIView animateWithDuration:0.12 animations:^{
+            self.nameTag.alpha = 0;
+        }];
+        return;
+    }
+    self.nameTag.text = bubble.accessibilityLabel;
+    [self.nameTag sizeToFit];
+    CGRect frame = self.nameTag.frame;
+    frame.size.width = MIN(frame.size.width + 24, CGRectGetWidth(self.bounds) - 32);
+    frame.size.height = 26;
+    self.nameTag.frame = frame;
+    CGPoint center = CGPointMake(bubble.slot.x, bubble.slot.y + kBubbleSize / 2.0 + 22);
+    CGFloat half = frame.size.width / 2.0;
+    center.x = MAX(16 + half, MIN(center.x, CGRectGetWidth(self.bounds) - 16 - half));
+    self.nameTag.center = center;
+    [UIView animateWithDuration:0.12 animations:^{
+        self.nameTag.alpha = 1;
+    }];
+}
+
 - (void)hoverAt:(CGPoint)point {
     NFBAccountBubble* next = [self bubbleNear:point];
     if (next == self.hovered) {
         return;
     }
+    self.hovered = next;
     for (NFBAccountBubble* bubble in self.bubbles) {
         if (!bubble.settled) {
             continue;
         }
-        [UIView animateWithDuration:0.12
+        [UIView animateWithDuration:0.14
                          animations:^{
-                             bubble.transform = bubble == next ? CGAffineTransformMakeScale(1.18, 1.18)
+                             bubble.transform = bubble == next ? CGAffineTransformMakeScale(1.2, 1.2)
                                                                : CGAffineTransformIdentity;
                          }];
     }
-    self.hovered = next;
-    if (next && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
-        UISelectionFeedbackGenerator* tap = [UISelectionFeedbackGenerator new];
-        [tap selectionChanged];
+    [self showName:next];
+    if (next) {
+        Tick();
     }
 }
 
-- (void)dismissSwitching:(BOOL)switching {
-    NFBAccountBubble* chosen = self.hovered;
-    [UIView animateWithDuration:0.18
+// Released without picking: keep the circles up and let the user tap one.
+- (void)waitForTap {
+    self.userInteractionEnabled = YES;
+    UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                          action:@selector(tapped:)];
+    [self addGestureRecognizer:tap];
+}
+
+- (void)tapped:(UITapGestureRecognizer*)tap {
+    NFBAccountBubble* bubble = [self bubbleNear:[tap locationInView:self]];
+    if (bubble) {
+        self.hovered = bubble;
+        Tick();
+        [self finishWith:bubble];
+    } else {
+        [self finishWith:nil];
+    }
+}
+
+- (void)finishWith:(NFBAccountBubble*)chosen {
+    if (self.closing) {
+        return;
+    }
+    self.closing = YES;
+    self.userInteractionEnabled = NO;
+    id account = chosen && !chosen.current ? chosen.account : nil;
+    [UIView animateWithDuration:0.2
         animations:^{
             self.alpha = 0;
-            if (!switching) {
-                for (NFBAccountBubble* bubble in self.bubbles) {
-                    bubble.transform = CGAffineTransformMakeScale(0.2, 0.2);
-                }
+            for (NFBAccountBubble* bubble in self.bubbles) {
+                bubble.transform = bubble == chosen ? CGAffineTransformMakeScale(1.35, 1.35)
+                                                    : CGAffineTransformMakeScale(0.3, 0.3);
             }
         }
         completion:^(BOOL finished) {
-            if (switching && chosen && self.onSwitch) {
-                self.onSwitch(chosen.account);
-            }
             [self removeFromSuperview];
+            if (account) {
+                SwitchToAccount(account);
+            }
         }];
 }
 
 @end
 
-static const void* kFanKey = &kFanKey;
-static const void* kPassKey = &kPassKey;
+// MARK: - Long press on the avatar button
 
-static void FanUpdate(id owner, UIGestureRecognizer* gesture) {
-    UIWindow* window = gesture.view.window;
-    NFBAccountFan* fan = objc_getAssociatedObject(owner, kFanKey);
-    UIGestureRecognizerState state = gesture.state;
-    if (state == UIGestureRecognizerStateBegan) {
-        if (!window) {
-            return;
-        }
-        NSArray* accounts = TwitterAccounts();
-        if (accounts.count == 0) {
-            objc_setAssociatedObject(owner, kPassKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            return;
-        }
-        CGPoint origin = [gesture locationInView:window];
-        NFBAccountFan* created = [[NFBAccountFan alloc] initWithAccounts:accounts origin:origin];
-        created.frame = window.bounds;
-        created.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        __weak id weakOwner = owner;
-        created.onSwitch = ^(id account) {
-            if (!SwitchToAccount(account, weakOwner)) {
+@interface NFBAccountPress : UILongPressGestureRecognizer
+@end
+
+@implementation NFBAccountPress
+@end
+
+@interface NFBAccountPressHandler : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, strong) NFBAccountFan* fan;
+@property (nonatomic, assign) BOOL moved;
+@property (nonatomic, assign) CGPoint start;
++ (instancetype)shared;
+@end
+
+@implementation NFBAccountPressHandler
+
++ (instancetype)shared {
+    static NFBAccountPressHandler* handler;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        handler = [NFBAccountPressHandler new];
+    });
+    return handler;
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer*)gesture {
+    if (!BubblesOn() || !gesture.view.window || self.fan.superview) {
+        return NO;
+    }
+    // With one account there is nothing to switch to; X's sheet can add one.
+    return TwitterAccounts().count >= 2;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
+    return NO;
+}
+
+// X's own long press (the account sheet) and the bar-wide settings long press
+// wait for this one, so they do not fire when the circles open.
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
+    shouldBeRequiredToFailByGestureRecognizer:(UIGestureRecognizer*)other {
+    if (other == gesture || [other isKindOfClass:[NFBAccountPress class]]) {
+        return NO;
+    }
+    NSString* name = NSStringFromClass(other.class);
+    BOOL pressLike = [other isKindOfClass:[UILongPressGestureRecognizer class]] ||
+                     [name containsString:@"LongPress"] || [name containsString:@"ContextMenu"] ||
+                     [name containsString:@"Preview"];
+    if (!pressLike || !other.view || !gesture.view) {
+        return NO;
+    }
+    return [other.view isDescendantOfView:gesture.view] || [gesture.view isDescendantOfView:other.view];
+}
+
+- (void)pressed:(NFBAccountPress*)press {
+    UIWindow* window = press.view.window;
+    switch (press.state) {
+        case UIGestureRecognizerStateBegan: {
+            NSArray* accounts = TwitterAccounts();
+            if (!window || accounts.count < 2) {
                 return;
             }
-        };
-        [window addSubview:created];
-        objc_setAssociatedObject(owner, kFanKey, created, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        return;
-    }
-    if (!fan) {
-        return;
-    }
-    if (state == UIGestureRecognizerStateChanged) {
-        [fan hoverAt:[gesture locationInView:fan.superview ?: window]];
-        return;
-    }
-    if (state == UIGestureRecognizerStateEnded) {
-        [fan dismissSwitching:fan.hovered != nil];
-        objc_setAssociatedObject(owner, kFanKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        return;
-    }
-    if (state == UIGestureRecognizerStateCancelled || state == UIGestureRecognizerStateFailed) {
-        [fan dismissSwitching:NO];
-        objc_setAssociatedObject(owner, kFanKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            UIView* avatar = press.view;
+            CGPoint origin = [avatar convertPoint:CGPointMake(CGRectGetMidX(avatar.bounds),
+                                                              CGRectGetMidY(avatar.bounds))
+                                           toView:window];
+            if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+                UIImpactFeedbackGenerator* thump =
+                    [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+                [thump impactOccurred];
+            }
+            self.fan = [[NFBAccountFan alloc] initWithFrame:window.bounds
+                                                   accounts:accounts
+                                                     origin:origin
+                                                       safe:window.safeAreaInsets];
+            [window addSubview:self.fan];
+            self.start = [press locationInView:window];
+            self.moved = NO;
+            break;
+        }
+        case UIGestureRecognizerStateChanged: {
+            CGPoint point = [press locationInView:window];
+            if (hypot(point.x - self.start.x, point.y - self.start.y) > 12) {
+                self.moved = YES;
+            }
+            [self.fan hoverAt:point];
+            break;
+        }
+        case UIGestureRecognizerStateEnded: {
+            NFBAccountFan* fan = self.fan;
+            self.fan = nil;
+            if (fan.hovered) {
+                [fan finishWith:fan.hovered];
+            } else if (!self.moved) {
+                [fan waitForTap];
+            } else {
+                [fan finishWith:nil];
+            }
+            break;
+        }
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed: {
+            [self.fan finishWith:nil];
+            self.fan = nil;
+            break;
+        }
+        default:
+            break;
     }
 }
 
-%hook T1TabNavigationController
+@end
 
-- (void)_t1_action_didLongPressDashButton:(id)sender {
-    if (!BubblesOn() || ![sender isKindOfClass:[UIGestureRecognizer class]]) {
-        %orig;
-        return;
+static BOOL LooksLikeAvatar(UIView* view) {
+    NSString* name = NSStringFromClass(view.class);
+    if ([name rangeOfString:@"Avatar" options:NSCaseInsensitiveSearch].location == NSNotFound) {
+        return NO;
     }
-    UIGestureRecognizer* gesture = sender;
-    if (objc_getAssociatedObject(self, kPassKey)) {
-        if (gesture.state == UIGestureRecognizerStateEnded ||
-            gesture.state == UIGestureRecognizerStateCancelled ||
-            gesture.state == UIGestureRecognizerStateFailed) {
-            objc_setAssociatedObject(self, kPassKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CGSize size = view.bounds.size;
+    return !view.hidden && view.alpha > 0.01 && size.width >= 20 && size.width <= 64 && size.height >= 20 &&
+           size.height <= 64;
+}
+
+// The view that should carry the press: the avatar's biggest small ancestor
+// below the bar, preferring a control, that takes touches.
+static UIView* PressHost(UIView* avatar, UINavigationBar* bar) {
+    UIView* host = nil;
+    UIView* control = nil;
+    for (UIView* view = avatar; view && view != bar; view = view.superview) {
+        CGSize size = view.bounds.size;
+        if (size.width > 80 || size.height > 80) {
+            break;
         }
-        %orig;
-        return;
-    }
-    if (gesture.state == UIGestureRecognizerStateBegan) {
-        NSArray* accounts = TwitterAccounts();
-        if (accounts.count == 0 || !gesture.view.window) {
-            objc_setAssociatedObject(self, kPassKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            %orig;
-            return;
+        if (view.userInteractionEnabled) {
+            host = view;
+            if ([view isKindOfClass:[UIControl class]]) {
+                control = view;
+            }
+        } else {
+            host = nil;
         }
-        FanUpdate(self, gesture);
-        return;
     }
-    if (gesture.state == UIGestureRecognizerStateEnded) {
-        NFBAccountFan* fan = objc_getAssociatedObject(self, kFanKey);
-        BOOL failedSwitch = fan.hovered && !SwitchToAccount(fan.hovered.account, self);
-        [fan dismissSwitching:NO];
-        objc_setAssociatedObject(self, kFanKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (failedSwitch) {
-            %orig;
+    return control ?: host;
+}
+
+@interface NFBWeakView : NSObject
+@property (nonatomic, weak) UIView* view;
+@end
+
+@implementation NFBWeakView
+@end
+
+static const void* kPressHostKey = &kPressHostKey;
+
+static BOOL HasAccountPress(UIView* host) {
+    for (UIGestureRecognizer* existing in host.gestureRecognizers) {
+        if ([existing isKindOfClass:[NFBAccountPress class]]) {
+            return YES;
         }
+    }
+    return NO;
+}
+
+static void AttachAccountPress(UINavigationBar* bar) {
+    NFBWeakView* known = objc_getAssociatedObject(bar, kPressHostKey);
+    if (known.view && [known.view isDescendantOfView:bar] && HasAccountPress(known.view)) {
         return;
     }
-    FanUpdate(self, gesture);
+    UIView* found = nil;
+    BOOL rtl = bar.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithArray:bar.subviews];
+    NSInteger budget = 300;
+    while (queue.count > 0 && budget-- > 0) {
+        UIView* view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (view.hidden) {
+            continue;
+        }
+        if (LooksLikeAvatar(view)) {
+            CGRect frame = [view convertRect:view.bounds toView:bar];
+            BOOL leading = rtl ? CGRectGetMaxX(frame) > CGRectGetWidth(bar.bounds) - 96
+                               : CGRectGetMinX(frame) < 96;
+            if (leading) {
+                found = view;
+                break;
+            }
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+    UIView* host = found ? PressHost(found, bar) : nil;
+    if (!host) {
+        return;
+    }
+    if (!HasAccountPress(host)) {
+        NFBAccountPressHandler* handler = [NFBAccountPressHandler shared];
+        NFBAccountPress* press = [[NFBAccountPress alloc] initWithTarget:handler action:@selector(pressed:)];
+        press.minimumPressDuration = 0.35;
+        press.cancelsTouchesInView = YES;
+        press.delegate = handler;
+        [host addGestureRecognizer:press];
+    }
+    NFBWeakView* box = known ?: [NFBWeakView new];
+    box.view = host;
+    objc_setAssociatedObject(bar, kPressHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%hook UINavigationBar
+
+- (void)layoutSubviews {
+    %orig;
+    if (BubblesOn()) {
+        AttachAccountPress(self);
+    }
 }
 
 %end

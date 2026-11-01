@@ -514,28 +514,12 @@
 "KEMO_HISTORY_PAGE_SUBTITLE" = "이전내역과 새로고침 위치";
 "KEMO_HISTORY_TAB_TITLE" = "이전내역";
 
-"KEMO_LIKE_HEARTS_TITLE" = "좋아요 하트 파티클";
-"KEMO_LIKE_HEARTS_DETAIL" = "좋아요를 누르면 하트가 버튼에서 떠올라 사라집니다.";
-"KEMO_HEADER_GLOW_TITLE" = "다크 모드 헤더 글로우";
-"KEMO_HEADER_GLOW_DETAIL" = "어두운 화면에서 홈 로고 뒤에 은은한 빛이 천천히 숨 쉽니다.";
-"KEMO_POST_BURST_TITLE" = "보낸 뒤 로고 반짝임";
-"KEMO_POST_BURST_DETAIL" = "트윗을 보내면 헤더 로고가 한 번 빛나고 작은 입자가 퍼집니다.";
-"KEMO_MEDIA_PARALLAX_TITLE" = "미디어 패럴랙스";
-"KEMO_MEDIA_PARALLAX_DETAIL" = "타임라인 사진이 스크롤에 맞춰 아주 살짝 움직입니다.";
 
-"KEMO_CONFLICT_TITLE" = "분쟁 트윗 표시";
-"KEMO_CONFLICT_DETAIL" = "편 가르기·어그로 트윗 아바타 아래에 화난 고양이 표시";
-"KEMO_CONFLICT_HUFF_TITLE" = "고양이 쎒쎒 애니메이션";
-"KEMO_CONFLICT_HUFF_DETAIL" = "작게 부풀며 식식거려요";
 
-"KEMO_EFFECT_HAPTICS_TITLE" = "케모 효과 햅틱";
-"KEMO_EFFECT_HAPTICS_DETAIL" = "케모 효과가 터질 때 짧게 울리고 잦아듭니다.";
 "KEMO_RETURN_READ_TITLE" = "읽던 곳으로";
-"KEMO_RETURN_READ_DETAIL" = "상태 막대를 5초 안에 한 번 더 누르면 보던 위치로 돌아갑니다.";
-"KEMO_JELLY_PAW_TITLE" = "젤리 발바닥 새로고침";
-"KEMO_JELLY_PAW_DETAIL" = "당겨서 새로고침하면 발바닥이 늘어났다가 찍힙니다.";
+"KEMO_RETURN_READ_DETAIL" = "상태 막대를 10초 안에 한 번 더 누르면 보던 위치로 돌아갑니다.";
 "KEMO_ACCOUNT_BUBBLES_TITLE" = "계정 방울";
-"KEMO_ACCOUNT_BUBBLES_DETAIL" = "홈을 길게 누르고 계정 위로 끌어 놓으면 전환됩니다.";
+"KEMO_ACCOUNT_BUBBLES_DETAIL" = "왼쪽 위 프로필 사진을 길게 누른 뒤 계정 위로 끌어 놓거나 눌러서 전환합니다.";
 "SETTINGS_CODE_EXPORT_TITLE" = "설정 코드 복사";
 "SETTINGS_CODE_IMPORT_TITLE" = "설정 코드 붙여넣기";
 "SETTINGS_CODE_COPIED" = "클립보드에 복사했어요. 다른 기기에서는 코드를 스캔하거나 붙여넣으세요.";

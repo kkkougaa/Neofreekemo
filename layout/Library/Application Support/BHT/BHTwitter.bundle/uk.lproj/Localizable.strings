@@ -367,26 +367,10 @@
 "KEMO_HISTORY_PAGE_SUBTITLE" = "Recently viewed, and keeping your place";
 "KEMO_HISTORY_TAB_TITLE" = "History";
 
-"KEMO_LIKE_HEARTS_TITLE" = "Like heart particles";
-"KEMO_LIKE_HEARTS_DETAIL" = "Hearts float up from the like button, then fade.";
-"KEMO_HEADER_GLOW_TITLE" = "Dark mode header glow";
-"KEMO_HEADER_GLOW_DETAIL" = "A soft light breathes behind the home logo when it's dark.";
-"KEMO_POST_BURST_TITLE" = "Glow when a tweet is sent";
-"KEMO_POST_BURST_DETAIL" = "The header logo flashes once and sends out a small burst.";
-"KEMO_MEDIA_PARALLAX_TITLE" = "Media parallax";
-"KEMO_MEDIA_PARALLAX_DETAIL" = "Timeline photos shift a tiny bit as you scroll.";
 
-"KEMO_CONFLICT_TITLE" = "Show conflict tweets";
-"KEMO_CONFLICT_DETAIL" = "An angry cat under the avatar on divisive, baiting tweets";
-"KEMO_CONFLICT_HUFF_TITLE" = "Cat huff animation";
-"KEMO_CONFLICT_HUFF_DETAIL" = "A small puff and wiggle";
 
-"KEMO_EFFECT_HAPTICS_TITLE" = "Kemo effect haptics";
-"KEMO_EFFECT_HAPTICS_DETAIL" = "A short tap and fade when a Kemo burst plays.";
 "KEMO_RETURN_READ_TITLE" = "Return to last read";
-"KEMO_RETURN_READ_DETAIL" = "Tap the status bar again within 5 seconds to jump back.";
-"KEMO_JELLY_PAW_TITLE" = "Jelly paw refresh";
-"KEMO_JELLY_PAW_DETAIL" = "The pull-to-refresh control stretches like a paw, then stamps.";
+"KEMO_RETURN_READ_DETAIL" = "Tap the status bar again within 10 seconds to jump back.";
 "KEMO_ACCOUNT_BUBBLES_TITLE" = "Account bubbles";
 "KEMO_ACCOUNT_BUBBLES_DETAIL" = "Long-press Home and drag onto an account to switch.";
 "SETTINGS_CODE_EXPORT_TITLE" = "Copy settings code";

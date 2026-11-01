@@ -304,28 +304,7 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openKemoHistory:"
                     },
                     @{
-                        @"key": @"kemo_conflict",
-                        @"default": @NO,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_conflict_huff",
-                        @"default": @YES,
-                        @"type": @"toggle",
-                        @"parentKey": @"kemo_conflict"
-                    },
-                    @{
-                        @"key": @"kemo_effect_haptics",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
                         @"key": @"kemo_return_read",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_jelly_paw",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
@@ -379,26 +358,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"key": @"kemo_haptics",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_like_hearts",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_header_glow",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_post_burst",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_media_parallax",
                         @"default": @YES,
                         @"type": @"toggle"
                     },

@@ -3,6 +3,7 @@
 //  NeoFreeBird
 //
 
+#import <CoreText/CoreText.h>
 #import "Headers/XHeaders.h"
 #import "HookHelpers.h"
 
@@ -112,7 +113,86 @@ static NSString* CustomFontName(BOOL isBold) {
     if (![defaults boolForKey:@"custom_fonts"]) {
         return nil;
     }
-    return [defaults objectForKey:isBold ? @"bhtwitter_font_2" : @"bhtwitter_font_1"];
+    id name = [defaults objectForKey:isBold ? @"bhtwitter_font_2" : @"bhtwitter_font_1"];
+    return [name isKindOfClass:[NSString class]] && [name length] > 0 ? name : nil;
+}
+
+static BOOL CustomFontsEnabled(void) {
+    return CustomFontName(NO) != nil || CustomFontName(YES) != nil;
+}
+
+// Twitter keeps the fonts from +tfn_fontWithName:size: in its own cache and then
+// stores the CTFont (toll-free with UIFont) into attributed strings without an
+// extra retain. A font we hand back from +fontWithName: or -tfn_withMonospacedDigits
+// is not in that cache. Quoted-tweet cells add a second attribute after the
+// autorelease pool has drained, and hashing the dead font crashes. This map is
+// intentionally not an NSCache: eviction would bring the crash back.
+static NSMutableDictionary<NSString*, UIFont*>* BHTFontCache(void) {
+    static NSMutableDictionary* cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSMutableDictionary dictionary];
+    });
+    return cache;
+}
+
+static UIFont* BHTRememberFont(NSString* key, UIFont* font) {
+    if (key.length == 0 || ![font isKindOfClass:[UIFont class]]) {
+        return [font isKindOfClass:[UIFont class]] ? font : nil;
+    }
+    NSMutableDictionary* cache = BHTFontCache();
+    @synchronized(cache) {
+        UIFont* existing = cache[key];
+        if (existing) {
+            return existing;
+        }
+        cache[key] = font;
+        return font;
+    }
+}
+
+static BOOL BHTFontIsRemembered(UIFont* font) {
+    if (![font isKindOfClass:[UIFont class]]) {
+        return NO;
+    }
+    NSMutableDictionary* cache = BHTFontCache();
+    @synchronized(cache) {
+        for (UIFont* cached in cache.objectEnumerator) {
+            if (cached == font) {
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+// kNumberSpacingType / kMonospacedNumbersSelector. Built here so the result is a
+// real UIFont we retain, instead of -tfn_withMonospacedDigits' temporary font.
+static UIFont* BHTMonospacedDigits(UIFont* font) {
+    if (![font isKindOfClass:[UIFont class]] || font.pointSize <= 0) {
+        return font;
+    }
+    NSString* key = [NSString stringWithFormat:@"mono|%@|%.2f", font.fontName ?: @"", font.pointSize];
+    NSMutableDictionary* cache = BHTFontCache();
+    @synchronized(cache) {
+        UIFont* existing = cache[key];
+        if (existing) {
+            return existing;
+        }
+    }
+    UIFontDescriptor* descriptor = [font.fontDescriptor fontDescriptorByAddingAttributes:@{
+        UIFontDescriptorFeatureSettingsAttribute : @[
+            @{
+                UIFontFeatureTypeIdentifierKey : @(kNumberSpacingType),
+                UIFontFeatureSelectorIdentifierKey : @(kMonospacedNumbersSelector)
+            }
+        ]
+    }];
+    UIFont* made = [UIFont fontWithDescriptor:descriptor size:font.pointSize];
+    if (![made isKindOfClass:[UIFont class]]) {
+        made = font;
+    }
+    return BHTRememberFont(key, made);
 }
 
 static BOOL BHTFontIsBold(UIFont* font) {
@@ -141,12 +221,39 @@ static BOOL BHTFontIsBold(UIFont* font) {
     return weight && weight.doubleValue >= UIFontWeightSemibold;
 }
 
+static BOOL BHTNameMatchesCustomFont(NSString* name) {
+    if (name.length == 0) {
+        return NO;
+    }
+    NSString* regular = CustomFontName(NO);
+    NSString* bold = CustomFontName(YES);
+    return (regular && [name isEqualToString:regular]) || (bold && [name isEqualToString:bold]);
+}
+
 static UIFont* BHTReplaceFont(UIFont* originalFont, BOOL isBold) {
     NSString* customName = CustomFontName(isBold);
-    if (!customName || !originalFont || [originalFont.fontName isEqualToString:customName]) {
+    if (!customName || ![originalFont isKindOfClass:[UIFont class]] || originalFont.pointSize <= 0) {
         return originalFont;
     }
-    return [UIFont fontWithName:customName size:originalFont.pointSize] ?: originalFont;
+    if ([originalFont.fontName isEqualToString:customName] ||
+        [originalFont.familyName isEqualToString:customName]) {
+        return BHTRememberFont(
+            [NSString stringWithFormat:@"face|%@|%.2f", originalFont.fontName, originalFont.pointSize],
+            originalFont);
+    }
+    NSString* key = [NSString stringWithFormat:@"%@|%.2f", customName, originalFont.pointSize];
+    NSMutableDictionary* cache = BHTFontCache();
+    @synchronized(cache) {
+        UIFont* existing = cache[key];
+        if (existing) {
+            return existing;
+        }
+    }
+    UIFont* created = [UIFont fontWithName:customName size:originalFont.pointSize];
+    if (![created isKindOfClass:[UIFont class]]) {
+        return originalFont;
+    }
+    return BHTRememberFont(key, created);
 }
 
 %hook UIFont
@@ -155,7 +262,22 @@ static UIFont* BHTReplaceFont(UIFont* originalFont, BOOL isBold) {
     UIFont* originalFont = %orig;
     BOOL isBold = [name containsString:@"Bold"] || [name containsString:@"Heavy"] ||
                   [name containsString:@"Black"] || [name containsString:@"Semibold"];
-    return BHTReplaceFont(originalFont, isBold);
+    UIFont* replaced = BHTReplaceFont(originalFont, isBold);
+    return [replaced isKindOfClass:[UIFont class]] ? replaced : originalFont;
+}
+
+- (UIFont*)tfn_withMonospacedDigits {
+    if (!CustomFontsEnabled()) {
+        return %orig;
+    }
+    // Only the faces we substituted. System fonts keep Twitter's own implementation.
+    BOOL custom = BHTNameMatchesCustomFont(self.fontName) || BHTNameMatchesCustomFont(self.familyName) ||
+                  BHTFontIsRemembered(self);
+    if (!custom) {
+        return %orig;
+    }
+    UIFont* made = BHTMonospacedDigits(self);
+    return [made isKindOfClass:[UIFont class]] ? made : self;
 }
 
 %end
@@ -183,8 +305,10 @@ static UIFont* BHTReplaceFont(UIFont* originalFont, BOOL isBold) {
 + (UIFont*)tabularDigitsFontOfSize:(CGFloat)size weight:(UIFontWeight)weight {
     UIFont* originalFont = %orig;
     UIFont* customFont = BHTReplaceFont(originalFont, weight >= UIFontWeightSemibold);
-    return customFont == originalFont ? originalFont
-                                      : ([customFont tfn_withMonospacedDigits] ?: customFont);
+    if (customFont == originalFont || ![customFont isKindOfClass:[UIFont class]]) {
+        return originalFont;
+    }
+    return BHTMonospacedDigits(customFont);
 }
 
 %end
@@ -213,9 +337,10 @@ static UIBarButtonItemAppearance* BHTBarButtonAppearanceWithFont(
         NSMutableDictionary* attributes =
             [state.titleTextAttributes mutableCopy] ?: [NSMutableDictionary dictionary];
         UIFont* existingFont = attributes[NSFontAttributeName];
-        UIFont* customFont = [UIFont fontWithName:fontName
-                                             size:existingFont ? existingFont.pointSize : 17.0];
+        CGFloat size = existingFont ? existingFont.pointSize : 17.0;
+        UIFont* customFont = [UIFont fontWithName:fontName size:size];
         if (customFont) {
+            customFont = BHTRememberFont([NSString stringWithFormat:@"%@|%.2f", fontName, size], customFont);
             attributes[NSFontAttributeName] = customFont;
             state.titleTextAttributes = attributes;
         }
@@ -240,9 +365,10 @@ static UINavigationBarAppearance* BHTNavigationAppearanceWithFonts(
         NSMutableDictionary* attributes =
             [appearance.titleTextAttributes mutableCopy] ?: [NSMutableDictionary dictionary];
         UIFont* existingFont = attributes[NSFontAttributeName];
-        UIFont* customFont = [UIFont fontWithName:boldName
-                                             size:existingFont ? existingFont.pointSize : 17.0];
+        CGFloat size = existingFont ? existingFont.pointSize : 17.0;
+        UIFont* customFont = [UIFont fontWithName:boldName size:size];
         if (customFont) {
+            customFont = BHTRememberFont([NSString stringWithFormat:@"%@|%.2f", boldName, size], customFont);
             attributes[NSFontAttributeName] = customFont;
             appearance.titleTextAttributes = attributes;
         }

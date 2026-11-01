@@ -5,6 +5,7 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import "HookHelpers.h"
+#import "Core/NFBKemoHaptics.h"
 
 // MARK: - Burst when a tweet is sent
 
@@ -146,6 +147,7 @@ static void PlayBurst(UIImageView* logo) {
                            [flash removeFromSuperlayer];
                        });
     }
+    NFBKemoPlayBurstHaptic();
     if (reduce) {
         return;
     }

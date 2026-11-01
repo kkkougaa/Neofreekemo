@@ -565,3 +565,18 @@
 "KEMO_CONFLICT_DETAIL" = "An angry cat under the avatar on divisive, baiting tweets";
 "KEMO_CONFLICT_HUFF_TITLE" = "Cat huff animation";
 "KEMO_CONFLICT_HUFF_DETAIL" = "A small puff and wiggle";
+
+"KEMO_EFFECT_HAPTICS_TITLE" = "Kemo effect haptics";
+"KEMO_EFFECT_HAPTICS_DETAIL" = "A short tap and fade when a Kemo burst plays.";
+"KEMO_RETURN_READ_TITLE" = "Return to last read";
+"KEMO_RETURN_READ_DETAIL" = "Tap the status bar again within 5 seconds to jump back.";
+"KEMO_JELLY_PAW_TITLE" = "Jelly paw refresh";
+"KEMO_JELLY_PAW_DETAIL" = "The pull-to-refresh control stretches like a paw, then stamps.";
+"KEMO_ACCOUNT_BUBBLES_TITLE" = "Account bubbles";
+"KEMO_ACCOUNT_BUBBLES_DETAIL" = "Long-press Home and drag onto an account to switch.";
+"SETTINGS_CODE_EXPORT_TITLE" = "Copy settings code";
+"SETTINGS_CODE_IMPORT_TITLE" = "Paste settings code";
+"SETTINGS_CODE_COPIED" = "Copied to the clipboard. Scan the code on another device, or paste it there.";
+"SETTINGS_CODE_TOO_BIG" = "Copied to the clipboard. The backup is too large for a QR code.";
+"SETTINGS_CODE_EMPTY" = "The clipboard does not have a settings code.";
+"SETTINGS_CODE_RESTORED" = "%ld settings restored";

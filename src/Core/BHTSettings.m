@@ -315,6 +315,26 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_conflict"
                     },
                     @{
+                        @"key": @"kemo_effect_haptics",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_return_read",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_jelly_paw",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_account_bubbles",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"type": @"compactButton",
                         @"key": @"spotify_client_id",
                         @"titleKey": @"SPOTIFY_CLIENT_ID_TITLE",
@@ -703,6 +723,16 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"compactButton",
                         @"titleKey": @"SETTINGS_IMPORT_TITLE",
                         @"action": @"importSettings:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"titleKey": @"SETTINGS_CODE_EXPORT_TITLE",
+                        @"action": @"exportSettingsCode:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"titleKey": @"SETTINGS_CODE_IMPORT_TITLE",
+                        @"action": @"importSettingsCode:"
                     },
                     @{
                         @"type": @"compactButton",

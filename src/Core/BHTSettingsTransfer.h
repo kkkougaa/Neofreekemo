@@ -37,6 +37,12 @@ typedef NS_ENUM(NSInteger, BHTSettingsTransferErrorCode) {
 // set when the file could not be read or was not one of our exports.
 + (NSInteger)importSettingsFromFileAtURL:(NSURL*)url error:(NSError**)error;
 
+// Compact JSON of the same export, base64-encoded, for the clipboard and a QR.
++ (NSString*)exportBase64String:(NSError**)error;
+
+// Imports a string produced by exportBase64String. Same return as the file import.
++ (NSInteger)importSettingsFromBase64String:(NSString*)string error:(NSError**)error;
+
 // Restores every registered preference to its default and reapplies settings
 // whose values are also cached outside NSUserDefaults.
 + (void)resetAllSettings;

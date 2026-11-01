@@ -13,6 +13,10 @@
 //  button in the navigation bar, makes X's own long press wait for it, and fans
 //  the circles toward the middle of the screen. With fewer than two accounts the
 //  press stands aside and X's sheet opens as before.
+//
+//  7.3.22: on iOS 26 the avatar sits in a SwiftUI platter and X's sheet still
+//  won. Now X's sheet itself is caught when it is presented after a held
+//  finger, and the circles open in its place, following that finger.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -719,12 +723,218 @@ static void AttachAccountPress(UINavigationBar* bar) {
     objc_setAssociatedObject(bar, kPressHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+// MARK: - Catching X's account sheet
+//
+// On iOS 26 the avatar button lives in a SwiftUI platter, and the press above
+// may never get the touch. So also watch for X presenting its account sheet
+// (AccountSwitcherTrayContentViewController) while a finger has been held: skip
+// the sheet and open the circles there instead, following the same finger.
+
+static NSTimeInterval gTouchStart = 0;
+static NSTimeInterval gTouchEnd = 0;
+static CGPoint gTouchStartPoint;
+static BOOL gTouchDown = NO;
+static __weak UITouch* gTrackedTouch = nil;
+static NFBAccountFan* gCaughtFan = nil;
+static BOOL gCaughtMoved = NO;
+static NSString* gBubbleLog = @"(no account sheet seen)";
+
+NSString* NFBAccountBubblesDebugText(void) {
+    NFBWeakView* known = nil;
+    for (UIWindow* window in UIApplication.sharedApplication.windows) {
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
+        NSInteger budget = 4000;
+        while (queue.count > 0 && budget-- > 0 && !known) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if ([view isKindOfClass:[UINavigationBar class]]) {
+                NFBWeakView* box = objc_getAssociatedObject(view, kPressHostKey);
+                if (box.view) {
+                    known = box;
+                }
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
+    }
+    return [NSString stringWithFormat:@"on=%d accounts=%lu pressHost=%@ last=%@", BubblesOn(),
+                                      (unsigned long)TwitterAccounts().count,
+                                      known.view ? NSStringFromClass(known.view.class) : @"(none)", gBubbleLog];
+}
+
+static BOOL IsAccountSheet(UIViewController* controller, NSInteger depth) {
+    if (!controller || depth > 6) {
+        return NO;
+    }
+    if ([NSStringFromClass(controller.class) containsString:@"AccountSwitcherTray"]) {
+        return YES;
+    }
+    for (UIViewController* child in controller.childViewControllers) {
+        if (IsAccountSheet(child, depth + 1)) {
+            return YES;
+        }
+    }
+    for (NSString* name in @[ @"viewControllers" ]) {
+        id list = ObjectProp(controller, name);
+        if ([list isKindOfClass:[NSArray class]]) {
+            for (id item in (NSArray*)list) {
+                if ([item isKindOfClass:[UIViewController class]] && IsAccountSheet(item, depth + 1)) {
+                    return YES;
+                }
+            }
+        }
+    }
+    for (NSString* name in @[ @"rootViewController", @"contentViewController", @"topViewController" ]) {
+        id item = ObjectProp(controller, name);
+        if (item != controller && [item isKindOfClass:[UIViewController class]] && IsAccountSheet(item, depth + 1)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+// A held finger (not a quick tap) that is still down or only just lifted.
+static BOOL FingerHeld(NSTimeInterval grace) {
+    if (gTouchStart <= 0) {
+        return NO;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (!gTouchDown && now - gTouchEnd > grace) {
+        return NO;
+    }
+    return (gTouchDown ? now : gTouchEnd) - gTouchStart >= 0.25;
+}
+
+static BOOL FanIsUp(void) {
+    return [NFBAccountPressHandler shared].fan.superview != nil || gCaughtFan.superview != nil;
+}
+
+static BOOL OpenCaughtFan(UIWindow* window) {
+    NSArray* accounts = TwitterAccounts();
+    if (!window || accounts.count < 2) {
+        return NO;
+    }
+    if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        UIImpactFeedbackGenerator* thump =
+            [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        [thump impactOccurred];
+    }
+    NFBAccountFan* fan = [[NFBAccountFan alloc] initWithFrame:window.bounds
+                                                     accounts:accounts
+                                                       origin:gTouchStartPoint
+                                                         safe:window.safeAreaInsets];
+    [window addSubview:fan];
+    if (gTouchDown) {
+        gCaughtFan = fan;
+        gCaughtMoved = NO;
+    } else {
+        [fan waitForTap];
+    }
+    return YES;
+}
+
+static void TrackTouches(UIWindow* window, UIEvent* event) {
+    for (UITouch* touch in event.allTouches) {
+        if (touch.phase == UITouchPhaseBegan && !gTouchDown) {
+            gTrackedTouch = touch;
+            gTouchDown = YES;
+            gTouchStart = touch.timestamp;
+            gTouchStartPoint = [touch locationInView:nil];
+            continue;
+        }
+        if (touch != gTrackedTouch) {
+            continue;
+        }
+        NFBAccountFan* fan = gCaughtFan;
+        if (touch.phase == UITouchPhaseMoved && fan) {
+            CGPoint point = [touch locationInView:fan];
+            if (hypot(point.x - gTouchStartPoint.x, point.y - gTouchStartPoint.y) > 12) {
+                gCaughtMoved = YES;
+            }
+            [fan hoverAt:point];
+        } else if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+            gTouchDown = NO;
+            gTouchEnd = NSProcessInfo.processInfo.systemUptime;
+            gTrackedTouch = nil;
+            gCaughtFan = nil;
+            if (fan) {
+                if (fan.hovered) {
+                    [fan finishWith:fan.hovered];
+                } else if (!gCaughtMoved && touch.phase == UITouchPhaseEnded) {
+                    [fan waitForTap];
+                } else {
+                    [fan finishWith:nil];
+                }
+            }
+        }
+    }
+}
+
 %hook UINavigationBar
 
 - (void)layoutSubviews {
     %orig;
     if (BubblesOn()) {
         AttachAccountPress(self);
+    }
+}
+
+%end
+
+%hook UIWindow
+
+- (void)sendEvent:(UIEvent*)event {
+    if (event.type == UIEventTypeTouches && BubblesOn()) {
+        TrackTouches(self, event);
+    }
+    %orig;
+}
+
+%end
+
+%hook UIViewController
+
+- (void)presentViewController:(UIViewController*)controller
+                     animated:(BOOL)animated
+                   completion:(void (^)(void))completion {
+    if (BubblesOn() && IsAccountSheet(controller, 0)) {
+        BOOL held = FingerHeld(0.6);
+        if (FanIsUp()) {
+            gBubbleLog = @"sheet skipped, circles already up";
+            return;
+        }
+        if (held) {
+            UIWindow* window = self.view.window ?: UIApplication.sharedApplication.keyWindow;
+            if (OpenCaughtFan(window)) {
+                gBubbleLog = [NSString stringWithFormat:@"sheet replaced by circles (from %@)",
+                                                        NSStringFromClass(self.class)];
+                return;
+            }
+        }
+        gBubbleLog = [NSString stringWithFormat:@"sheet shown: held=%d accounts=%lu", held,
+                                                (unsigned long)TwitterAccounts().count];
+    }
+    %orig;
+}
+
+// Fallback for a sheet that came up some other way than presentViewController.
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (!BubblesOn() || ![NSStringFromClass(self.class) containsString:@"AccountSwitcherTrayContent"]) {
+        return;
+    }
+    if (FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
+        return;
+    }
+    UIViewController* top = self;
+    while (top.parentViewController) {
+        top = top.parentViewController;
+    }
+    UIWindow* window = top.presentingViewController.view.window ?: self.view.window;
+    if (top.presentingViewController) {
+        [top dismissViewControllerAnimated:NO completion:nil];
+    }
+    if (OpenCaughtFan(window)) {
+        gBubbleLog = @"sheet closed after appearing, circles opened";
     }
 }
 

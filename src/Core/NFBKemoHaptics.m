@@ -50,11 +50,12 @@ static BOOL NFBPlayCoreBurst(void) {
                                                        relativeTime:0
                                                            duration:0.2];
     CHHapticParameterCurve* curve = [[CHHapticParameterCurve alloc]
-        initWithParameterID:CHHapticEventParameterIDHapticIntensity
+        initWithParameterID:CHHapticDynamicParameterIDHapticIntensityControl
               controlPoints:@[
                   [[CHHapticParameterCurveControlPoint alloc] initWithRelativeTime:0 value:0.4],
                   [[CHHapticParameterCurveControlPoint alloc] initWithRelativeTime:0.2 value:0]
-              ]];
+              ]
+               relativeTime:0];
     NSError* error = nil;
     CHHapticPattern* pattern = [[CHHapticPattern alloc] initWithEvents:@[ tap, decay ]
                                                       parameterCurves:@[ curve ]

@@ -155,6 +155,9 @@ static BOOL SwitchToAccount(id account) {
 }
 
 static NSString* AccountTitle(id account) {
+    if (!account) {
+        return @"";
+    }
     id user = ObjectProp(account, @"user");
     for (id source in @[ user ?: [NSNull null], account ]) {
         if (source == [NSNull null]) {
@@ -179,6 +182,9 @@ static NSString* AccountTitle(id account) {
 static NSString* ProbedImageString(id account);
 
 static NSURL* AccountImageURL(id account) {
+    if (!account) {
+        return nil;
+    }
     id user = ObjectProp(account, @"user");
     for (id source in @[ user ?: [NSNull null], account ]) {
         if (source == [NSNull null]) {
@@ -273,6 +279,9 @@ static NSString* ProfileImageString(id value) {
 // Any getter on the user or account that hands back a pbs.twimg.com
 // profile_images address.
 static NSString* ProbedImageString(id account) {
+    if (!account) {
+        return nil;
+    }
     id user = ObjectProp(account, @"user");
     for (id source in @[ user ?: [NSNull null], account ]) {
         if (source == [NSNull null]) {

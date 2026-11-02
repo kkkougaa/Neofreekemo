@@ -25,6 +25,9 @@
 //  7.3.24: one even arc (quarter circle from a corner) that slides as a whole
 //  to stay on screen; unread badges read off X's own account list rows; the
 //  name tag sits above the arc, away from the thumb.
+//
+//  7.3.25: a Liquid Glass gear at the far end of the arc opens a list where
+//  the accounts can be dragged into the order the circles use.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -434,6 +437,54 @@ static NSInteger BadgeCountFor(id account) {
     return AccountUnreadCount(account);
 }
 
+// MARK: - Account order
+
+static NSString* const kOrderKey = @"kemo_account_bubble_order";
+
+static NSString* OrderTitle(void) {
+    NSString* language = NSLocale.preferredLanguages.firstObject ?: @"en";
+    if ([language hasPrefix:@"ko"]) {
+        return @"계정 순서";
+    }
+    if ([language hasPrefix:@"ja"]) {
+        return @"アカウントの順番";
+    }
+    return @"Account order";
+}
+
+// X's accounts sorted by the saved order; accounts not in it keep X's order
+// and go last.
+static NSArray* OrderedAccounts(NSArray* accounts) {
+    NSArray* saved = [[NSUserDefaults standardUserDefaults] arrayForKey:kOrderKey];
+    if (saved.count == 0 || accounts.count < 2) {
+        return accounts;
+    }
+    NSMutableArray* placed = [NSMutableArray array];
+    NSMutableArray* rest = [NSMutableArray arrayWithArray:accounts];
+    for (id key in saved) {
+        for (id account in rest) {
+            if ([AccountKey(account) isEqual:key]) {
+                [placed addObject:account];
+                [rest removeObject:account];
+                break;
+            }
+        }
+    }
+    [placed addObjectsFromArray:rest];
+    return placed;
+}
+
+static void SaveOrder(NSArray* accounts) {
+    NSMutableArray* keys = [NSMutableArray array];
+    for (id account in accounts) {
+        NSString* key = AccountKey(account);
+        if (key.length > 0) {
+            [keys addObject:key];
+        }
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:keys forKey:kOrderKey];
+}
+
 static NSCache<NSString*, UIImage*>* AvatarCache(void) {
     static NSCache* cache;
     static dispatch_once_t once;
@@ -482,6 +533,7 @@ static void Tick(void) {
 @property (nonatomic, assign) CGPoint slot;
 @property (nonatomic, assign) BOOL settled;
 @property (nonatomic, assign) BOOL current;
+@property (nonatomic, assign) BOOL settings;
 @property (nonatomic, strong) UIImageView* avatar;
 @property (nonatomic, strong) UILabel* initial;
 @property (nonatomic, strong) UILabel* badge;
@@ -546,7 +598,7 @@ static void Tick(void) {
 }
 
 - (void)setCount:(NSInteger)count {
-    if (count <= 0) {
+    if (count <= 0 || self.settings) {
         self.badge.hidden = YES;
         return;
     }
@@ -559,12 +611,172 @@ static void Tick(void) {
     self.accessibilityValue = self.badge.text;
 }
 
+// The gear at the end of the arc that opens the order editor.
+- (instancetype)initSettings {
+    if ((self = [self initWithAccount:nil current:NO])) {
+        _settings = YES;
+        UIImageSymbolConfiguration* config =
+            [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightSemibold];
+        self.avatar.image = [UIImage systemImageNamed:@"gearshape.fill" withConfiguration:config];
+        self.avatar.contentMode = UIViewContentModeCenter;
+        self.avatar.tintColor = [UIColor labelColor];
+        self.initial.hidden = YES;
+        self.accessibilityLabel = OrderTitle();
+    }
+    return self;
+}
+
 - (void)setImage:(UIImage*)image {
     self.avatar.image = image;
     self.initial.hidden = image != nil;
 }
 
 @end
+
+// MARK: - Order editor
+
+// A plain reorderable list: drag the handles, the order is saved on every move.
+@interface NFBAccountOrderController : UITableViewController
+@property (nonatomic, strong) NSMutableArray* accounts;
+@end
+
+@implementation NFBAccountOrderController
+
+- (instancetype)init {
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
+        _accounts = [NSMutableArray arrayWithArray:OrderedAccounts(TwitterAccounts() ?: @[])];
+        self.title = OrderTitle();
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.tableView.rowHeight = 60;
+    self.tableView.editing = YES;
+    self.tableView.allowsSelectionDuringEditing = NO;
+    self.navigationItem.rightBarButtonItem =
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                      target:self
+                                                      action:@selector(done)];
+}
+
+- (void)done {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (NSInteger)tableView:(UITableView*)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.accounts.count;
+}
+
+- (UIImage*)roundImage:(UIImage*)image {
+    CGFloat side = 36;
+    UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(0, 0, side, side)] addClip];
+        [image drawInRect:CGRectMake(0, 0, side, side)];
+    }];
+}
+
+- (UITableViewCell*)tableView:(UITableView*)tableView cellForRowAtIndexPath:(NSIndexPath*)indexPath {
+    UITableViewCell* cell = [tableView dequeueReusableCellWithIdentifier:@"account"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"account"];
+    }
+    id account = self.accounts[indexPath.row];
+    id user = ObjectProp(account, @"user");
+    NSString* name = nil;
+    for (NSString* selector in @[ @"fullName", @"displayFullName", @"name" ]) {
+        name = StringProp(user, selector) ?: StringProp(account, selector);
+        if (name.length > 0) {
+            break;
+        }
+    }
+    NSString* handle = AccountTitle(account);
+    cell.textLabel.text = name.length > 0 ? name : handle;
+    cell.detailTextLabel.text = name.length > 0 ? handle : nil;
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+    NSString* key = AccountKey(account);
+    UIImage* image = key ? [AvatarCache() objectForKey:key] : nil;
+    if (!image) {
+        image = OnScreenAvatar(key);
+    }
+    cell.imageView.image = image ? [self roundImage:image]
+                                 : [UIImage systemImageNamed:@"person.crop.circle.fill"];
+    cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+    if (!image) {
+        NSURL* url = AccountImageURL(account);
+        if (url) {
+            __weak typeof(self) weakSelf = self;
+            [[[NSURLSession sharedSession]
+                  dataTaskWithURL:url
+                completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+                    UIImage* loaded = data.length > 0 ? [UIImage imageWithData:data] : nil;
+                    if (!loaded || !key) {
+                        return;
+                    }
+                    [AvatarCache() setObject:loaded forKey:key];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [weakSelf.tableView reloadData];
+                    });
+                }] resume];
+        }
+    }
+    return cell;
+}
+
+- (UITableViewCellEditingStyle)tableView:(UITableView*)tableView
+           editingStyleForRowAtIndexPath:(NSIndexPath*)indexPath {
+    return UITableViewCellEditingStyleNone;
+}
+
+- (BOOL)tableView:(UITableView*)tableView shouldIndentWhileEditingRowAtIndexPath:(NSIndexPath*)indexPath {
+    return NO;
+}
+
+- (BOOL)tableView:(UITableView*)tableView canMoveRowAtIndexPath:(NSIndexPath*)indexPath {
+    return YES;
+}
+
+- (void)tableView:(UITableView*)tableView
+    moveRowAtIndexPath:(NSIndexPath*)from
+           toIndexPath:(NSIndexPath*)to {
+    id account = self.accounts[from.row];
+    [self.accounts removeObjectAtIndex:from.row];
+    [self.accounts insertObject:account atIndex:to.row];
+    SaveOrder(self.accounts);
+    Tick();
+}
+
+@end
+
+static void ShowOrderEditor(void) {
+    UIWindow* window = nil;
+    for (UIWindow* candidate in UIApplication.sharedApplication.windows) {
+        if (candidate.isKeyWindow) {
+            window = candidate;
+            break;
+        }
+    }
+    UIViewController* top = (window ?: UIApplication.sharedApplication.windows.firstObject).rootViewController;
+    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) {
+        top = top.presentedViewController;
+    }
+    if (!top) {
+        return;
+    }
+    UINavigationController* nav =
+        [[UINavigationController alloc] initWithRootViewController:[NFBAccountOrderController new]];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController* sheet = nav.sheetPresentationController;
+        sheet.detents = @[ [UISheetPresentationControllerDetent mediumDetent],
+                           [UISheetPresentationControllerDetent largeDetent] ];
+        sheet.prefersGrabberVisible = YES;
+    }
+    [top presentViewController:nav animated:YES completion:nil];
+}
 
 @interface NFBAccountFan : UIView
 @property (nonatomic, strong) NSArray<NFBAccountBubble*>* bubbles;
@@ -599,7 +811,10 @@ static __weak NFBAccountFan* gLiveFan = nil;
         }];
 
         id current = CurrentAccount();
-        NSInteger count = MIN((NSInteger)accounts.count, kBubbleLimit);
+        accounts = OrderedAccounts(accounts);
+        NSInteger accountCount = MIN((NSInteger)accounts.count, kBubbleLimit);
+        // One more slot at the far end of the arc for the settings gear.
+        NSInteger count = accountCount + 1;
 
         // One even arc around the finger. From a corner it is a quarter circle
         // pointing into the screen; elsewhere it opens toward the middle. The
@@ -627,7 +842,7 @@ static __weak NFBAccountFan* gLiveFan = nil;
         CGFloat step = count > 1 ? spread / (CGFloat)(count - 1) : 0;
         CGFloat radius = count > 1 ? MAX(120.0, gap / (2.0 * sin(step / 2.0))) : 120.0;
 
-        CGPoint slots[kBubbleLimit];
+        CGPoint slots[kBubbleLimit + 1];
         CGFloat minX = CGFLOAT_MAX, maxX = -CGFLOAT_MAX, minY = CGFLOAT_MAX, maxY = -CGFLOAT_MAX;
         for (NSInteger i = 0; i < count; i++) {
             CGFloat angle = aim - spread / 2.0 + step * (CGFloat)i;
@@ -649,9 +864,11 @@ static __weak NFBAccountFan* gLiveFan = nil;
 
         NSMutableArray* bubbles = [NSMutableArray array];
         for (NSInteger i = 0; i < count; i++) {
-            id account = accounts[i];
-            NFBAccountBubble* bubble = [[NFBAccountBubble alloc] initWithAccount:account
-                                                                         current:SameAccount(account, current)];
+            BOOL gear = i == accountCount;
+            id account = gear ? nil : accounts[i];
+            NFBAccountBubble* bubble = gear ? [[NFBAccountBubble alloc] initSettings]
+                                            : [[NFBAccountBubble alloc] initWithAccount:account
+                                                                                current:SameAccount(account, current)];
             CGPoint slot = slots[i];
             bubble.slot = slot;
             bubble.center = origin;
@@ -672,8 +889,10 @@ static __weak NFBAccountFan* gLiveFan = nil;
                 completion:^(BOOL finished) {
                     bubble.settled = YES;
                 }];
-            [self loadImageForBubble:bubble];
-            [bubble setCount:bubble.current ? 0 : BadgeCountFor(account)];
+            if (!gear) {
+                [self loadImageForBubble:bubble];
+                [bubble setCount:bubble.current ? 0 : BadgeCountFor(account)];
+            }
         }
         _bubbles = bubbles;
 
@@ -694,7 +913,9 @@ static __weak NFBAccountFan* gLiveFan = nil;
 
 - (void)refreshCounts {
     for (NFBAccountBubble* bubble in self.bubbles) {
-        [bubble setCount:bubble.current ? 0 : BadgeCountFor(bubble.account)];
+        if (!bubble.settings) {
+            [bubble setCount:bubble.current ? 0 : BadgeCountFor(bubble.account)];
+        }
     }
 }
 
@@ -831,7 +1052,8 @@ static __weak NFBAccountFan* gLiveFan = nil;
     }
     self.closing = YES;
     self.userInteractionEnabled = NO;
-    id account = chosen && !chosen.current ? chosen.account : nil;
+    id account = chosen && !chosen.current && !chosen.settings ? chosen.account : nil;
+    BOOL openOrder = chosen.settings;
     [UIView animateWithDuration:0.2
         animations:^{
             self.alpha = 0;
@@ -844,6 +1066,8 @@ static __weak NFBAccountFan* gLiveFan = nil;
             [self removeFromSuperview];
             if (account) {
                 SwitchToAccount(account);
+            } else if (openOrder) {
+                ShowOrderEditor();
             }
         }];
 }

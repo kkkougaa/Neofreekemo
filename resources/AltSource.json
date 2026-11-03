@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.26",
+      "subtitle": "NeoFreeBird version 7.3.27",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.27",
+          "buildVersion": "27",
+          "date": "2026-11-03T01:56:16Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.27/NeoFreeBird-Twitter-sideloaded_7.3.27_12.38.1.ipa",
+          "size": 266147180,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Version 7.3.27\n\nAccount bubbles\n- Profile pictures are kept on the device and only downloaded again when a profile picture changes\n\nFixed\n- Timeline filters can no longer leave a list outside Home (such as notifications) completely empty\n\nDebug\n- Shake dump has a Timeline Filter section"
+        },
         {
           "version": "7.3.26",
           "buildVersion": "26",

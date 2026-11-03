@@ -811,7 +811,7 @@ NSString* NFBTimelineFilterDebugText(void) {
     return gFilterLog.count ? [gFilterLog componentsJoinedByString:@"\n"] : @"(no filtering outside home yet)";
 }
 
-static NSUInteger ItemCount(NSArray* sections) {
+static NSUInteger SectionItemCount(NSArray* sections) {
     NSUInteger count = 0;
     for (id section in sections) {
         if ([section isKindOfClass:[NSArray class]]) {
@@ -833,8 +833,8 @@ static NSArray* FilteredTimelineSections(TFNItemsDataViewController* dataViewCon
     if (filtered == sections || IsHomeTimeline(dataViewController)) {
         return filtered;
     }
-    NSUInteger before = ItemCount(sections);
-    NSUInteger after = ItemCount(filtered);
+    NSUInteger before = SectionItemCount(sections);
+    NSUInteger after = SectionItemCount(filtered);
     NSString* name = NSStringFromClass(dataViewController.class);
     if (before > 0 && after == 0) {
         FilterNote([NSString stringWithFormat:@"%@: would remove all %lu items, kept them", name,

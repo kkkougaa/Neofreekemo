@@ -794,8 +794,60 @@ static NSSet<NSNumber*>* ConversationAuthorRepliedToUserIDs(NSArray* sections,
 
 @end
 
+// What the filter did outside the home timeline, for the shake dump.
+static NSMutableArray<NSString*>* gFilterLog;
+
+static void FilterNote(NSString* line) {
+    if (!gFilterLog) {
+        gFilterLog = [NSMutableArray array];
+    }
+    [gFilterLog addObject:line];
+    if (gFilterLog.count > 12) {
+        [gFilterLog removeObjectAtIndex:0];
+    }
+}
+
+NSString* NFBTimelineFilterDebugText(void) {
+    return gFilterLog.count ? [gFilterLog componentsJoinedByString:@"\n"] : @"(no filtering outside home yet)";
+}
+
+static NSUInteger ItemCount(NSArray* sections) {
+    NSUInteger count = 0;
+    for (id section in sections) {
+        if ([section isKindOfClass:[NSArray class]]) {
+            count += [(NSArray*)section count];
+        }
+    }
+    return count;
+}
+
+static NSArray* FilteredTimelineSectionsUnguarded(TFNItemsDataViewController* dataViewController,
+                                                  NSArray* sections);
+
+// Outside the home timeline (notifications, profiles, lists, search...), a
+// filter that would leave a non-empty list with nothing at all shows a blank
+// screen. Then the list is kept as X sent it.
 static NSArray* FilteredTimelineSections(TFNItemsDataViewController* dataViewController,
                                          NSArray* sections) {
+    NSArray* filtered = FilteredTimelineSectionsUnguarded(dataViewController, sections);
+    if (filtered == sections || IsHomeTimeline(dataViewController)) {
+        return filtered;
+    }
+    NSUInteger before = ItemCount(sections);
+    NSUInteger after = ItemCount(filtered);
+    NSString* name = NSStringFromClass(dataViewController.class);
+    if (before > 0 && after == 0) {
+        FilterNote([NSString stringWithFormat:@"%@: would remove all %lu items, kept them", name,
+                                              (unsigned long)before]);
+        return sections;
+    }
+    FilterNote([NSString stringWithFormat:@"%@: %lu -> %lu items", name, (unsigned long)before,
+                                          (unsigned long)after]);
+    return filtered;
+}
+
+static NSArray* FilteredTimelineSectionsUnguarded(TFNItemsDataViewController* dataViewController,
+                                                  NSArray* sections) {
     BHTimelineFilterContext* context =
         [BHTimelineFilterContext contextForDataViewController:dataViewController];
     if (!context.shouldFilter) {

@@ -28,6 +28,9 @@
 //
 //  7.3.25: a Liquid Glass gear at the far end of the arc opens a list where
 //  the accounts can be dragged into the order the circles use.
+//
+//  7.3.27: profile pictures are kept on disk (Application Support) and only
+//  downloaded again when an account's picture address changes.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -504,6 +507,134 @@ static NSCache<NSString*, UIImage*>* AvatarCache(void) {
     return cache;
 }
 
+// MARK: - Avatars kept on disk
+//
+// Library/Application Support/NFBAccountAvatars/<user id>.img, plus index.plist
+// mapping each user id to the profile_images address the file came from.
+// Application Support is never purged by iOS (unlike Caches), so a picture
+// stays until the account's address changes, which only happens when the
+// profile picture itself is changed. Index reads and writes stay on the main
+// thread; file writes go to a background queue.
+
+static NSString* AvatarDirectory(void) {
+    static NSString* directory;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURL* base = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                             inDomains:NSUserDomainMask].firstObject;
+        NSURL* folder = [base URLByAppendingPathComponent:@"NFBAccountAvatars" isDirectory:YES];
+        [[NSFileManager defaultManager] createDirectoryAtURL:folder
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:nil];
+        [folder setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+        directory = [folder.path copy];
+    });
+    return directory;
+}
+
+static NSString* AvatarFileKey(NSString* key) {
+    NSCharacterSet* bad = [[NSCharacterSet alphanumericCharacterSet] invertedSet];
+    return [[key componentsSeparatedByCharactersInSet:bad] componentsJoinedByString:@"_"];
+}
+
+static NSString* AvatarPath(NSString* key) {
+    return [AvatarDirectory() stringByAppendingPathComponent:[AvatarFileKey(key) stringByAppendingString:@".img"]];
+}
+
+static NSMutableDictionary<NSString*, NSString*>* AvatarIndex(void) {
+    static NSMutableDictionary* index;
+    if (!index) {
+        NSString* path = [AvatarDirectory() stringByAppendingPathComponent:@"index.plist"];
+        NSDictionary* saved = [NSDictionary dictionaryWithContentsOfFile:path];
+        index = [NSMutableDictionary dictionaryWithDictionary:saved ?: @{}];
+    }
+    return index;
+}
+
+static void SaveAvatarIndex(void) {
+    NSDictionary* snapshot = [AvatarIndex() copy];
+    NSString* path = [AvatarDirectory() stringByAppendingPathComponent:@"index.plist"];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [snapshot writeToFile:path atomically:YES];
+    });
+}
+
+// Memory first, then the file on disk.
+static UIImage* StoredAvatar(NSString* key) {
+    if (key.length == 0) {
+        return nil;
+    }
+    UIImage* image = [AvatarCache() objectForKey:key];
+    if (image) {
+        return image;
+    }
+    NSData* data = [NSData dataWithContentsOfFile:AvatarPath(key)];
+    image = data.length > 0 ? [UIImage imageWithData:data] : nil;
+    if (image) {
+        [AvatarCache() setObject:image forKey:key];
+    }
+    return image;
+}
+
+// Main thread. `source` is the profile_images address, or @"" when the picture
+// was taken from X's on-screen avatar and its address is not known yet.
+static void StoreAvatar(NSString* key, NSData* data, UIImage* image, NSString* source) {
+    if (key.length == 0 || !image) {
+        return;
+    }
+    [AvatarCache() setObject:image forKey:key];
+    NSData* bytes = data.length > 0 ? data : UIImagePNGRepresentation(image);
+    if (bytes.length == 0) {
+        return;
+    }
+    NSString* path = AvatarPath(key);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [bytes writeToFile:path atomically:YES];
+    });
+    AvatarIndex()[key] = source ?: @"";
+    SaveAvatarIndex();
+}
+
+// Hands back the stored picture right away, then a fresh one only if the
+// account's picture address differs from the one the stored file came from.
+// `done` runs on the main thread, once or twice.
+static void LoadAvatar(id account, void (^done)(UIImage* image)) {
+    NSString* key = AccountKey(account);
+    UIImage* stored = StoredAvatar(key);
+    if (!stored) {
+        stored = OnScreenAvatar(key);
+        if (stored) {
+            StoreAvatar(key, nil, stored, @"");
+        }
+    }
+    if (stored) {
+        done(stored);
+    }
+    NSURL* url = AccountImageURL(account);
+    if (!url || key.length == 0) {
+        return;
+    }
+    NSString* source = url.absoluteString;
+    if (stored && [AvatarIndex()[key] isEqualToString:source]) {
+        return;
+    }
+    [[[NSURLSession sharedSession]
+          dataTaskWithURL:url
+        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+            UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!image) {
+                    ProbeNote([NSString stringWithFormat:@"download failed %@: %@", url.host,
+                                                         error.localizedDescription ?: @"no image data"]);
+                    return;
+                }
+                StoreAvatar(key, data, image, source);
+                done(image);
+            });
+        }] resume];
+}
+
 static UIVisualEffect* BubbleEffect(void) {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     if (glassClass) {
@@ -706,32 +837,19 @@ static void Tick(void) {
     cell.detailTextLabel.text = name.length > 0 ? handle : nil;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
-    NSString* key = AccountKey(account);
-    UIImage* image = key ? [AvatarCache() objectForKey:key] : nil;
-    if (!image) {
-        image = OnScreenAvatar(key);
-    }
-    cell.imageView.image = image ? [self roundImage:image]
-                                 : [UIImage systemImageNamed:@"person.crop.circle.fill"];
+    cell.imageView.image = [UIImage systemImageNamed:@"person.crop.circle.fill"];
     cell.imageView.tintColor = [UIColor tertiaryLabelColor];
-    if (!image) {
-        NSURL* url = AccountImageURL(account);
-        if (url) {
-            __weak typeof(self) weakSelf = self;
-            [[[NSURLSession sharedSession]
-                  dataTaskWithURL:url
-                completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
-                    UIImage* loaded = data.length > 0 ? [UIImage imageWithData:data] : nil;
-                    if (!loaded || !key) {
-                        return;
-                    }
-                    [AvatarCache() setObject:loaded forKey:key];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [weakSelf.tableView reloadData];
-                    });
-                }] resume];
+    __weak UITableViewCell* weakCell = cell;
+    __weak typeof(self) weakSelf = self;
+    LoadAvatar(account, ^(UIImage* image) {
+        UITableViewCell* shown = weakCell;
+        NSIndexPath* path = shown ? [weakSelf.tableView indexPathForCell:shown] : nil;
+        if (!shown || (path && weakSelf.accounts[path.row] != account)) {
+            return;
         }
-    }
+        shown.imageView.image = [weakSelf roundImage:image];
+        [shown setNeedsLayout];
+    });
     return cell;
 }
 
@@ -929,47 +1047,10 @@ static __weak NFBAccountFan* gLiveFan = nil;
 }
 
 - (void)loadImageForBubble:(NFBAccountBubble*)bubble {
-    NSString* key = AccountKey(bubble.account);
-    UIImage* known = key ? [AvatarCache() objectForKey:key] : nil;
-    if (!known) {
-        known = OnScreenAvatar(key);
-        if (known) {
-            [AvatarCache() setObject:known forKey:key];
-        }
-    }
-    if (known) {
-        [bubble setImage:known];
-    }
-    NSURL* url = AccountImageURL(bubble.account);
-    if (!url) {
-        return;
-    }
-    UIImage* cached = [AvatarCache() objectForKey:url.absoluteString];
-    if (cached) {
-        [bubble setImage:cached];
-        return;
-    }
     __weak NFBAccountBubble* weakBubble = bubble;
-    [[[NSURLSession sharedSession]
-          dataTaskWithURL:url
-        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
-            UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
-            if (!image) {
-                NSString* line = [NSString stringWithFormat:@"download failed %@: %@", url.host,
-                                                            error.localizedDescription ?: @"no image data"];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    ProbeNote(line);
-                });
-                return;
-            }
-            [AvatarCache() setObject:image forKey:url.absoluteString];
-            if (key) {
-                [AvatarCache() setObject:image forKey:key];
-            }
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [weakBubble setImage:image];
-            });
-        }] resume];
+    LoadAvatar(bubble.account, ^(UIImage* image) {
+        [weakBubble setImage:image];
+    });
 }
 
 - (NFBAccountBubble*)bubbleNear:(CGPoint)point {

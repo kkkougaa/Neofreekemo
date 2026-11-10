@@ -2,47 +2,13 @@
 //  Chat.x
 //  NeoFreeBird
 //
-//  XChat's typing indicator has two carriers: a one-off POST to the
-//  jot/client_event analytics endpoint, and a periodic push over the
-//  persistent chat-ws.x.com websocket. The jot POST is blocked outright
-//  below (a normal NSURLSession data task). The websocket also carries
-//  message delivery/read-receipts/presence, so it can't be blocked outright
-//  -- instead, only the specific outgoing frame shape used for the typing
-//  heartbeat is dropped; everything else on the socket passes through
-//  untouched. See the field-shape comment on isTypingIndicatorFrame for how
-//  that shape was identified.
+//  Hide typing indicator: XChat's own "me typing" call is skipped
+//  (upstream e8159ed). Also the chat diagnostics for the shake dump, the
+//  chat button tint and the screenshot protection switch.
 //
 
 #import <string.h>
 #import "HookHelpers.h"
-
-// MARK: - Matching
-
-static BOOL isChatWebSocketURL(NSURL* url) {
-    if (!url) {
-        return NO;
-    }
-    return [url.host isEqualToString:@"chat-ws.x.com"];
-}
-
-// The chat socket's typing heartbeat is a Thrift TBinaryProtocol struct whose
-// second field -- the one that carries message text on a real send -- is an
-// empty string. Frames captured while actually sending messages never hit
-// -sendMessage: on this socket at all (message bodies go out over a separate
-// HTTP/GraphQL write), so this shape reliably identifies the heartbeat:
-//
-//   0c 0001                  STRUCT, field 1 (envelope)
-//     0b 0002 00000000        STRING, field 2, len=0   <- always empty on the ping
-//     0b 0003 ...              STRING, field 3          -- sender user ID
-//     ...
-static const uint8_t TypingIndicatorFramePrefix[] = {0x0c, 0x00, 0x01, 0x0b, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00};
-
-static BOOL isTypingIndicatorFrame(NSData* data) {
-    if (data.length < sizeof(TypingIndicatorFramePrefix)) {
-        return NO;
-    }
-    return memcmp(data.bytes, TypingIndicatorFramePrefix, sizeof(TypingIndicatorFramePrefix)) == 0;
-}
 
 // MARK: - Diagnostics (shake dump "== CHAT ==")
 //
@@ -54,17 +20,6 @@ static BOOL isTypingIndicatorFrame(NSData* data) {
 static NSMutableArray<NSString*>* gChatLog;
 static NSString* gChatLastKey;
 static NSUInteger gChatLastRepeat;
-static NSUInteger gFramesSent, gFramesDropped, gFramesReceived;
-
-static NSString* HexPrefix(NSData* data, NSUInteger limit) {
-    NSUInteger count = MIN(data.length, limit);
-    const uint8_t* bytes = data.bytes;
-    NSMutableString* hex = [NSMutableString stringWithCapacity:count * 2];
-    for (NSUInteger i = 0; i < count; i++) {
-        [hex appendFormat:@"%02x", bytes[i]];
-    }
-    return hex;
-}
 
 void NFBChatNote(NSString* line) {
     static NSDateFormatter* formatter;
@@ -98,10 +53,8 @@ void NFBChatNote(NSString* line) {
 
 NSString* NFBChatDebugText(void) {
     @synchronized([NSObject class]) {
-        NSString* head = [NSString
-            stringWithFormat:@"hide_typing_indicator=%d sent=%lu dropped=%lu received=%lu",
-                             [BHTSettings boolForKey:@"hide_typing_indicator"], (unsigned long)gFramesSent,
-                             (unsigned long)gFramesDropped, (unsigned long)gFramesReceived];
+        NSString* head = [NSString stringWithFormat:@"hide_typing_indicator=%d",
+                                                    [BHTSettings boolForKey:@"hide_typing_indicator"]];
         return gChatLog.count ? [head stringByAppendingFormat:@"\n%@", [gChatLog componentsJoinedByString:@"\n"]]
                               : [head stringByAppendingString:@"\n(nothing recorded yet)"];
     }
@@ -233,123 +186,19 @@ static void* NFBTaskWatcherKey = &NFBTaskWatcherKey;
 
 %end
 
-// MARK: - Chat websocket tagging
+// MARK: - Hide typing indicator (upstream e8159ed)
 
-static void* ChatSocketTagKey = &ChatSocketTagKey;
-
-static void tagIfChatSocket(NSURLSessionWebSocketTask* task, NSURL* url) {
-    if (task && isChatWebSocketURL(url)) {
-        NFBChatNote([NSString stringWithFormat:@"ws opened %@ (%@)", url.host, NSStringFromClass(object_getClass(task))]);
-        objc_setAssociatedObject(task, ChatSocketTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-}
-
-// MARK: - Dynamic swizzle for the real (private) websocket task class
-
-typedef void (*SendMessageIMP)(id, SEL, NSURLSessionWebSocketMessage*, void (^)(NSError* _Nullable));
-static SendMessageIMP OriginalSendMessageIMP;
-
-static void nfb_sendMessageReplacement(id self, SEL _cmd, NSURLSessionWebSocketMessage* message,
-                                       void (^completionHandler)(NSError* _Nullable)) {
-    BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
-    BOOL drop = tagged && message.data && isTypingIndicatorFrame(message.data) &&
-                [BHTSettings boolForKey:@"hide_typing_indicator"];
-    if (tagged) {
-        @synchronized([NSObject class]) {
-            gFramesSent++;
-            if (drop) {
-                gFramesDropped++;
-            }
-        }
-        NSString* what = message.data
-                             ? [NSString stringWithFormat:@"%lu B %@", (unsigned long)message.data.length,
-                                                          HexPrefix(message.data, 20)]
-                             : [NSString stringWithFormat:@"text %lu chars", (unsigned long)message.string.length];
-        NFBChatNote([NSString stringWithFormat:@"ws out %@ typingShape=%d %@", what,
-                                               message.data ? isTypingIndicatorFrame(message.data) : 0,
-                                               drop ? @"DROPPED" : @"sent"]);
-    }
-    if (drop) {
-        if (completionHandler) {
-            completionHandler(nil);
-        }
+%hook Subsystem_ios_iosArm64_mainXChatConnectionManagerImpl
+- (void)onMeTypingConversationId:(id)conversationID {
+    if ([BHTSettings boolForKey:@"hide_typing_indicator"]) {
+        NFBChatNote(@"typing indicator not sent");
         return;
     }
-    OriginalSendMessageIMP(self, _cmd, message, completionHandler);
+    %orig(conversationID);
 }
-
-typedef void (*ReceiveMessageIMP)(id, SEL, void (^)(NSURLSessionWebSocketMessage* _Nullable, NSError* _Nullable));
-static ReceiveMessageIMP OriginalReceiveMessageIMP;
-
-static void nfb_receiveMessageReplacement(id self, SEL _cmd,
-                                          void (^completionHandler)(NSURLSessionWebSocketMessage* _Nullable,
-                                                                    NSError* _Nullable)) {
-    BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
-    if (!tagged || !completionHandler) {
-        OriginalReceiveMessageIMP(self, _cmd, completionHandler);
-        return;
-    }
-    OriginalReceiveMessageIMP(self, _cmd, ^(NSURLSessionWebSocketMessage* message, NSError* error) {
-        @synchronized([NSObject class]) {
-            gFramesReceived++;
-        }
-        if (error) {
-            NFBChatNote([NSString stringWithFormat:@"ws in error %@", error.localizedDescription]);
-        } else if (message.data) {
-            NFBChatNote([NSString stringWithFormat:@"ws in %lu B %@", (unsigned long)message.data.length,
-                                                   HexPrefix(message.data, 16)]);
-        } else {
-            NFBChatNote([NSString stringWithFormat:@"ws in text %lu chars", (unsigned long)message.string.length]);
-        }
-        completionHandler(message, error);
-    });
-}
-
-static void nfb_swizzleSendMessageIfNeeded(NSURLSessionWebSocketTask* task) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        Class realClass = object_getClass(task);
-        SEL selector = @selector(sendMessage:completionHandler:);
-        Method method = class_getInstanceMethod(realClass, selector);
-        if (!method) {
-            return;
-        }
-        OriginalSendMessageIMP = (SendMessageIMP)method_getImplementation(method);
-        method_setImplementation(method, (IMP)nfb_sendMessageReplacement);
-        Method receive = class_getInstanceMethod(realClass, @selector(receiveMessageWithCompletionHandler:));
-        if (receive) {
-            OriginalReceiveMessageIMP = (ReceiveMessageIMP)method_getImplementation(receive);
-            method_setImplementation(receive, (IMP)nfb_receiveMessageReplacement);
-        }
-    });
-}
-
-// MARK: - Hooks
-
-%hook NSURLSession
-
-- (NSURLSessionWebSocketTask*)webSocketTaskWithURL:(NSURL*)url {
-    NSURLSessionWebSocketTask* task = %orig;
-    nfb_swizzleSendMessageIfNeeded(task);
-    tagIfChatSocket(task, url);
-    return task;
-}
-
-- (NSURLSessionWebSocketTask*)webSocketTaskWithURL:(NSURL*)url protocols:(NSArray<NSString*>*)protocols {
-    NSURLSessionWebSocketTask* task = %orig;
-    nfb_swizzleSendMessageIfNeeded(task);
-    tagIfChatSocket(task, url);
-    return task;
-}
-
-- (NSURLSessionWebSocketTask*)webSocketTaskWithRequest:(NSURLRequest*)request {
-    NSURLSessionWebSocketTask* task = %orig;
-    nfb_swizzleSendMessageIfNeeded(task);
-    tagIfChatSocket(task, request.URL);
-    return task;
-}
-
 %end
+
+// MARK: - Tint chat buttons
 
 static void nfb_applyChatScreenTint(UIView* view) {
     if ([BHTSettings boolForKey:@"tab_bar_theming"]) {

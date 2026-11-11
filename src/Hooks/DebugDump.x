@@ -18,6 +18,7 @@ extern NSString* BHTMediaProbeSummary(void);
 extern NSString* NFBBubbleDebugText(void);
 extern NSString* NFBAccountBubblesDebugText(void);
 extern NSString* NFBTimelineFilterDebugText(void);
+extern NSString* NFBChatDebugText(void);
 extern NSString* NFBStringProbeText(void);
 
 static const NSUInteger kMaxLines = 200;
@@ -405,6 +406,7 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== BUBBLE STATE ==%c%@%c", 10, NFBBubbleDebugText(), 10];
     [out appendFormat:@"== ACCOUNT BUBBLES ==%c%@%c", 10, NFBAccountBubblesDebugText(), 10];
     [out appendFormat:@"== TIMELINE FILTER ==%c%@%c", 10, NFBTimelineFilterDebugText(), 10];
+    [out appendFormat:@"== CHAT ==%c%@%c", 10, NFBChatDebugText(), 10];
     [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
 
     // The drawer's controller: which methods it has (to see who rebuilds the menu list).

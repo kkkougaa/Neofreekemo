@@ -723,6 +723,9 @@ static NSInteger FirstInteger(NSString* text) {
 }
 
 // Unread counts the tab bar exposes through accessibility, keyed "dm" / "notifications".
+extern void NFBChatNote(NSString* line);
+static NSString* gDMBadgeRaw;
+
 static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
     NSArray* dmWords = @[ @"쪽지", @"메시지", @"DM", @"Messages", @"Message", @"Chat", @"채팅", @"メッセージ", @"チャット" ];
     NSArray* notificationWords = @[ @"알림", @"Notifications", @"通知", @"お知らせ" ];
@@ -758,6 +761,10 @@ static NSDictionary<NSString*, NSNumber*>* ScanBadges(UIWindow* window) {
                 }
                 if (!found[kind] || count > [found[kind] integerValue]) {
                     found[kind] = @(count);
+                    if ([kind isEqualToString:@"dm"]) {
+                        gDMBadgeRaw = [NSString stringWithFormat:@"%@ | %@ | %@", NSStringFromClass(view.class), label,
+                                                                 view.accessibilityValue ?: @"-"];
+                    }
                 }
             }
         }
@@ -831,6 +838,11 @@ static NSString* CurrentAccountKey(void) {
 
 static void CheckBadges(UIWindow* window) {
     NSDictionary<NSString*, NSNumber*>* now = ScanBadges(window);
+    static NSNumber* lastDM;
+    if (now[@"dm"] && ![now[@"dm"] isEqual:lastDM]) {
+        NFBChatNote([NSString stringWithFormat:@"tab badge dm %@ -> %@ [%@]", lastDM ?: @"?", now[@"dm"], gDMBadgeRaw]);
+        lastDM = now[@"dm"];
+    }
     gLastScanText = [NSString stringWithFormat:@"%@ at %@", now, [NSDate date]];
     NSString* accountKey = CurrentAccountKey();
     BOOL switched = gAccountKey && accountKey && ![gAccountKey isEqualToString:accountKey];

@@ -44,12 +44,108 @@ static BOOL isTypingIndicatorFrame(NSData* data) {
     return memcmp(data.bytes, TypingIndicatorFramePrefix, sizeof(TypingIndicatorFramePrefix)) == 0;
 }
 
+// MARK: - Diagnostics (shake dump "== CHAT ==")
+//
+// Records what goes over the chat socket and which DM / read / badge requests
+// are made, to find out why the Chat tab can keep an unread badge. Repeated
+// identical lines (the typing heartbeat, keep-alives) are collapsed with a
+// count instead of filling the log.
+
+static NSMutableArray<NSString*>* gChatLog;
+static NSString* gChatLastKey;
+static NSUInteger gChatLastRepeat;
+static NSUInteger gFramesSent, gFramesDropped, gFramesReceived;
+
+static NSString* HexPrefix(NSData* data, NSUInteger limit) {
+    NSUInteger count = MIN(data.length, limit);
+    const uint8_t* bytes = data.bytes;
+    NSMutableString* hex = [NSMutableString stringWithCapacity:count * 2];
+    for (NSUInteger i = 0; i < count; i++) {
+        [hex appendFormat:@"%02x", bytes[i]];
+    }
+    return hex;
+}
+
+void NFBChatNote(NSString* line) {
+    static NSDateFormatter* formatter;
+    @synchronized([NSObject class]) {
+        if (!formatter) {
+            formatter = [NSDateFormatter new];
+            formatter.dateFormat = @"HH:mm:ss";
+        }
+        if (!gChatLog) {
+            gChatLog = [NSMutableArray array];
+        }
+        if ([line isEqualToString:gChatLastKey] && gChatLog.count > 0) {
+            gChatLastRepeat++;
+            NSString* last = gChatLog.lastObject;
+            NSRange mark = [last rangeOfString:@" (x" options:NSBackwardsSearch];
+            if (mark.location != NSNotFound) {
+                last = [last substringToIndex:mark.location];
+            }
+            gChatLog[gChatLog.count - 1] =
+                [NSString stringWithFormat:@"%@ (x%lu)", last, (unsigned long)gChatLastRepeat + 1];
+            return;
+        }
+        gChatLastKey = [line copy];
+        gChatLastRepeat = 0;
+        [gChatLog addObject:[NSString stringWithFormat:@"%@ %@", [formatter stringFromDate:[NSDate date]], line]];
+        if (gChatLog.count > 60) {
+            [gChatLog removeObjectAtIndex:0];
+        }
+    }
+}
+
+NSString* NFBChatDebugText(void) {
+    @synchronized([NSObject class]) {
+        NSString* head = [NSString
+            stringWithFormat:@"hide_typing_indicator=%d sent=%lu dropped=%lu received=%lu",
+                             [BHTSettings boolForKey:@"hide_typing_indicator"], (unsigned long)gFramesSent,
+                             (unsigned long)gFramesDropped, (unsigned long)gFramesReceived];
+        return gChatLog.count ? [head stringByAppendingFormat:@"\n%@", [gChatLog componentsJoinedByString:@"\n"]]
+                              : [head stringByAppendingString:@"\n(nothing recorded yet)"];
+    }
+}
+
+static BOOL IsChatRelatedPath(NSString* path) {
+    NSString* lower = path.lowercaseString;
+    for (NSString* word in @[ @"/dm", @"dm_", @"chat", @"inbox", @"conversation", @"seen", @"unread", @"badge",
+                              @"markread", @"mark_read", @"lastread", @"last_read" ]) {
+        if ([lower containsString:word]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+%hook TNLResponseInfo
+
+- (instancetype)initWithFinalURLRequest:(NSURLRequest*)request
+                            URLResponse:(NSURLResponse*)response
+                                 source:(NSInteger)source
+                                   data:(NSData*)data
+                     temporarySavedFile:(id)temporarySavedFile {
+    NSURL* url = request.URL;
+    if (url && IsChatRelatedPath(url.path)) {
+        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+                               ? ((NSHTTPURLResponse*)response).statusCode
+                               : -1;
+        NSString* path = url.path.length > 90 ? [url.path substringFromIndex:url.path.length - 90] : url.path;
+        NFBChatNote([NSString stringWithFormat:@"http %@ %@ -> %ld (%lu B)", request.HTTPMethod ?: @"GET", path,
+                                               (long)status, (unsigned long)data.length]);
+    }
+    return %orig;
+}
+
+%end
+
 // MARK: - Chat websocket tagging
 
 static void* ChatSocketTagKey = &ChatSocketTagKey;
 
 static void tagIfChatSocket(NSURLSessionWebSocketTask* task, NSURL* url) {
     if (task && isChatWebSocketURL(url)) {
+        NFBChatNote([NSString stringWithFormat:@"ws opened %@ (%@)", url.host, NSStringFromClass(object_getClass(task))]);
         objc_setAssociatedObject(task, ChatSocketTagKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
@@ -62,14 +158,57 @@ static SendMessageIMP OriginalSendMessageIMP;
 static void nfb_sendMessageReplacement(id self, SEL _cmd, NSURLSessionWebSocketMessage* message,
                                        void (^completionHandler)(NSError* _Nullable)) {
     BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
-    if (tagged && message.data && isTypingIndicatorFrame(message.data) &&
-        [BHTSettings boolForKey:@"hide_typing_indicator"]) {
+    BOOL drop = tagged && message.data && isTypingIndicatorFrame(message.data) &&
+                [BHTSettings boolForKey:@"hide_typing_indicator"];
+    if (tagged) {
+        @synchronized([NSObject class]) {
+            gFramesSent++;
+            if (drop) {
+                gFramesDropped++;
+            }
+        }
+        NSString* what = message.data
+                             ? [NSString stringWithFormat:@"%lu B %@", (unsigned long)message.data.length,
+                                                          HexPrefix(message.data, 20)]
+                             : [NSString stringWithFormat:@"text %lu chars", (unsigned long)message.string.length];
+        NFBChatNote([NSString stringWithFormat:@"ws out %@ typingShape=%d %@", what,
+                                               message.data ? isTypingIndicatorFrame(message.data) : 0,
+                                               drop ? @"DROPPED" : @"sent"]);
+    }
+    if (drop) {
         if (completionHandler) {
             completionHandler(nil);
         }
         return;
     }
     OriginalSendMessageIMP(self, _cmd, message, completionHandler);
+}
+
+typedef void (*ReceiveMessageIMP)(id, SEL, void (^)(NSURLSessionWebSocketMessage* _Nullable, NSError* _Nullable));
+static ReceiveMessageIMP OriginalReceiveMessageIMP;
+
+static void nfb_receiveMessageReplacement(id self, SEL _cmd,
+                                          void (^completionHandler)(NSURLSessionWebSocketMessage* _Nullable,
+                                                                    NSError* _Nullable)) {
+    BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
+    if (!tagged || !completionHandler) {
+        OriginalReceiveMessageIMP(self, _cmd, completionHandler);
+        return;
+    }
+    OriginalReceiveMessageIMP(self, _cmd, ^(NSURLSessionWebSocketMessage* message, NSError* error) {
+        @synchronized([NSObject class]) {
+            gFramesReceived++;
+        }
+        if (error) {
+            NFBChatNote([NSString stringWithFormat:@"ws in error %@", error.localizedDescription]);
+        } else if (message.data) {
+            NFBChatNote([NSString stringWithFormat:@"ws in %lu B %@", (unsigned long)message.data.length,
+                                                   HexPrefix(message.data, 16)]);
+        } else {
+            NFBChatNote([NSString stringWithFormat:@"ws in text %lu chars", (unsigned long)message.string.length]);
+        }
+        completionHandler(message, error);
+    });
 }
 
 static void nfb_swizzleSendMessageIfNeeded(NSURLSessionWebSocketTask* task) {
@@ -83,6 +222,11 @@ static void nfb_swizzleSendMessageIfNeeded(NSURLSessionWebSocketTask* task) {
         }
         OriginalSendMessageIMP = (SendMessageIMP)method_getImplementation(method);
         method_setImplementation(method, (IMP)nfb_sendMessageReplacement);
+        Method receive = class_getInstanceMethod(realClass, @selector(receiveMessageWithCompletionHandler:));
+        if (receive) {
+            OriginalReceiveMessageIMP = (ReceiveMessageIMP)method_getImplementation(receive);
+            method_setImplementation(receive, (IMP)nfb_receiveMessageReplacement);
+        }
     });
 }
 

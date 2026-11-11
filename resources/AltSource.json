@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.29",
+      "subtitle": "NeoFreeBird version 7.3.30",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.30",
+          "buildVersion": "30",
+          "date": "2026-11-11T07:24:01Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.30/NeoFreeBird-Twitter-sideloaded_7.3.30_12.38.1.ipa",
+          "size": 266183070,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Version 7.3.30\n\nSettings backup\n- Now also carries D-day events, account aliases, highlight keywords, account bubble order and the custom accent colour\n- Logins, tokens, drafts and history are still left out on purpose"
+        },
         {
           "version": "7.3.29",
           "buildVersion": "29",

@@ -35,6 +35,16 @@ static NSString* const kPrimaryIconSentinel = @"PrimaryIcon";
 
 static NSArray* skippedKeys = @[@"custom_send_sound_name"];
 
+// kemo (this fork) lists kept straight in NSUserDefaults by their own stores,
+// outside the settings registry. Account logins, Spotify tokens, drafts,
+// history and caches are deliberately not carried: a backup code can be
+// pasted anywhere, so it holds choices only, never credentials or content.
+static NSString* const kCustomColorKey = @"bh_color_theme_customColor";
+static NSString* const kKemoEventsKey = @"kemo_events";               // BHTEvents
+static NSString* const kKemoAliasesKey = @"kemo_account_aliases";     // BHTAliases
+static NSString* const kKemoKeywordsKey = @"kemo_highlight_keywords"; // BHTKeywords
+static NSString* const kKemoBubbleOrderKey = @"kemo_account_bubble_order"; // AccountBubbles.x
+
 // The tab registry (every tab seen on this device) is deliberately absent: it
 // is captured metadata, not a choice, and is rebuilt on launch.
 static NSDictionary<NSString*, Class>* BHTExtraTransferableKeys(void) {
@@ -43,8 +53,13 @@ static NSDictionary<NSString*, Class>* BHTExtraTransferableKeys(void) {
     dispatch_once(&onceToken, ^{
         keys = @{
             kAccentColorKey: [NSNumber class],
+            kCustomColorKey: [NSArray class],
             kVisibleTabsKey: [NSArray class],
-            kAppIconKey: [NSString class]
+            kAppIconKey: [NSString class],
+            kKemoEventsKey: [NSArray class],
+            kKemoAliasesKey: [NSDictionary class],
+            kKemoKeywordsKey: [NSArray class],
+            kKemoBubbleOrderKey: [NSArray class]
         };
     });
     return keys;
@@ -71,14 +86,35 @@ static NSDictionary<NSString*, Class>* BHTTransferableKeyClasses(void) {
 }
 
 // Guards against a hand-edited file: a string where a switch belongs would be
-// read back as a truthy value forever after.
-static BOOL BHTValueMatchesClass(id value, Class expected) {
+// read back as a truthy value forever after. Lists and dictionaries are
+// checked down to their elements, per key.
+static BOOL BHTIsEventEntry(id element) {
+    if (![element isKindOfClass:[NSDictionary class]]) {
+        return NO;
+    }
+    NSDictionary* event = element;
+    return [event[@"name"] isKindOfClass:[NSString class]] && [event[@"time"] isKindOfClass:[NSNumber class]] &&
+           (!event[@"handle"] || [event[@"handle"] isKindOfClass:[NSString class]]);
+}
+
+static BOOL BHTValueMatchesClass(id value, Class expected, NSString* key) {
     if (![value isKindOfClass:expected]) {
         return NO;
     }
     if (expected == [NSArray class]) {
         for (id element in (NSArray*)value) {
-            if (![element isKindOfClass:[NSString class]]) {
+            BOOL ok = [key isEqualToString:kCustomColorKey]  ? [element isKindOfClass:[NSNumber class]]
+                      : [key isEqualToString:kKemoEventsKey] ? BHTIsEventEntry(element)
+                                                             : [element isKindOfClass:[NSString class]];
+            if (!ok) {
+                return NO;
+            }
+        }
+    }
+    if (expected == [NSDictionary class]) {
+        for (id entryKey in (NSDictionary*)value) {
+            if (![entryKey isKindOfClass:[NSString class]] ||
+                ![((NSDictionary*)value)[entryKey] isKindOfClass:[NSString class]]) {
                 return NO;
             }
         }
@@ -110,7 +146,7 @@ static NSError* BHTTransferError(BHTSettingsTransferErrorCode code, NSString* me
             // writing it out keeps the import deterministic. Text and list
             // preferences have no default worth recording.
             id value = [defaults objectForKey:key] ?: [BHTSettings settingForKey:key][@"default"];
-            if (value && BHTValueMatchesClass(value, expected)) {
+            if (value && BHTValueMatchesClass(value, expected, key)) {
                 settings[key] = value;
             }
         }];
@@ -224,7 +260,7 @@ static NSError* BHTTransferError(BHTSettingsTransferErrorCode code, NSString* me
         // Unknown keys are skipped rather than written through: an export from a
         // newer build should still import everything this one understands.
         if (!expected || ![key isKindOfClass:[NSString class]] ||
-            !BHTValueMatchesClass(value, expected)) {
+            !BHTValueMatchesClass(value, expected, key)) {
             return;
         }
         [defaults setObject:value forKey:key];

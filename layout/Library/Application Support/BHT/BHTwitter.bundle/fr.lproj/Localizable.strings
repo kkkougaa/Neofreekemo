@@ -574,3 +574,4 @@
 
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "Bienvenue !";
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "Assurez-vous d’avoir installé NeoFreeBird depuis notre dépôt GitHub officiel. Nous ne pouvons pas vous aider à résoudre les problèmes liés à des fichiers IPA provenant d’autres sources, et vous ne pouvez pas être certain que votre version est exempte de code malveillant. Si vous avez des questions, veuillez ouvrir un ticket sur GitHub.";
+"KEMO_ISLAND_LOGO_TITLE" = "Slime character hanging from the Dynamic Island";

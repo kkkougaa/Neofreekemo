@@ -574,3 +574,4 @@
 
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "歡迎使用！";
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "請確認你是從官方 GitHub 安裝 NeoFreeBird。若使用其他來源的 IPA，我們不僅無法協助排解問題，這類版本也可能暗藏惡意程式碼。如有任何疑問，請至 GitHub 提交 Issue。";
+"KEMO_ISLAND_LOGO_TITLE" = "Slime character hanging from the Dynamic Island";

@@ -526,3 +526,4 @@
 "SETTINGS_CODE_TOO_BIG" = "클립보드에 복사했어요. 백업이 길어 QR은 만들지 못했어요.";
 "SETTINGS_CODE_EMPTY" = "클립보드에 설정 코드가 없어요.";
 "SETTINGS_CODE_RESTORED" = "%ld개 설정을 복원했어요";
+"KEMO_ISLAND_LOGO_TITLE" = "다이나믹 아일랜드에 슬라임 캐릭터 매달기";

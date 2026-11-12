@@ -1028,8 +1028,8 @@ static const CGFloat kSlimeTuck = 4.0; // how far its top edge sits up under the
 // (the body's own edge: the paw and the phone it holds are left out on the left).
 // The liquid junction below hugs these edges.
 static const CGFloat kSlimeEdges[][2] = {
-    {0.150,0.850}, {0.111,0.910}, {0.094,0.944}, {0.085,0.970}, {0.085,0.983}, {0.100,0.996}, {0.110,1.000},
-    {0.130,1.000}, {0.160,0.872}, {0.180,0.936}, {0.200,0.974}, {0.215,0.966}, {0.230,0.936}, {0.240,0.949},
+    {0.150,0.850}, {0.111,0.910}, {0.094,0.932}, {0.085,0.889}, {0.085,0.872}, {0.100,0.850}, {0.110,0.850},
+    {0.130,0.902}, {0.160,0.872}, {0.180,0.936}, {0.200,0.974}, {0.215,0.966}, {0.230,0.936}, {0.240,0.949},
     {0.252,0.979}, {0.256,0.996}, {0.295,0.979}, {0.303,0.944}, {0.325,0.953}, {0.355,0.962}, {0.333,0.966},
     {0.350,0.970}, {0.397,0.970}, {0.397,0.970}, {0.402,0.970}, {0.406,0.966}, {0.415,0.962}, {0.423,0.957},
     {0.436,0.944}, {0.449,0.936}, {0.466,0.919}, {0.487,0.897}, {0.509,0.547},
@@ -1087,7 +1087,13 @@ static const NSInteger kSlimeSubsteps = 4;
 static const void* kHiddenByIslandKey = &kHiddenByIslandKey;
 
 static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
-    if (!logo || [objc_getAssociatedObject(logo, kHiddenByIslandKey) boolValue] == hide) {
+    if (!logo) {
+        return;
+    }
+    BOOL ours = [objc_getAssociatedObject(logo, kHiddenByIslandKey) boolValue];
+    // Hiding is checked against the layer itself, not only our flag: the app sometimes
+    // puts the logo's opacity back on its own (a new bar, a fade), and the logo showed.
+    if (hide ? (ours && logo.layer.opacity == 0) : !ours) {
         return;
     }
     [CATransaction begin];
@@ -1239,7 +1245,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
             // A slow, uneven breeze, stronger toward the head.
             CGFloat breeze = (sin(self.clock * 1.3 + depth * 0.9) + 0.4 * sin(self.clock * 3.1)) * 70 * depth;
             CGPoint p = _points[i];
-            CGPoint v = CGPointMake((p.x - _previous[i].x) * 0.985, (p.y - _previous[i].y) * 0.985);
+            CGPoint v = CGPointMake((p.x - _previous[i].x) * 0.975, (p.y - _previous[i].y) * 0.975);
             _previous[i] = p;
             _points[i] = CGPointMake(p.x + v.x + breeze * h * h, p.y + v.y + gravity * h * h);
         }
@@ -1354,6 +1360,22 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     if (!self.container) {
         [self buildLayersIn:window];
     }
+    // Only on the home timeline: once its logo is off screen (another tab, a pushed page
+    // such as settings) or something is presented over it, the slime is gone at once.
+    UIImageView* logo = self.logo;
+    BOOL onTimeline = logo && logo.window == window && !window.rootViewController.presentedViewController;
+    if (!onTimeline) {
+        self.out = 0;
+        self.velocity = 0;
+        self.thumped = NO;
+        _pointsReady = NO;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.container.hidden = YES;
+        [CATransaction commit];
+        return;
+    }
+    SetLogoHiddenByIsland(logo, YES);
     if (self.container.superlayer != window.layer) {
         [window.layer addSublayer:self.container];
     }
@@ -1385,11 +1407,11 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
         self.out = target;
         self.velocity = 0;
     } else {
-        // How far out rides a spring: underdamped coming out (it overshoots and the body
-        // stretches), slower and steadier going in (a slurp, the head dragged in last).
-        // The rig adds the follow-through on top.
+        // How far out rides a spring: coming out a little underdamped (a soft boing, not a
+        // big stretch), going in steadier (a slurp, the head dragged in last). The rig adds
+        // the follow-through on top. Both run 1.3x the first version's speed.
         BOOL comingOut = target > self.out;
-        CGFloat stiffness = comingOut ? 130 : 30, damping = comingOut ? 9 : 10;
+        CGFloat stiffness = comingOut ? 220 : 51, damping = comingOut ? 17 : 13;
         CGFloat before = self.velocity;
         self.velocity += (stiffness * (target - self.out) - damping * self.velocity) * dt;
         self.out = MAX(0, self.out + self.velocity * dt);
@@ -1404,7 +1426,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     // (so the head is dragged in last); past full length the bones stretch instead, so
     // it never comes loose from the island.
     CGFloat depth = MAX(0, 1 - self.out);
-    CGFloat breathe = still ? 0 : sin(self.clock * 2.4) * 0.012;
+    CGFloat breathe = still ? 0 : sin(self.clock * 2.0) * 0.03; // breathing, slow and visible
     CGFloat length = MAX(1, self.out) * (1 + breathe);
     CGPoint anchor = CGPointMake(CGRectGetMidX(window.bounds),
                                  IslandBottom(window) - kSlimeTuck - depth * (self.slimeSize.height + 4));

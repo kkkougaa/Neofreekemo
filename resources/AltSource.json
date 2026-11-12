@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.35",
+      "subtitle": "NeoFreeBird version 7.3.36",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.36",
+          "buildVersion": "36",
+          "date": "2026-11-12T07:20:32Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.36/NeoFreeBird-Twitter-sideloaded_7.3.36_12.38.1.ipa",
+          "size": 266182905,
+          "minOSVersion": "15.0",
+          "localizedDescription": "다이나믹 아일랜드 슬라임 기능을 뺐어요. 헤더 로고와 말풍선은 예전처럼 동작해요."
+        },
         {
           "version": "7.3.35",
           "buildVersion": "35",

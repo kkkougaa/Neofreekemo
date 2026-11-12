@@ -25,3 +25,16 @@ in the order above.
   expression sheet, climbing the pill ends to look at the clock and battery,
   falling and reuniting by a goo thread, music mode on a wide island).
 - `sheet.py`: the close-up expression sheet.
+
+## Draft v3
+
+- Body drawn on a shared-vertex mesh along the spine (`Rig.warp`), so bends never
+  open cracks; parts are placed with the same mesh mapping. In the app this maps
+  to SpriteKit's `SKWarpGeometryGrid`.
+- `meniscus.py`: liquid junction where the body leaves the island: concave
+  Bezier fillets tangent to the pill outline (flat middle, round ends) and to the
+  body edge (`edges.json`), plus a solid neck.
+- Stretchy-arm wave; only "sleepy" kept among the new expressions; no climbing.
+- `sceneA.py`: island close-up. `sceneB.py`: full-screen fall (pinch off,
+  teardrop, splat on the tab bar, rise upright with legs, hops, melt, strand
+  from the island sucks it back, re-emerge).

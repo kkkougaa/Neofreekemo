@@ -1,5 +1,6 @@
 """Slime rig engine, draft v2. World units are points; images are the slime_*.png parts."""
 import math,json,random
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 class Rig:
     PARTS=['base','paw','earLBase','earLTip','earRBase','earRTip','phone','lid','oval','mouth','furA','furB','furC','furD','furE','furF']
@@ -9,7 +10,8 @@ class Rig:
         s.IMG={n:Image.open(f'{B}/slime_{n}.png') for n in s.PARTS}
         s.PIV={k:(u*s.W,v*s.H) for k,(u,v) in meta['pivots'].items()}
         s.TIP={k:(u*s.W,v*s.H) for k,(u,v) in meta['tips'].items()}
-        s.NB=14; s.bandH=s.H/s.NB
+        s.NB=14; s.bandH=s.H/s.NB; s.COLS=7
+        s.SRC={n:np.asarray(s.IMG[n].convert('RGBA'),dtype=np.float32) for n in ('base',)}
         s.pts=[[0,0] for _ in range(s.NB+1)]; s.prev=[[0,0] for _ in range(s.NB+1)]; s.ready=False
         s.bones={}; s.order=[]
         def bone(n,parent,k,c,gain,limit):
@@ -18,7 +20,7 @@ class Rig:
         bone('earLBase',None,140,10,0.5,0.4); bone('earLTip','earLBase',95,7,0.7,0.5)
         bone('earRBase',None,140,10,0.5,0.4); bone('earRTip','earRBase',95,7,0.7,0.5)
         for f in 'ABCDEF': bone('fur'+f,None,230,10,0.8,0.3)
-        bone('phone',None,120,10,0.25,0.3); bone('paw',None,160,11,0.3,1.0)
+        bone('phone',None,120,10,0.25,0.3); bone('paw',None,160,11,0.3,1.5)
         s.ramp=0
         # eye shapes, drawn where the eye is (upside down, like the character)
         oc=(0.5203*s.W,0.431*s.H)
@@ -51,7 +53,7 @@ class Rig:
          'dizzy':    dict(oval=1,eyeScale=1,lid=0.3,lidRot=0.15,mouth=1.1,perk=-0.4,shape='spiral'),
          'curious':  dict(oval=1,eyeScale=1.12,lid=0.9,lidRot=-0.12,mouth=1.0,perk=1.2,shape='oval'),
         }
-        s.expr='normal'; s.phone=[0.0,0.0]; s.phoneWanted=0.0; s.wave=0.0
+        s.expr='normal'; s.phone=[0.0,0.0]; s.phoneWanted=0.0; s.wave=0.0; s.arm=[0.0,0.0]
     # ------------------------------------------------------------- body
     def reset(s,anchor,length=1.0,rootDir=(0,1)):
         rest=s.bandH*length
@@ -92,10 +94,30 @@ class Rig:
             if st<1: w=min(w,1.15*squeeze)
             out.append((a,math.atan2(-dx,dy),w,max(st,1e-3)))
         return out
+    def joints(s,B):
+        """per joint: position, unit tangent (down the body), width scale. Neighbouring
+        bones share each joint, so the mesh built on them has no gaps."""
+        NB=s.NB; d=[(-math.sin(b[1]),math.cos(b[1])) for b in B]
+        J=[]
+        for i in range(NB+1):
+            P=B[i][0] if i<NB else s.pts[NB]
+            if i==0: t=d[0]; w=B[0][2]
+            elif i==NB: t=d[NB-1]; w=B[NB-1][2]
+            else:
+                t=(d[i-1][0]+d[i][0],d[i-1][1]+d[i][1]); l=math.hypot(*t) or 1; t=(t[0]/l,t[1]/l); w=(B[i-1][2]+B[i][2])/2
+            J.append((tuple(P),t,w))
+        return J
     def body_xform(s,u,v,B):
-        i=min(s.NB-1,max(0,int(v/s.bandH))); a,ang,w,st=B[i]
-        lx=(u-s.W/2)*w; ly=(v-i*s.bandH)*st; c,sn=math.cos(ang),math.sin(ang)
-        return (a[0]+c*lx-sn*ly,a[1]+sn*lx+c*ly),ang,w,st
+        J=s._J if getattr(s,'_Jkey',None) is B else s.joints(B)
+        s._J=J; s._Jkey=B
+        f=max(0.0,min(s.NB-1e-6,v/s.bandH)); i=int(f); t=f-i
+        (P0,t0,w0),(P1,t1,w1)=J[i],J[i+1]
+        tx,ty=t0[0]+(t1[0]-t0[0])*t,t0[1]+(t1[1]-t0[1])*t; l=math.hypot(tx,ty) or 1; tx,ty=tx/l,ty/l
+        w=w0+(w1-w0)*t; ox=(u-s.W/2)
+        n0=(t0[1]*w0,-t0[0]*w0); n1=(t1[1]*w1,-t1[0]*w1)
+        nx=n0[0]+(n1[0]-n0[0])*t; ny=n0[1]+(n1[1]-n0[1])*t
+        P=(P0[0]+(P1[0]-P0[0])*t+nx*ox, P0[1]+(P1[1]-P0[1])*t+ny*ox)
+        return P,math.atan2(-tx,ty),w,B[i][3]
     # ------------------------------------------------------------- secondary bones
     def bone_world(s,n,B,cache):
         if n in cache: return cache[n]
@@ -132,7 +154,9 @@ class Rig:
         s.bones['earLBase']['target']=-0.22*f['perk']; s.bones['earRBase']['target']=0.22*f['perk']
         s.bones['earLTip']['target']=-0.12*min(0,f['perk']); s.bones['earRTip']['target']=0.12*min(0,f['perk'])
         p=s.phone; p[1]+=(160*(s.phoneWanted-p[0])-11*p[1])*dt; p[0]+=p[1]*dt
-        s.bones['paw']['target']=s.wave*0.55*math.sin(clock*10)+s.wave*0.35
+        # waving: the arm stretches out like goo (spring, overshoots), the paw swings on it
+        a=s.arm; a[1]+=(170*(s.wave-a[0])-12*a[1])*dt; a[0]+=a[1]*dt
+        s.bones['paw']['target']=s.wave*(0.9*math.sin(clock*11)-0.5)
     # ------------------------------------------------------------- render
     def paste(s,canvas,K,img,piv,P,ang,sx,sy):
         px,py=piv; c,sn=math.cos(ang),math.sin(ang)
@@ -150,13 +174,20 @@ class Rig:
                 k=0.35+0.65*max(0,min(1.15,o)); ang+=(1-o)*0.7; sx*=k; sy*=k
             if n.startswith('ear'): sy*=1+0.07*s.face['perk']*(1 if n.endswith('Base') else 0.5)
             s.paste(canvas,K,s.IMG[n],s.PIV[n],P,ang,sx,sy)
-        base=s.IMG['base']
-        for i in range(s.NB):
-            a,ang,w,st=B[i]
-            y0=int(i*s.bandH*s.PXPT); y1=min(s.TH,int(((i+1)*s.bandH+1.5)*s.PXPT)) if i<s.NB-1 else s.TH
-            m=Image.new('RGBA',base.size,(0,0,0,0)); m.paste(base.crop((0,y0,s.TW,y1)),(0,y0))
-            s.paste(canvas,K,m,(s.W/2,i*s.bandH),a,ang,w,st)
-        P,ang,(sx,sy)=s.bone_world('paw',B,cache); s.paste(canvas,K,s.IMG['paw'],s.PIV['paw'],P,ang,sx,sy)
+        s.warp(canvas,K,B)
+        P,ang,(sx,sy)=s.bone_world('paw',B,cache)
+        ext=max(0.0,s.arm[0])
+        if ext>0.02:
+            # the arm: a goo strand from the wrist out to where the paw has gone
+            base=ang-s.bones['paw']['th']; tx,ty=s.TIP['paw'][0]-s.PIV['paw'][0],s.TIP['paw'][1]-s.PIV['paw'][1]
+            l=math.hypot(tx,ty); base-=0.35   # reach out and a little down, clear of the island
+            c,sn=math.cos(base),math.sin(base); ux,uy=(c*tx-sn*ty)/l,(sn*tx+c*ty)/l
+            Q=(P[0]+ux*ext*25,P[1]+uy*ext*25)
+            d=ImageDraw.Draw(canvas); nx,ny=-uy,ux; w0,w1=6.5,4.2
+            d.polygon([((P[0]+nx*w0)*K,(P[1]+ny*w0)*K),((Q[0]+nx*w1)*K,(Q[1]+ny*w1)*K),((Q[0]-nx*w1)*K,(Q[1]-ny*w1)*K),((P[0]-nx*w0)*K,(P[1]-ny*w0)*K)],fill=(0,0,0,255))
+            d.ellipse([(Q[0]-w1)*K,(Q[1]-w1)*K,(Q[0]+w1)*K,(Q[1]+w1)*K],fill=(0,0,0,255))
+            P=Q
+        s.paste(canvas,K,s.IMG['paw'],s.PIV['paw'],P,ang,sx,sy)
         f=s.face; shape=s.EXPR[s.expr]['shape']
         P,ang,w,st=s.body_xform(*s.PIV['lid'],B)
         s.paste(canvas,K,s.IMG['lid'],s.PIV['lid'],(P[0],P[1]+f['lid']*st),ang+f['lidRot'],w,st)
@@ -169,5 +200,60 @@ class Rig:
             s.paste(canvas,K,s.shapes[shape],s.PIV[shape],P,ang+extra,w*pulse,st*pulse*(1 if shape!='arc' else (1-0.5*blink)))
         P,ang,w,st=s.body_xform(*s.PIV['mouth'],B); m=0.78*f['mouth']*(1+0.3*talk)
         s.paste(canvas,K,s.IMG['mouth'],s.PIV['mouth'],P,ang,w*m,st*m)
+    def outline(s,B,contour):
+        """the character contour (canvas coords, x from the middle) carried by the bones"""
+        out=[]
+        for x,y in contour:
+            P,_,_,_=s.body_xform(x+s.W/2,min(max(y,0.0),s.H-0.01),B)
+            if y<0: P=(P[0],P[1]+y)
+            out.append(P)
+        return out
+    def edges(s,B,table):
+        """the body's left and right edges near the root (edges.json rows), carried by
+        the spine; the paw's part of the edge follows the paw's own bone"""
+        cache={}; pw=s.bone_world('paw',B,cache)
+        def place(u,v,paw):
+            if not paw:
+                P,_,_,_=s.body_xform(u*s.W,v*s.H,B); return P
+            (px,py),ang,(sx,sy)=pw; ox=(u*s.W-s.PIV['paw'][0])*sx; oy=(v*s.H-s.PIV['paw'][1])*sy
+            c,sn=math.cos(ang),math.sin(ang); return (px+c*ox-sn*oy,py+sn*ox+c*oy)
+        L=[place(r['l'],r['v'],r['lpaw']) for r in table if r]
+        Rr=[place(r['r'],r['v'],r['rpaw']) for r in table if r]
+        return L,Rr
+    def warp(s,canvas,K,B):
+        """the body picture on a mesh that follows the spine: COLS vertices across at
+        every joint, two triangles per cell, sampled bilinearly"""
+        src=s.SRC['base']; TH,TW=src.shape[:2]
+        J=s.joints(B); s._J=J; s._Jkey=B
+        cols=s.COLS; dst={}; srcv={}
+        for i,(P,t,w) in enumerate(J):
+            n=(t[1]*w,-t[0]*w)
+            for j in range(cols):
+                u=j/(cols-1); ox=(u-0.5)*s.W
+                dst[i,j]=((P[0]+n[0]*ox)*K,(P[1]+n[1]*ox)*K); srcv[i,j]=(u*TW,min(i/s.NB,1)*TH)
+        Wc,Hc=canvas.size; out=np.zeros((Hc,Wc,4),dtype=np.float32)
+        for i in range(s.NB):
+            for j in range(cols-1):
+                for tri in (((i,j),(i,j+1),(i+1,j)),((i,j+1),(i+1,j+1),(i+1,j))):
+                    D=np.array([dst[k] for k in tri]); Sv=np.array([srcv[k] for k in tri])
+                    x0,y0=np.floor(D.min(0)).astype(int); x1,y1=np.ceil(D.max(0)).astype(int)
+                    x0=max(x0,0); y0=max(y0,0); x1=min(x1,Wc-1); y1=min(y1,Hc-1)
+                    if x1<x0 or y1<y0: continue
+                    M=np.array([[D[0,0],D[1,0],D[2,0]],[D[0,1],D[1,1],D[2,1]],[1,1,1]])
+                    try: Mi=np.linalg.inv(M)
+                    except np.linalg.LinAlgError: continue
+                    ys,xs=np.mgrid[y0:y1+1,x0:x1+1]; px=xs+0.5; py=ys+0.5
+                    l=Mi@np.stack([px.ravel(),py.ravel(),np.ones(px.size)])
+                    inside=(l>=-1e-4).all(0)
+                    if not inside.any(): continue
+                    sx=(Sv[:,0]@l)[inside]-0.5; sy=(Sv[:,1]@l)[inside]-0.5
+                    sx=np.clip(sx,0,TW-1.001); sy=np.clip(sy,0,TH-1.001)
+                    ix=sx.astype(int); iy=sy.astype(int); fx=(sx-ix)[:,None]; fy=(sy-iy)[:,None]
+                    c=(src[iy,ix]*(1-fx)*(1-fy)+src[iy,ix+1]*fx*(1-fy)+src[iy+1,ix]*(1-fx)*fy+src[iy+1,ix+1]*fx*fy)
+                    yy=ys.ravel()[inside]; xx=xs.ravel()[inside]
+                    keep=c[:,3]>out[yy,xx,3]
+                    out[yy[keep],xx[keep]]=c[keep]
+        layer=Image.fromarray(out.clip(0,255).astype(np.uint8),'RGBA')
+        canvas.alpha_composite(layer)
     def head(s,B,v=0.62):
         P,_,_,_=s.body_xform(30,v*s.H,B); return P

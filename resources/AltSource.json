@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.34",
+      "subtitle": "NeoFreeBird version 7.3.35",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.35",
+          "buildVersion": "35",
+          "date": "2026-11-12T06:50:32Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.35/NeoFreeBird-Twitter-sideloaded_7.3.35_12.38.1.ipa",
+          "size": 266226743,
+          "minOSVersion": "15.0",
+          "localizedDescription": "아일랜드 슬라임: 새 그림, 메인 타임라인에서만 표시, 부드럽고 빠른 등장. 노래 재생 중엔 폰을 내려놓고, 말풍선이 슬라임 오른쪽에서 나오며 슬라임이 그쪽을 봐요."
+        },
         {
           "version": "7.3.34",
           "buildVersion": "34",

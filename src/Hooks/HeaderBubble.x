@@ -1020,8 +1020,29 @@ static const CGFloat kLogoSize = 40.0;
 // The island's bottom edge is taken as 11pt above the top safe area inset (59 -> 48 on
 // the first island phones, 62 -> 51 later) and the island as centred; no API reports it.
 
-static const CGFloat kSlimeWidth = 60.0;
-static const CGFloat kSlimeTuck = 5.0; // how far its top edge sits up under the island
+static const CGFloat kSlimeWidth = 44.0;
+static const CGFloat kSlimeTuck = 4.0; // how far its top edge sits up under the island
+
+// The silhouette of island_slime.png, row by row from its top edge (tucked under the
+// island) to the ear tips: left and right edge as a fraction of the picture's width
+// (the body's own edge: the paw and the phone it holds are left out on the left).
+// The liquid junction below hugs these edges.
+static const CGFloat kSlimeEdges[][2] = {
+    {0.150,0.850}, {0.111,0.910}, {0.094,0.944}, {0.085,0.970}, {0.085,0.983}, {0.100,0.996}, {0.110,1.000},
+    {0.130,1.000}, {0.160,0.872}, {0.180,0.936}, {0.200,0.974}, {0.215,0.966}, {0.230,0.936}, {0.240,0.949},
+    {0.252,0.979}, {0.256,0.996}, {0.295,0.979}, {0.303,0.944}, {0.325,0.953}, {0.355,0.962}, {0.333,0.966},
+    {0.350,0.970}, {0.397,0.970}, {0.397,0.970}, {0.402,0.970}, {0.406,0.966}, {0.415,0.962}, {0.423,0.957},
+    {0.436,0.944}, {0.449,0.936}, {0.466,0.919}, {0.487,0.897}, {0.509,0.547},
+};
+static const NSInteger kSlimeEdgeRows = sizeof(kSlimeEdges) / sizeof(kSlimeEdges[0]) - 1;
+
+static void SlimeEdgesAt(CGFloat v, CGFloat* left, CGFloat* right) {
+    v = MAX(0, MIN(1, v)) * kSlimeEdgeRows;
+    NSInteger i = MIN((NSInteger)v, kSlimeEdgeRows - 1);
+    CGFloat t = v - i;
+    *left = kSlimeEdges[i][0] + (kSlimeEdges[i + 1][0] - kSlimeEdges[i][0]) * t;
+    *right = kSlimeEdges[i][1] + (kSlimeEdges[i + 1][1] - kSlimeEdges[i][1]) * t;
+}
 
 static BOOL IslandLogoOn(UIWindow* window) {
     if (![BHTSettings boolForKey:@"kemo_island_logo"] || !window) {
@@ -1079,6 +1100,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
 @interface NFBIslandSlime : NSObject {
     CGPoint _points[kSlimeBones + 1];
     CGPoint _previous[kSlimeBones + 1];
+    CGFloat _widths[kSlimeBones];
     BOOL _pointsReady;
 }
 @property (nonatomic, strong) CADisplayLink* link;
@@ -1087,6 +1109,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
 @property (nonatomic, weak) UIImageView* logo; // the header logo hidden while the slime shows
 @property (nonatomic, strong) CALayer* container;
 @property (nonatomic, strong) NSArray<CALayer*>* bands;
+@property (nonatomic, strong) CAShapeLayer* junction; // the liquid join with the island
 @property (nonatomic, assign) CGSize slimeSize;
 @property (nonatomic, assign) CGFloat out;       // 0 inside the island, 1 hanging (the length)
 @property (nonatomic, assign) CGFloat velocity;
@@ -1108,6 +1131,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     [self.container removeFromSuperlayer];
     self.container = nil;
     self.bands = nil;
+    self.junction = nil;
     _pointsReady = NO;
     SetLogoHiddenByIsland(self.logo, NO);
 }
@@ -1188,6 +1212,9 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
         [bands addObject:band];
     }
     self.bands = bands;
+    self.junction = [CAShapeLayer layer];
+    self.junction.fillColor = [UIColor blackColor].CGColor;
+    [self.container addSublayer:self.junction];
 }
 
 - (void)simulate:(CGFloat)dt anchor:(CGPoint)anchor length:(CGFloat)length still:(BOOL)still {
@@ -1263,10 +1290,59 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
             width = MIN(width, 1.15 * squeeze);
         }
         CGFloat angle = atan2(-dx, dy);
+        _widths[i] = width;
         band.position = a;
         CATransform3D transform = CATransform3DMakeRotation(angle, 0, 0, 1);
         band.transform = CATransform3DScale(transform, width, MAX(stretch, 0.001), 1);
     }
+}
+
+// The liquid join where the body leaves the island's underside. On each side a concave
+// fillet runs from the island's flat underside (tangent to it) down into the body's edge
+// (tangent to that, arriving upward), so the island flows into the silhouette with no
+// corner, step or ledge. `energy` (0 at rest, 1 being sucked in) makes the join thicker
+// and longer, so going in it reads as liquid drawn up through a neck, not a slide.
+- (CGPathRef)newJunctionAt:(CGFloat)island energy:(CGFloat)energy CF_RETURNS_RETAINED {
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGFloat radius = 6 + 7 * energy, depth = 6 + 6 * energy;
+    CGFloat y = island + depth;
+    // Where the body crosses that row: which bone, and how far down the picture.
+    NSInteger bone = -1;
+    CGFloat t = 0;
+    for (NSInteger i = 0; i < kSlimeBones; i++) {
+        CGFloat y0 = _points[i].y, y1 = _points[i + 1].y;
+        if (y >= MIN(y0, y1) && y <= MAX(y0, y1) && fabs(y1 - y0) > 0.001) {
+            bone = i;
+            t = (y - y0) / (y1 - y0);
+            break;
+        }
+    }
+    if (bone < 0) {
+        return path;
+    }
+    CGFloat cx = _points[bone].x + (_points[bone + 1].x - _points[bone].x) * t;
+    CGFloat left, right;
+    SlimeEdgesAt((bone + t) / kSlimeBones, &left, &right);
+    CGFloat w = kSlimeWidth * _widths[bone];
+    CGFloat edges[2] = {cx + (left - 0.5) * w, cx + (right - 0.5) * w};
+    // A thin tip (the ears going in last) only gets a small join, which shrinks away.
+    CGFloat scale = MIN(1, MAX(0, (edges[1] - edges[0]) / 8));
+    radius *= scale;
+    depth *= MAX(scale, 0.3);
+    y = island + depth;
+    CGFloat yb = island - 0.5;
+    for (NSInteger k = 0; k < 2; k++) {
+        CGFloat side = k == 0 ? -1 : 1, e = edges[k];
+        CGPoint S = CGPointMake(e + side * radius, yb), E = CGPointMake(e, y);
+        CGPathMoveToPoint(path, NULL, S.x, island - 3);
+        CGPathAddLineToPoint(path, NULL, S.x, S.y);
+        CGPathAddCurveToPoint(path, NULL, S.x - side * radius * 0.62, S.y, E.x, E.y - depth * 0.62, E.x, E.y);
+        // back up inside the body and the island
+        CGPathAddLineToPoint(path, NULL, e - side * 3, E.y);
+        CGPathAddLineToPoint(path, NULL, e - side * 3, island - 3);
+        CGPathCloseSubpath(path);
+    }
+    return path;
 }
 
 - (void)step:(CADisplayLink*)link {
@@ -1337,6 +1413,11 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     [CATransaction setDisableActions:YES];
     [self simulate:dt anchor:anchor length:length still:still];
     [self render:depth];
+    // Thicker while it is pulled in or stretched, settling to a slim join at rest.
+    CGFloat energy = MIN(1, depth * 1.4 + MAX(0, -self.velocity) * 0.15 + MAX(0, self.out - 1) * 2);
+    CGPathRef junction = [self newJunctionAt:IslandBottom(window) energy:energy];
+    self.junction.path = junction;
+    CGPathRelease(junction);
     self.container.frame = window.bounds;
     self.container.hidden = depth > 0.98;
     // Whatever is pulled up past the island would show above it, in the status bar:

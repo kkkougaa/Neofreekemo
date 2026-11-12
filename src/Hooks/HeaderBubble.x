@@ -994,34 +994,67 @@ static void Tick(void) {
 static const CGFloat kLogoSize = 40.0;
 
 
-// MARK: Slime hanging from the Dynamic Island
+// MARK: Slime fox peeking out under the Dynamic Island
 //
-// With kemo_island_logo on (iPhone with a Dynamic Island, portrait), the character from
-// the header logo hangs upside down out of the island, in black, as if the island were
-// made of the same slime. island_slime.png is the character cut out of the logo (the
-// speech bubble and the motion marks left out), turned upside down so the edge where
-// the logo crops its body is at the top, tucked under the island.
+// With kemo_island_logo on (iPhone with a Dynamic Island, portrait), a black fox (형's
+// artwork, its upper body, island_fox.png) peeks out under the island, right side up, as
+// if the island were made of the same slime:
+// - it comes out as a drop that swells out of the island, stretches down and takes on the
+//   fox's shape (its outline is morphed from the drop's, point for point), landing with a
+//   little squash; the picture fades in under the outline as the two meet;
+// - out, it just lives there: breathes, blinks now and then, sways a little;
+// - going in, the fox melts back into a drop and is drawn up into the island;
+// - it follows the navigation bar: in when the bar slides away while scrolling, out again
+//   with it, and now and then it goes in and comes back out on its own.
+// Its ear tips sit in the island; where they meet its underside, and where the goo column
+// leaves it, concave fillets tangent to the island's flat underside round the joins off,
+// so there is never a corner. Reduce Motion: it is simply out (or in), with no motion.
 //
 // It is a layer of its own on the key window; the real header logo stays where it was
 // (the right end), only hidden, so the speech bubble keeps its place beside it.
 //
-// Motion: "how far out" (0 inside, 1 hanging) rides a spring, and a bone rig (below)
-// makes the whole body follow it with lag and overlap, like rigged character animation:
-// - it comes out on launch and on coming back to the app, ears first, overshoots so the
-//   body stretches thin, and wobbles back; going in it is slurped up, body first and
-//   the head dragged in last;
-// - it follows the navigation bar: when the bar slides away while scrolling it is
-//   sucked back into the island, and comes out again with the bar;
-// - now and then it ducks in and pops out again, and it gives a little tug when the
-//   speech bubble opens;
-// - at rest it sways slightly about the island, like something hanging.
-// Reduce Motion: it just hangs, no spring, no sway.
-//
 // The island's bottom edge is taken as 11pt above the top safe area inset (59 -> 48 on
 // the first island phones, 62 -> 51 later) and the island as centred; no API reports it.
 
-static const CGFloat kSlimeWidth = 60.0;
-static const CGFloat kSlimeTuck = 5.0; // how far its top edge sits up under the island
+static const CGFloat kFoxHang = 6.72;                          // the notch between the ears, below the island
+static const CGPoint kFoxNotch = {18.72, 12.96};                // the notch in the picture, from its top left
+static const CGRect kFoxLid = {{2.88, 12.48}, {11.04, 8.16}};   // the eye, from the notch
+static const CGFloat kFoxDropRX = 15, kFoxDropRY = 20;          // the drop it comes out as
+static const CFTimeInterval kFoxEmerge = 1.25, kFoxAbsorb = 1.2;
+
+// The fox's outline (pt from the notch), and for each point where it sits on the drop
+// (cos, sin of its angle), so the two line up point for point when morphing.
+static const CGFloat kFoxContour[][4] = { // x, y (pt from the notch), blob cos, sin
+    {6.00,36.72,0.115,0.993}, {3.99,36.72,-0.021,1.000}, {2.08,36.48,-0.150,0.989}, {0.27,36.00,-0.271,0.963}, {-1.44,35.28,-0.382,0.924}, {-3.14,34.54,-0.483,0.876},
+    {-4.78,33.62,-0.573,0.819}, {-6.48,32.88,-0.651,0.759}, {-5.91,31.11,-0.662,0.750}, {-5.14,29.76,-0.658,0.753}, {-6.48,29.09,-0.719,0.695}, {-7.38,27.84,-0.768,0.640},
+    {-9.39,27.84,-0.815,0.579}, {-8.90,26.66,-0.824,0.566}, {-10.46,26.02,-0.861,0.509}, {-12.23,25.45,-0.892,0.453}, {-14.00,24.88,-0.915,0.404}, {-15.64,23.96,-0.935,0.355},
+    {-16.80,22.44,-0.953,0.303}, {-15.39,21.15,-0.957,0.291}, {-13.97,19.73,-0.962,0.273}, {-14.40,18.48,-0.972,0.234}, {-15.96,17.40,-0.982,0.188}, {-17.21,15.91,-0.990,0.140},
+    {-18.13,14.27,-0.995,0.095}, {-17.68,12.88,-0.998,0.062}, {-15.98,12.14,-0.999,0.046}, {-15.12,10.97,-1.000,0.015}, {-15.60,9.15,-0.999,-0.037}, {-16.08,7.34,-0.996,-0.085},
+    {-16.32,5.43,-0.991,-0.135}, {-16.32,3.42,-0.982,-0.188}, {-16.32,1.41,-0.971,-0.239}, {-16.08,-0.50,-0.958,-0.288}, {-15.60,-2.31,-0.941,-0.338}, {-15.12,-4.12,-0.922,-0.387},
+    {-14.52,-5.88,-0.899,-0.437}, {-13.78,-7.58,-0.873,-0.488}, {-12.87,-9.21,-0.842,-0.540}, {-11.55,-10.56,-0.803,-0.596}, {-9.70,-10.18,-0.771,-0.637}, {-8.07,-9.27,-0.746,-0.666},
+    {-6.51,-8.19,-0.719,-0.695}, {-5.02,-6.94,-0.691,-0.723}, {-3.52,-5.68,-0.654,-0.756}, {-2.27,-4.19,-0.625,-0.781}, {-1.02,-2.70,-0.585,-0.811}, {0.24,-2.01,-0.502,-0.865},
+    {1.04,-3.68,-0.380,-0.925}, {1.96,-5.32,-0.256,-0.967}, {3.04,-6.88,-0.129,-0.992}, {4.29,-8.37,-0.001,-1.000}, {5.71,-9.79,0.124,-0.992}, {7.27,-10.87,0.242,-0.970},
+    {8.83,-11.95,0.340,-0.940}, {10.62,-12.48,0.442,-0.897}, {12.00,-11.28,0.535,-0.845}, {13.08,-9.72,0.614,-0.789}, {13.99,-8.09,0.683,-0.731}, {14.73,-6.39,0.742,-0.670},
+    {15.36,-4.64,0.795,-0.607}, {15.84,-2.82,0.841,-0.541}, {16.32,-1.01,0.882,-0.471}, {16.56,0.90,0.917,-0.400}, {16.54,2.86,0.945,-0.328}, {14.91,1.95,0.912,-0.409},
+    {13.20,1.35,0.868,-0.497}, {12.96,-0.56,0.815,-0.580}, {12.50,-2.38,0.752,-0.659}, {12.00,-4.18,0.685,-0.729}, {11.35,-5.93,0.610,-0.792}, {10.56,-7.61,0.527,-0.850},
+    {9.19,-7.75,0.433,-0.901}, {7.87,-6.43,0.354,-0.935}, {6.62,-4.94,0.260,-0.966}, {5.52,-3.38,0.156,-0.988}, {4.79,-1.67,0.073,-0.997}, {5.79,-1.23,0.223,-0.975},
+    {7.71,-1.44,0.456,-0.890}, {8.70,-0.54,0.582,-0.813}, {7.75,1.03,0.547,-0.837}, {9.58,1.44,0.723,-0.690}, {11.40,1.92,0.830,-0.558}, {13.20,2.40,0.892,-0.451},
+    {14.91,3.15,0.933,-0.360}, {16.53,4.08,0.960,-0.280}, {18.10,5.14,0.978,-0.211}, {19.59,6.39,0.989,-0.147}, {20.91,7.71,0.996,-0.092}, {20.56,8.88,0.999,-0.054},
+    {19.52,9.68,1.000,-0.029}, {20.94,11.10,1.000,0.022}, {21.85,12.73,0.997,0.072}, {21.79,14.16,0.993,0.118}, {19.82,14.06,0.992,0.129}, {20.47,14.88,0.988,0.151},
+    {22.29,15.33,0.989,0.150}, {22.13,16.32,0.983,0.181}, {20.22,16.56,0.978,0.210}, {20.72,18.08,0.968,0.251}, {22.28,18.28,0.972,0.236}, {22.56,19.62,0.963,0.270},
+    {22.20,21.48,0.945,0.326}, {20.71,22.73,0.922,0.386}, {19.15,23.81,0.893,0.450}, {17.45,24.55,0.857,0.515}, {15.70,25.20,0.810,0.586}, {13.89,25.68,0.748,0.664},
+    {12.06,26.10,0.663,0.748}, {11.73,26.85,0.629,0.777}, {13.29,27.93,0.677,0.736}, {14.64,29.38,0.699,0.715}, {13.53,30.57,0.634,0.773}, {14.88,31.88,0.662,0.750},
+    {15.62,33.38,0.662,0.750}, {15.14,34.54,0.627,0.779}, {13.44,35.28,0.550,0.835}, {11.73,36.00,0.461,0.887}, {9.92,36.48,0.360,0.933}, {8.01,36.72,0.245,0.970},
+};
+
+// Where the ears cross the island's underside: left and right edge, and the row (pt from the notch).
+static const CGFloat kFoxEarRuns[][3] = { // left x, right x, y (pt from the notch) where the ears meet the island
+    {-14.16, -4.80, -4.72},
+    {2.88, 8.16, -4.72},
+    {11.04, 14.64, -4.72},
+};
+static const NSInteger kFoxPoints = sizeof(kFoxContour) / sizeof(kFoxContour[0]);
+static const NSInteger kFoxEars = sizeof(kFoxEarRuns) / sizeof(kFoxEarRuns[0]);
 
 static BOOL IslandLogoOn(UIWindow* window) {
     if (![BHTSettings boolForKey:@"kemo_island_logo"] || !window) {
@@ -1043,24 +1076,12 @@ static CGFloat IslandBottom(UIWindow* window) {
 static UIImage* SlimeImage(void) {
     static UIImage* image;
     if (!image) {
-        NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"island_slime.png"];
+        NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"island_fox.png"];
         NSData* data = url ? [NSData dataWithContentsOfURL:url] : nil;
         image = data ? [UIImage imageWithData:data scale:3.0] : nil;
     }
     return image;
 }
-
-// The rig: the picture is cut into kSlimeBones horizontal bands, one per bone of a chain
-// that starts under the island (its root is pinned there) and ends at the head and ears.
-// The joints are points simulated with Verlet integration: gravity pulls them down, soft
-// distance constraints keep each bone near its rest length (soft, so the body stretches
-// and springs back like slime), and a bend constraint pulls each bone back in line with
-// the one above it (stiff near the root, looser at the head, so motion travels down the
-// body and the head and ears lag behind and settle last). Each band is drawn along its
-// bone, rotated to the bone's angle and stretched to its length; its width shrinks as it
-// stretches, so the volume looks kept. Bands overlap a little to hide the seams.
-static const NSInteger kSlimeBones = 9;
-static const NSInteger kSlimeSubsteps = 4;
 
 // Set on the header logo while the slime has hidden it, so only that is undone.
 static const void* kHiddenByIslandKey = &kHiddenByIslandKey;
@@ -1076,25 +1097,64 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     objc_setAssociatedObject(logo, kHiddenByIslandKey, @(hide), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-@interface NFBIslandSlime : NSObject {
-    CGPoint _points[kSlimeBones + 1];
-    CGPoint _previous[kSlimeBones + 1];
-    BOOL _pointsReady;
+static CGFloat FoxSmooth(CGFloat x, CGFloat a, CGFloat b) {
+    CGFloat t = MAX(0, MIN(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
 }
+
+static CGFloat FoxEaseOut(CGFloat x) {
+    x = MAX(0, MIN(1, x));
+    return 1 - pow(1 - x, 3);
+}
+
+static CGFloat FoxLerp(CGFloat a, CGFloat b, CGFloat t) {
+    return a + (b - a) * t;
+}
+
+// The goo column from the island down to (x, bottom). It leaves the island's flat
+// underside through concave fillets of radius r, tangent to it, so there is no corner.
+// Every piece here is drawn the same way round, so overlapping pieces fill as one.
+static void AddFoxNeck(CGMutablePathRef path, CGFloat island, CGFloat x, CGFloat bottom, CGFloat wBottom, CGFloat wTop, CGFloat r) {
+    CGFloat yb = island - 0.5;
+    CGPathMoveToPoint(path, NULL, x - wTop - r - 2, island - 4);
+    CGPathAddLineToPoint(path, NULL, x - wTop - r, yb);
+    CGPathAddQuadCurveToPoint(path, NULL, x - wTop, yb, x - wTop, yb + r);
+    CGPathAddLineToPoint(path, NULL, x - wBottom, bottom);
+    CGPathAddLineToPoint(path, NULL, x + wBottom, bottom);
+    CGPathAddLineToPoint(path, NULL, x + wTop, yb + r);
+    CGPathAddQuadCurveToPoint(path, NULL, x + wTop, yb, x + wTop + r, yb);
+    CGPathAddLineToPoint(path, NULL, x + wTop + r + 2, island - 4);
+    CGPathCloseSubpath(path);
+}
+
+typedef NS_ENUM(NSInteger, FoxPhase) {
+    FoxPhaseInside,
+    FoxPhaseEmerging,
+    FoxPhaseOut,
+    FoxPhaseAbsorbing,
+};
+
+@interface NFBIslandSlime : NSObject
 @property (nonatomic, strong) CADisplayLink* link;
 @property (nonatomic, weak) UIWindow* window;
 @property (nonatomic, weak) UIView* bar;
 @property (nonatomic, weak) UIImageView* logo; // the header logo hidden while the slime shows
 @property (nonatomic, strong) CALayer* container;
-@property (nonatomic, strong) NSArray<CALayer*>* bands;
-@property (nonatomic, assign) CGSize slimeSize;
-@property (nonatomic, assign) CGFloat out;       // 0 inside the island, 1 hanging (the length)
-@property (nonatomic, assign) CGFloat velocity;
+@property (nonatomic, strong) CALayer* fox;
+@property (nonatomic, strong) CALayer* lid;
+@property (nonatomic, strong) CAShapeLayer* dropShape; // the drop, or the fox's outline while morphing
+@property (nonatomic, strong) CAShapeLayer* neck;  // the goo column out of the island
+@property (nonatomic, strong) CAShapeLayer* ears;  // the fillets where the ears meet the island
+@property (nonatomic, assign) FoxPhase phase;
+@property (nonatomic, assign) CFTimeInterval t;     // time in the phase
+@property (nonatomic, assign) CFTimeInterval clock;
+@property (nonatomic, assign) CGFloat squash;       // 1 at rest; a spring
+@property (nonatomic, assign) CGFloat squashVelocity;
+@property (nonatomic, assign) BOOL landed;
 @property (nonatomic, assign) CFTimeInterval peekUntil;
 @property (nonatomic, assign) CFTimeInterval nextPeek;
-@property (nonatomic, assign) CFTimeInterval nextTwitch;
-@property (nonatomic, assign) CFTimeInterval clock;
-@property (nonatomic, assign) BOOL thumped;
+@property (nonatomic, assign) CFTimeInterval nextBlink;
+@property (nonatomic, assign) CFTimeInterval blinkAt;
 @property (nonatomic, copy) NSString* debug;
 @end
 
@@ -1107,8 +1167,6 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     self.link = nil;
     [self.container removeFromSuperlayer];
     self.container = nil;
-    self.bands = nil;
-    _pointsReady = NO;
     SetLogoHiddenByIsland(self.logo, NO);
 }
 
@@ -1117,28 +1175,26 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
         self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(step:)];
         [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
         CFTimeInterval now = CACurrentMediaTime();
-        self.nextPeek = now + 25 + arc4random_uniform(20);
-        self.nextTwitch = now + 4 + arc4random_uniform(5);
+        self.nextPeek = now + 30 + arc4random_uniform(30);
+        self.nextBlink = now + 1.5;
+        self.blinkAt = -10;
     }
 }
 
-// Starts it inside the island; the spring and the rig bring it out.
+// Starts it inside the island; it comes out once the bar is there.
 - (void)drop {
-    self.out = UIAccessibilityIsReduceMotionEnabled() ? 1 : 0;
-    self.velocity = 0;
-    self.thumped = NO;
-    _pointsReady = NO;
+    self.phase = UIAccessibilityIsReduceMotionEnabled() ? FoxPhaseOut : FoxPhaseInside;
+    self.t = 0;
+    self.squash = 1;
+    self.squashVelocity = 0;
 }
 
-// A tug at the head, for when something happens (the speech bubble opening).
+// A little squash, for when something happens (the speech bubble opening).
 - (void)jiggle {
-    if (UIAccessibilityIsReduceMotionEnabled() || !_pointsReady) {
+    if (UIAccessibilityIsReduceMotionEnabled() || self.phase != FoxPhaseOut) {
         return;
     }
-    self.velocity += 1.2;
-    _previous[kSlimeBones].y -= 3.5;
-    self.thumped = YES;
-    _previous[kSlimeBones].x += (arc4random_uniform(2) ? 2.5 : -2.5);
+    self.squashVelocity -= 1.2;
 }
 
 // 1 while the navigation bar sits at the top, falling to 0 as it slides away or fades.
@@ -1163,110 +1219,78 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     return MAX(0, MIN(1, 1 - slid)) * MIN(1, alpha * 1.25);
 }
 
+- (CAShapeLayer*)gooLayer {
+    CAShapeLayer* layer = [CAShapeLayer layer];
+    layer.fillColor = [UIColor blackColor].CGColor;
+    layer.fillRule = kCAFillRuleNonZero;
+    [self.container addSublayer:layer];
+    return layer;
+}
+
 - (void)buildLayersIn:(UIWindow*)window {
     UIImage* image = SlimeImage();
-    CGSize size = image.size;
-    CGFloat height = kSlimeWidth * size.height / MAX(size.width, 1);
-    self.slimeSize = CGSizeMake(kSlimeWidth, height);
     self.container = [CALayer layer];
     self.container.zPosition = 9999;
     self.container.frame = window.bounds;
-    NSMutableArray* bands = [NSMutableArray array];
-    CGFloat bandHeight = height / kSlimeBones;
-    CGFloat overlap = 1.5; // points of picture shared with the next band
-    for (NSInteger i = 0; i < kSlimeBones; i++) {
-        CALayer* band = [CALayer layer];
-        band.contents = (__bridge id)image.CGImage;
-        band.contentsScale = 3.0;
-        band.contentsGravity = kCAGravityResize;
-        CGFloat extra = (i < kSlimeBones - 1) ? overlap : 0;
-        band.contentsRect = CGRectMake(0, i / (CGFloat)kSlimeBones, 1, (bandHeight + extra) / height);
-        band.anchorPoint = CGPointMake(0.5, 0);
-        band.bounds = CGRectMake(0, 0, kSlimeWidth, bandHeight + extra);
-        band.allowsEdgeAntialiasing = YES;
-        [self.container addSublayer:band];
-        [bands addObject:band];
-    }
-    self.bands = bands;
+    self.fox = [CALayer layer];
+    self.fox.contents = (__bridge id)image.CGImage;
+    self.fox.contentsScale = 3.0;
+    self.fox.contentsGravity = kCAGravityResize;
+    self.fox.bounds = CGRectMake(0, 0, image.size.width, image.size.height);
+    self.fox.anchorPoint = CGPointMake(kFoxNotch.x / MAX(image.size.width, 1), kFoxNotch.y / MAX(image.size.height, 1));
+    self.fox.allowsEdgeAntialiasing = YES;
+    [self.container addSublayer:self.fox];
+    // The eyelid: black, over the eye (a hole in the picture), closing from the top.
+    self.lid = [CALayer layer];
+    self.lid.backgroundColor = [UIColor blackColor].CGColor;
+    self.lid.anchorPoint = CGPointMake(0.5, 0);
+    self.lid.bounds = CGRectMake(0, 0, kFoxLid.size.width, kFoxLid.size.height + 1);
+    self.lid.position = CGPointMake(kFoxNotch.x + CGRectGetMidX(kFoxLid), kFoxNotch.y + kFoxLid.origin.y - 1);
+    [self.fox addSublayer:self.lid];
+    self.dropShape = [self gooLayer];
+    self.neck = [self gooLayer];
+    self.ears = [self gooLayer];
 }
 
-- (void)simulate:(CGFloat)dt anchor:(CGPoint)anchor length:(CGFloat)length still:(BOOL)still {
-    CGFloat rest = self.slimeSize.height / kSlimeBones * length;
-    if (!_pointsReady || still) {
-        for (NSInteger i = 0; i <= kSlimeBones; i++) {
-            _points[i] = CGPointMake(anchor.x, anchor.y + rest * i);
-            _previous[i] = _points[i];
-        }
-        _pointsReady = YES;
-        if (still) {
-            return;
-        }
-    }
-    CGFloat h = dt / kSlimeSubsteps;
-    CGFloat gravity = 1400;
-    for (NSInteger sub = 0; sub < kSlimeSubsteps; sub++) {
-        _points[0] = anchor;
-        _previous[0] = anchor;
-        for (NSInteger i = 1; i <= kSlimeBones; i++) {
-            CGFloat depth = i / (CGFloat)kSlimeBones;
-            // A slow, uneven breeze, stronger toward the head.
-            CGFloat breeze = (sin(self.clock * 1.3 + depth * 0.9) + 0.4 * sin(self.clock * 3.1)) * 70 * depth;
-            CGPoint p = _points[i];
-            CGPoint v = CGPointMake((p.x - _previous[i].x) * 0.985, (p.y - _previous[i].y) * 0.985);
-            _previous[i] = p;
-            _points[i] = CGPointMake(p.x + v.x + breeze * h * h, p.y + v.y + gravity * h * h);
-        }
-        for (NSInteger pass = 0; pass < 3; pass++) {
-            for (NSInteger i = 0; i < kSlimeBones; i++) {
-                // Length: soft, so the body stretches like slime.
-                CGPoint a = _points[i], b = _points[i + 1];
-                CGFloat dx = b.x - a.x, dy = b.y - a.y;
-                CGFloat dist = MAX(sqrt(dx * dx + dy * dy), 0.0001);
-                CGFloat push = (dist - rest) / dist * 0.55;
-                if (i == 0) {
-                    _points[1].x -= dx * push;
-                    _points[1].y -= dy * push;
-                } else {
-                    _points[i].x += dx * push * 0.5;
-                    _points[i].y += dy * push * 0.5;
-                    _points[i + 1].x -= dx * push * 0.5;
-                    _points[i + 1].y -= dy * push * 0.5;
-                }
-                // Bend: back in line with the bone above (straight down at the root);
-                // stiffer near the island, looser at the head.
-                CGPoint parent = i == 0 ? CGPointMake(0, 1)
-                                        : CGPointMake(_points[i].x - _points[i - 1].x, _points[i].y - _points[i - 1].y);
-                CGFloat parentLength = MAX(sqrt(parent.x * parent.x + parent.y * parent.y), 0.0001);
-                CGPoint wanted = CGPointMake(_points[i].x + parent.x / parentLength * rest,
-                                             _points[i].y + parent.y / parentLength * rest);
-                CGFloat stiffness = 0.22 - 0.12 * (i / (CGFloat)kSlimeBones);
-                _points[i + 1].x += (wanted.x - _points[i + 1].x) * stiffness;
-                _points[i + 1].y += (wanted.y - _points[i + 1].y) * stiffness;
-            }
-            _points[0] = anchor;
-        }
-    }
+// The fox's pose: where the notch hangs, its sway, and its scale (squash and breath).
+- (CGPoint)place:(CGPoint)p hang:(CGPoint)hang sway:(CGFloat)sway sx:(CGFloat)sx sy:(CGFloat)sy {
+    CGFloat x = p.x * sx, y = p.y * sy, c = cos(sway), s = sin(sway);
+    return CGPointMake(hang.x + c * x - s * y, hang.y + s * x + c * y);
 }
 
-- (void)render:(CGFloat)depth {
-    CGFloat bandHeight = self.slimeSize.height / kSlimeBones;
-    CGFloat squeeze = 1 - 0.3 * depth; // a little narrower while going through the hole
-    for (NSInteger i = 0; i < kSlimeBones; i++) {
-        CALayer* band = self.bands[i];
-        CGPoint a = _points[i], b = _points[i + 1];
-        CGFloat dx = b.x - a.x, dy = b.y - a.y;
-        CGFloat dist = sqrt(dx * dx + dy * dy);
-        CGFloat stretch = dist / MAX(bandHeight, 0.0001);
-        CGFloat width = MAX(0.7, MIN(1.3, 1 / sqrt(MAX(stretch, 0.05)))) * squeeze;
-        if (stretch < 1) {
-            // Squashed bones bulge only a little; the squeeze already narrows them.
-            width = MIN(width, 1.15 * squeeze);
+// The drop (an ellipse) morphed toward the fox's outline by `toFox`.
+- (CGPathRef)newOutlineWithDrop:(CGPoint)center rx:(CGFloat)rx ry:(CGFloat)ry toFox:(CGFloat)toFox
+                          hang:(CGPoint)hang sway:(CGFloat)sway sx:(CGFloat)sx sy:(CGFloat)sy CF_RETURNS_RETAINED {
+    CGMutablePathRef path = CGPathCreateMutable();
+    for (NSInteger i = 0; i < kFoxPoints; i++) {
+        CGPoint a = CGPointMake(center.x + rx * kFoxContour[i][2], center.y + ry * kFoxContour[i][3]);
+        CGPoint b = toFox > 0 ? [self place:CGPointMake(kFoxContour[i][0], kFoxContour[i][1]) hang:hang sway:sway sx:sx sy:sy] : a;
+        CGPoint p = CGPointMake(FoxLerp(a.x, b.x, toFox), FoxLerp(a.y, b.y, toFox));
+        if (i == 0) {
+            CGPathMoveToPoint(path, NULL, p.x, p.y);
+        } else {
+            CGPathAddLineToPoint(path, NULL, p.x, p.y);
         }
-        CGFloat angle = atan2(-dx, dy);
-        band.position = a;
-        CATransform3D transform = CATransform3DMakeRotation(angle, 0, 0, 1);
-        band.transform = CATransform3DScale(transform, width, MAX(stretch, 0.001), 1);
     }
+    CGPathCloseSubpath(path);
+    return path;
+}
+
+- (CGPathRef)newEarFilletsAt:(CGFloat)island hang:(CGPoint)hang sway:(CGFloat)sway sx:(CGFloat)sx sy:(CGFloat)sy CF_RETURNS_RETAINED {
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGFloat r = 2.0, yb = island - 0.5;
+    for (NSInteger i = 0; i < kFoxEars; i++) {
+        CGFloat ax = [self place:CGPointMake(kFoxEarRuns[i][0], kFoxEarRuns[i][2]) hang:hang sway:sway sx:sx sy:sy].x;
+        CGFloat bx = [self place:CGPointMake(kFoxEarRuns[i][1], kFoxEarRuns[i][2]) hang:hang sway:sway sx:sx sy:sy].x;
+        CGPathMoveToPoint(path, NULL, ax - r, yb - 3);
+        CGPathAddLineToPoint(path, NULL, ax - r, yb);
+        CGPathAddQuadCurveToPoint(path, NULL, ax, yb, ax, yb + r);
+        CGPathAddLineToPoint(path, NULL, bx, yb + r);
+        CGPathAddQuadCurveToPoint(path, NULL, bx, yb, bx + r, yb);
+        CGPathAddLineToPoint(path, NULL, bx + r, yb - 3);
+        CGPathCloseSubpath(path);
+    }
+    return path;
 }
 
 - (void)step:(CADisplayLink*)link {
@@ -1286,79 +1310,167 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     CGFloat dt = MIN(1.0 / 30.0, MAX(1.0 / 240.0, link.targetTimestamp - link.timestamp));
     CFTimeInterval now = CACurrentMediaTime();
     self.clock += dt;
+    self.t += dt;
 
-    CGFloat target = [self barShown];
-    if (!still && target > 0.9 && now > self.nextPeek) {
-        // Duck in for a moment, then come back out.
-        self.peekUntil = now + 0.6;
-        self.nextPeek = now + 30 + arc4random_uniform(30);
-        self.thumped = NO;
+    BOOL wanted = [self barShown] > 0.5;
+    if (!still && wanted && self.phase == FoxPhaseOut && now > self.nextPeek) {
+        // Go in for a moment, then come back out.
+        self.peekUntil = now + kFoxAbsorb + 0.5;
+        self.nextPeek = now + 40 + arc4random_uniform(40);
     }
     if (now < self.peekUntil) {
-        target = 0;
+        wanted = NO;
     }
-    if (!still && _pointsReady && now > self.nextTwitch && self.out > 0.9) {
-        // An ear twitch: a small flick at the head that ripples back up.
-        CGFloat side = arc4random_uniform(2) ? 1 : -1;
-        _previous[kSlimeBones].x -= side * 2.2;
-        _previous[kSlimeBones - 1].x += side * 1.0;
-        self.nextTwitch = now + 5 + arc4random_uniform(7);
+    if (still) {
+        self.phase = wanted ? FoxPhaseOut : FoxPhaseInside;
+        self.t = 0;
+    } else if (self.phase == FoxPhaseInside && wanted) {
+        self.phase = FoxPhaseEmerging;
+        self.t = 0;
+        self.landed = NO;
+    } else if (self.phase == FoxPhaseOut && !wanted) {
+        self.phase = FoxPhaseAbsorbing;
+        self.t = 0;
+    } else if (self.phase == FoxPhaseEmerging && self.t >= kFoxEmerge) {
+        self.phase = FoxPhaseOut;
+        self.t = 0;
+    } else if (self.phase == FoxPhaseAbsorbing && self.t >= kFoxAbsorb) {
+        self.phase = FoxPhaseInside;
+        self.t = 0;
+        self.squash = 1;
+        self.squashVelocity = 0;
     }
 
-    if (still) {
-        self.out = target;
-        self.velocity = 0;
-    } else {
-        // How far out rides a spring: underdamped coming out (it overshoots and the body
-        // stretches), slower and steadier going in (a slurp, the head dragged in last).
-        // The rig adds the follow-through on top.
-        BOOL comingOut = target > self.out;
-        CGFloat stiffness = comingOut ? 130 : 30, damping = comingOut ? 9 : 10;
-        CGFloat before = self.velocity;
-        self.velocity += (stiffness * (target - self.out) - damping * self.velocity) * dt;
-        self.out = MAX(0, self.out + self.velocity * dt);
-        if (!self.thumped && before > 0 && self.velocity <= 0 && self.out > 0.9) {
-            self.thumped = YES;
-            if ([BHTSettings boolForKey:@"kemo_haptics"] && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
-                [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurred];
+    CGFloat island = IslandBottom(window);
+    CGFloat midX = CGRectGetMidX(window.bounds);
+    CGPoint hang = CGPointMake(midX, island + kFoxHang);
+    CGFloat t = self.t;
+    if (!still) {
+        self.squashVelocity += (170 * (1 - self.squash) - 9 * self.squashVelocity) * dt;
+        self.squash += self.squashVelocity * dt;
+    }
+    CGFloat breath = still ? 0 : 0.035 * sin(self.clock * 2.4);
+    CGFloat sway = still ? 0 : 0.05 * sin(self.clock * 1.6);
+    CGFloat squash = self.squash;
+
+    CGFloat foxOpacity = 0, dropOpacity = 0, neckOpacity = 0, earsOpacity = 0;
+    CGPathRef dropPath = NULL, neckPath = NULL;
+    CGMutablePathRef neck = CGPathCreateMutable();
+    switch (self.phase) {
+        case FoxPhaseInside:
+            break;
+        case FoxPhaseEmerging: {
+            CGFloat k = 0.5;
+            if (t < k) {
+                // A drop swells out of the island and stretches down.
+                CGFloat e = FoxEaseOut(t / k), ry = FoxLerp(1.5, kFoxDropRY, e), rx = FoxLerp(7, kFoxDropRX, e);
+                dropPath = [self newOutlineWithDrop:CGPointMake(midX, island - 2 + ry) rx:rx ry:ry toFox:0 hang:hang sway:0 sx:1 sy:1];
+                dropOpacity = 1;
+                AddFoxNeck(neck, island, midX, island + ry * 0.6, rx * 0.7, rx * 0.8, FoxLerp(2, 5, e));
+                neckOpacity = 1;
+            } else {
+                // ...and takes on the fox's shape, landing with a squash.
+                if (!self.landed) {
+                    self.landed = YES;
+                    self.squash = squash = 1.18;
+                    self.squashVelocity = -1.5;
+                    if ([BHTSettings boolForKey:@"kemo_haptics"] && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+                        [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurred];
+                    }
+                }
+                CGFloat e = FoxSmooth(t, k, kFoxEmerge - 0.25), f = FoxSmooth(t, kFoxEmerge - 0.4, kFoxEmerge);
+                CGFloat sx = (1 + breath) / sqrt(squash), sy = squash * (1 + breath * 0.5);
+                dropPath = [self newOutlineWithDrop:CGPointMake(midX, island - 2 + kFoxDropRY) rx:kFoxDropRX ry:kFoxDropRY
+                                              toFox:FoxEaseOut(e) hang:hang sway:sway sx:sx sy:sy];
+                dropOpacity = 1 - f;
+                foxOpacity = f > 0 ? 1 : 0;
+                AddFoxNeck(neck, island, midX, island + FoxLerp(8, 2, e), FoxLerp(8, 5, e), FoxLerp(9, 6, e), FoxLerp(5, 3, e));
+                neckOpacity = 1 - FoxSmooth(e, 0.6, 1);
+                earsOpacity = f;
             }
+            break;
+        }
+        case FoxPhaseOut:
+            foxOpacity = 1;
+            earsOpacity = 1;
+            break;
+        case FoxPhaseAbsorbing: {
+            CGFloat k = 0.45;
+            sway *= 1 - FoxSmooth(t, 0, k);
+            if (t < k) {
+                // The fox melts back into a drop...
+                CGFloat e = FoxSmooth(t, 0, k), f = 1 - FoxSmooth(t, 0, 0.15);
+                squash = FoxLerp(1, 0.88, e);
+                CGFloat sx = (1 + breath) / sqrt(squash), sy = squash * (1 + breath * 0.5);
+                dropPath = [self newOutlineWithDrop:CGPointMake(midX, island - 2 + kFoxDropRY) rx:kFoxDropRX - 1 ry:kFoxDropRY
+                                              toFox:1 - e hang:hang sway:sway sx:sx sy:sy];
+                dropOpacity = 1 - f;
+                foxOpacity = f > 0 ? 1 : 0;
+                AddFoxNeck(neck, island, midX, island + FoxLerp(2, 9, e), FoxLerp(5, 8, e), FoxLerp(6, 9, e), FoxLerp(3, 4, e));
+                neckOpacity = FoxSmooth(e, 0, 0.4);
+                earsOpacity = 1 - FoxSmooth(e, 0, 0.4);
+            } else {
+                // ...that is drawn up into the island.
+                CGFloat e = FoxSmooth(t, k, kFoxAbsorb), ry = FoxLerp(kFoxDropRY, 1, e), rx = FoxLerp(kFoxDropRX - 1, 5, e);
+                dropPath = [self newOutlineWithDrop:CGPointMake(midX, island - 2 + ry * (1 - 0.4 * e)) rx:rx ry:ry
+                                              toFox:0 hang:hang sway:0 sx:1 sy:1];
+                dropOpacity = 1;
+                AddFoxNeck(neck, island, midX, island + ry * 0.6, rx * 0.75, rx * 0.85, FoxLerp(4, 1.5, e));
+                neckOpacity = 1;
+            }
+            break;
         }
     }
-    // Going in, the root of the chain slides up into the island and the rest follows it
-    // (so the head is dragged in last); past full length the bones stretch instead, so
-    // it never comes loose from the island.
-    CGFloat depth = MAX(0, 1 - self.out);
-    CGFloat breathe = still ? 0 : sin(self.clock * 2.4) * 0.012;
-    CGFloat length = MAX(1, self.out) * (1 + breathe);
-    CGPoint anchor = CGPointMake(CGRectGetMidX(window.bounds),
-                                 IslandBottom(window) - kSlimeTuck - depth * (self.slimeSize.height + 4));
+    neckPath = neck;
 
+    // Blinks, now and then; sometimes twice.
+    if (!still && now > self.nextBlink) {
+        self.blinkAt = now;
+        self.nextBlink = now + (arc4random_uniform(4) == 0 ? 0.35 : 2.0 + arc4random_uniform(30) / 10.0);
+    }
+    CGFloat blink = (now - self.blinkAt < 0.17) ? sin((now - self.blinkAt) / 0.17 * M_PI) : 0;
+
+    CGFloat sx = (1 + breath) / sqrt(squash), sy = squash * (1 + breath * 0.5);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    [self simulate:dt anchor:anchor length:length still:still];
-    [self render:depth];
     self.container.frame = window.bounds;
-    self.container.hidden = depth > 0.98;
-    // Whatever is pulled up past the island would show above it, in the status bar:
-    // only draw from a little above the island's bottom edge (the island hides the rest).
+    self.container.hidden = self.phase == FoxPhaseInside;
+    self.fox.position = hang;
+    self.fox.transform = CATransform3DScale(CATransform3DMakeRotation(sway, 0, 0, 1), sx, sy, 1);
+    self.fox.opacity = foxOpacity;
+    self.lid.hidden = blink <= 0.01;
+    self.lid.transform = CATransform3DMakeScale(1, MAX(blink, 0.01), 1);
+    self.dropShape.path = dropPath;
+    self.dropShape.opacity = dropOpacity;
+    self.neck.path = neckPath;
+    self.neck.opacity = neckOpacity;
+    if (earsOpacity > 0) {
+        CGPathRef ears = [self newEarFilletsAt:island hang:hang sway:sway sx:sx sy:sy];
+        self.ears.path = ears;
+        CGPathRelease(ears);
+    }
+    self.ears.opacity = earsOpacity;
+    // Only draw from a little above the island's bottom edge (the island hides the rest),
+    // so nothing ever shows in the status bar beside it.
     if (!self.container.mask) {
         self.container.mask = [CALayer layer];
         self.container.mask.backgroundColor = [UIColor blackColor].CGColor;
     }
-    CGFloat clipTop = IslandBottom(window) - 30;
-    self.container.mask.frame = CGRectMake(0, clipTop, CGRectGetWidth(window.bounds),
-                                           CGRectGetHeight(window.bounds) - clipTop);
+    CGFloat clipTop = island - 30;
+    self.container.mask.frame = CGRectMake(0, clipTop, CGRectGetWidth(window.bounds), CGRectGetHeight(window.bounds) - clipTop);
     // Black on a black bar would vanish: a faint light edge keeps it readable in dark mode.
     self.container.shadowColor = [UIColor whiteColor].CGColor;
     self.container.shadowOffset = CGSizeZero;
     self.container.shadowRadius = 1.5;
     self.container.shadowOpacity = dark ? 0.55 : 0;
     [CATransaction commit];
+    if (dropPath) {
+        CGPathRelease(dropPath);
+    }
+    CGPathRelease(neck);
 
-    CGPoint tip = _points[kSlimeBones];
-    self.debug = [NSString stringWithFormat:@"islandBottom=%.1f bar=%.2f out=%.2f v=%.2f tip=(%.1f, %.1f) dark=%d",
-                                            IslandBottom(window), target, self.out, self.velocity,
-                                            tip.x - anchor.x, tip.y - anchor.y, dark];
+    self.debug = [NSString stringWithFormat:@"islandBottom=%.1f phase=%ld t=%.2f squash=%.2f dark=%d",
+                                            island, (long)self.phase, t, squash, dark];
 }
 
 @end

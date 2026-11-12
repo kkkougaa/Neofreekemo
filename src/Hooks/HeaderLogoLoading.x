@@ -24,12 +24,15 @@ static const CGFloat kLogoViewBox = 1024.0;
 // Middle of the bubble hole (x 53-445, y 66-401 in the 1024 logo units).
 static const CGPoint kBubbleCenter = {249.0, 232.0};
 
+BOOL NFBLogoHiddenByIsland(UIView* view);
+
 UIImageView* HeaderLogoInWindow(UIWindow* window) {
     NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
     while (queue.count > 0) {
         UIView* view = queue.firstObject;
         [queue removeObjectAtIndex:0];
-        if ([view isKindOfClass:[UIImageView class]] && !view.hidden && view.alpha > 0.01 &&
+        if ([view isKindOfClass:[UIImageView class]] && !view.hidden &&
+            (view.alpha > 0.01 || NFBLogoHiddenByIsland(view)) &&
             CGRectGetWidth(view.bounds) <= 80 && CGRectGetWidth(view.bounds) >= 24 &&
             [NSStringFromClass([view.superview.superview class]) containsString:@"NavigationBarTitleControl"]) {
             return (UIImageView*)view;

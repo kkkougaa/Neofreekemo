@@ -20,6 +20,8 @@ extern void NFBRecentTick(void);
 extern UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color);
 void NFBIslandLogoJiggle(void);
 static NSString* IslandDebugText(void);
+static BOOL IslandBubbleSpot(UIWindow* window, CGPoint* spot);
+static NSString* const kIslandHostID = @"nfb.island.bubble";
 
 static const NSInteger kBubbleTag = 0x4E464C42;
 static const NSInteger kBubbleHostTag = 0x4E464C48;
@@ -381,6 +383,13 @@ static void RenderBubble(void) {
     CGRect logoFrame = [window convertRect:logo.bounds fromView:logo];
     CGFloat right = CGRectGetMinX(logoFrame) - 6;
     CGFloat available = right - kLeftLimit;
+    // With the slime out under the island, the bubble comes out of the slime, to its right
+    // (the slime turns to face it), instead of out of the hidden logo.
+    CGPoint islandSpot = CGPointZero;
+    BOOL atIsland = IslandBubbleSpot(window, &islandSpot);
+    if (atIsland) {
+        available = CGRectGetWidth(window.bounds) - 12 - islandSpot.x;
+    }
     if (available < 60) {
         return;
     }
@@ -429,7 +438,12 @@ static void RenderBubble(void) {
     bubble.userInteractionEnabled = NO;
 
     CAShapeLayer* shape = [CAShapeLayer layer];
-    shape.path = BubblePath(width, kBubbleHeight).CGPath;
+    UIBezierPath* bubblePath = BubblePath(width, kBubbleHeight);
+    if (atIsland) {
+        // Mirrored: the tail on the left, pointing back at the slime.
+        [bubblePath applyTransform:CGAffineTransformMake(-1, 0, 0, 1, width, 0)];
+    }
+    shape.path = bubblePath.CGPath;
     shape.fillColor = CurrentAccentColor().CGColor;
     [bubble.layer addSublayer:shape];
 
@@ -461,23 +475,36 @@ static void RenderBubble(void) {
         [bubble addSubview:mark];
     }
 
-    // Opens out of the logo: scales from the tail side.
-    bubble.layer.anchorPoint = CGPointMake(1, 0.5);
-    bubble.layer.position = CGPointMake(right, kBubbleHeight / 2);
+    if (atIsland) {
+        for (UIView* sub in bubble.subviews) {
+            sub.frame = CGRectOffset(sub.frame, kBubbleTail, 0); // past the tail, now on the left
+        }
+        // Shoots out of the slime: scales from the tail side, on the left.
+        bubble.layer.anchorPoint = CGPointMake(0, 0.5);
+        bubble.layer.position = CGPointMake(islandSpot.x, kBubbleHeight / 2);
+    } else {
+        // Opens out of the logo: scales from the tail side.
+        bubble.layer.anchorPoint = CGPointMake(1, 0.5);
+        bubble.layer.position = CGPointMake(right, kBubbleHeight / 2);
+    }
 
-    // A strip across the screen at the logo's height that carries the bubble.
+    // A strip across the screen that carries the bubble: at the logo's height, or beside
+    // the slime (which then fades it in and out with itself).
+    CGFloat hostMidY = atIsland ? islandSpot.y : CGRectGetMidY(logoFrame);
     UIView* host = [[UIView alloc]
-        initWithFrame:CGRectMake(0, CGRectGetMidY(logoFrame) - kBubbleHeight / 2,
-                                 CGRectGetWidth(window.bounds), kBubbleHeight)];
+        initWithFrame:CGRectMake(0, hostMidY - kBubbleHeight / 2, CGRectGetWidth(window.bounds), kBubbleHeight)];
     host.tag = kBubbleHostTag;
+    host.accessibilityIdentifier = atIsland ? kIslandHostID : nil;
     host.userInteractionEnabled = NO;
     [host addSubview:bubble];
     [window addSubview:host];
     NFBIslandLogoJiggle(); // the slime under the island gives a little tug
-    if (!gFollow) {
-        gFollow = [NFBBubbleFollow new];
+    if (!atIsland) {
+        if (!gFollow) {
+            gFollow = [NFBBubbleFollow new];
+        }
+        [gFollow attachHost:host logo:logo];
     }
-    [gFollow attachHost:host logo:logo];
 
     if (existing) {
         // Just a change of words (or of the count): swapped in place.
@@ -501,7 +528,7 @@ static void RenderBubble(void) {
     }
     gShownText = shownKey;
     if (withSpotify && !existing) {
-        StartNoteEffect(window, right - width, CGRectGetMidY(logoFrame));
+        StartNoteEffect(window, atIsland ? islandSpot.x : right - width, hostMidY);
     }
     if (!existing) {
         BlinkLogo(logo);
@@ -907,6 +934,7 @@ static void CheckDDay(void) {
 
 static NSString* gLastTrack;
 static NSDate* gSpotifyAt;
+static BOOL gSpotifyPlaying; // a song is playing (the island slime puts its phone away)
 
 static void CheckSpotify(void) {
     NSInteger interval = MAX([BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 5);
@@ -943,6 +971,7 @@ static void CheckSpotify(void) {
             if (title.length == 0) {
                 // Nothing is playing. The next song after this counts as a change.
                 gLastTrack = @"";
+                gSpotifyPlaying = NO;
                 gSpotifyLog = [NSString stringWithFormat:@"%@ nothing playing", when];
                 return;
             }
@@ -951,6 +980,7 @@ static void CheckSpotify(void) {
             gSpotifyLog = [NSString stringWithFormat:@"%@ playing: %@ (%@)", when, track,
                                                      changed ? @"changed, showing" : @"same or first"];
             gLastTrack = track;
+            gSpotifyPlaying = YES;
             if (changed) {
                 NFBShowBubbleWithIcon(title, @"spotify");
             }
@@ -1025,14 +1055,14 @@ static const CGFloat kSlimeTuck = 4.0; // how far its top edge sits up under the
 
 // The silhouette of island_slime.png, row by row from its top edge (tucked under the
 // island) to the ear tips: left and right edge as a fraction of the picture's width
-// (the body's own edge: the paw and the phone it holds are left out on the left).
+// (the body's own edge, measured on the picture without the phone).
 // The liquid junction below hugs these edges.
 static const CGFloat kSlimeEdges[][2] = {
-    {0.150,0.850}, {0.111,0.910}, {0.094,0.940}, {0.085,0.966}, {0.085,0.979}, {0.100,0.979}, {0.110,0.974},
-    {0.130,0.953}, {0.160,0.923}, {0.180,0.936}, {0.200,0.974}, {0.215,0.966}, {0.230,0.936}, {0.240,0.949},
-    {0.252,0.979}, {0.256,0.996}, {0.295,0.979}, {0.303,0.944}, {0.325,0.953}, {0.355,0.962}, {0.333,0.966},
-    {0.350,0.970}, {0.397,0.970}, {0.397,0.970}, {0.402,0.970}, {0.406,0.966}, {0.415,0.962}, {0.423,0.957},
-    {0.436,0.944}, {0.449,0.936}, {0.466,0.919}, {0.487,0.897}, {0.509,0.547},
+    {0.136,1.000}, {0.105,1.000}, {0.088,1.000}, {0.082,0.986}, {0.091,0.972}, {0.108,0.957}, {0.102,0.935},
+    {0.116,0.915}, {0.200,0.912}, {0.364,0.949}, {0.312,0.986}, {0.284,0.963}, {0.267,0.929}, {0.256,0.957},
+    {0.250,0.986}, {0.261,1.000}, {0.295,0.972}, {0.310,0.949}, {0.335,0.960}, {0.358,0.966}, {0.335,0.974},
+    {0.358,0.977}, {0.412,0.977}, {0.398,0.977}, {0.401,0.977}, {0.409,0.972}, {0.415,0.966}, {0.429,0.960},
+    {0.440,0.949}, {0.452,0.943}, {0.469,0.926}, {0.486,0.903}, {0.511,0.551},
 };
 static const NSInteger kSlimeEdgeRows = sizeof(kSlimeEdges) / sizeof(kSlimeEdges[0]) - 1;
 
@@ -1071,6 +1101,17 @@ static UIImage* SlimeImage(void) {
     return image;
 }
 
+// The same picture without the phone in its paw: shown while a song is playing.
+static UIImage* SlimeMusicImage(void) {
+    static UIImage* image;
+    if (!image) {
+        NSURL* url = [[BHTBundle sharedBundle] pathForFile:@"island_slime_music.png"];
+        NSData* data = url ? [NSData dataWithContentsOfURL:url] : nil;
+        image = data ? [UIImage imageWithData:data scale:3.0] : nil;
+    }
+    return image;
+}
+
 // The rig: the picture is cut into kSlimeBones horizontal bands, one per bone of a chain
 // that starts under the island (its root is pinned there) and ends at the head and ears.
 // The joints are points simulated with Verlet integration: gravity pulls them down, soft
@@ -1103,6 +1144,12 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     objc_setAssociatedObject(logo, kHiddenByIslandKey, @(hide), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+// The logo is only see-through because of the slime: it still counts as the home logo
+// (for the Spotify check and the bubble), it just is not drawn.
+BOOL NFBLogoHiddenByIsland(UIView* view) {
+    return view && [objc_getAssociatedObject(view, kHiddenByIslandKey) boolValue];
+}
+
 @interface NFBIslandSlime : NSObject {
     CGPoint _points[kSlimeBones + 1];
     CGPoint _previous[kSlimeBones + 1];
@@ -1125,6 +1172,8 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
 @property (nonatomic, assign) CFTimeInterval clock;
 @property (nonatomic, assign) BOOL thumped;
 @property (nonatomic, copy) NSString* debug;
+@property (nonatomic, assign) CGFloat facing;  // 1 the picture as drawn (facing left), -1 mirrored (facing right)
+@property (nonatomic, assign) BOOL showing;    // out under the island, on the home timeline
 @end
 
 @implementation NFBIslandSlime
@@ -1155,6 +1204,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
 // Starts it inside the island; the spring and the rig bring it out.
 - (void)drop {
     self.out = UIAccessibilityIsReduceMotionEnabled() ? 1 : 0;
+    self.facing = 1;
     self.velocity = 0;
     self.thumped = NO;
     _pointsReady = NO;
@@ -1299,7 +1349,7 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
         _widths[i] = width;
         band.position = a;
         CATransform3D transform = CATransform3DMakeRotation(angle, 0, 0, 1);
-        band.transform = CATransform3DScale(transform, width, MAX(stretch, 0.001), 1);
+        band.transform = CATransform3DScale(transform, width * self.facing, MAX(stretch, 0.001), 1);
     }
 }
 
@@ -1330,7 +1380,8 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     CGFloat left, right;
     SlimeEdgesAt((bone + t) / kSlimeBones, &left, &right);
     CGFloat w = kSlimeWidth * _widths[bone];
-    CGFloat edges[2] = {cx + (left - 0.5) * w, cx + (right - 0.5) * w};
+    CGFloat a = cx + (left - 0.5) * w * self.facing, b = cx + (right - 0.5) * w * self.facing;
+    CGFloat edges[2] = {MIN(a, b), MAX(a, b)};
     // A thin tip (the ears going in last) only gets a small join, which shrinks away.
     CGFloat scale = MIN(1, MAX(0, (edges[1] - edges[0]) / 8));
     radius *= scale;
@@ -1369,10 +1420,15 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
         self.velocity = 0;
         self.thumped = NO;
         _pointsReady = NO;
+        self.showing = NO;
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         self.container.hidden = YES;
         [CATransaction commit];
+        UIView* host = [window viewWithTag:kBubbleHostTag];
+        if ([host.accessibilityIdentifier isEqualToString:kIslandHostID]) {
+            host.alpha = 0;
+        }
         return;
     }
     SetLogoHiddenByIsland(logo, YES);
@@ -1431,8 +1487,34 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     CGPoint anchor = CGPointMake(CGRectGetMidX(window.bounds),
                                  IslandBottom(window) - kSlimeTuck - depth * (self.slimeSize.height + 4));
 
+    // Turns to face the bubble while it is open (it opens to the right), then back. The
+    // turn is a quick squash through edge-on, like flipping over.
+    UIView* bubble = [window viewWithTag:kBubbleTag];
+    BOOL talking = [bubble.superview.accessibilityIdentifier isEqualToString:kIslandHostID];
+    CGFloat facingTarget = talking ? -1 : 1;
+    self.facing = still ? facingTarget : self.facing + (facingTarget - self.facing) * MIN(1, dt * 9);
+    if (fabs(self.facing) < 0.02) {
+        self.facing = facingTarget * 0.02;
+    }
+    // While a song is playing it puts its phone away.
+    UIImage* picture = SlimeImage();
+    if (gSpotifyPlaying && [BHTSettings boolForKey:@"kemo_bubble_spotify"] && SlimeMusicImage()) {
+        picture = SlimeMusicImage();
+    }
+    if (self.bands.firstObject.contents != (__bridge id)picture.CGImage) {
+        for (CALayer* band in self.bands) {
+            CATransition* fade = [CATransition animation];
+            fade.type = kCATransitionFade;
+            fade.duration = 0.3;
+            [band addAnimation:fade forKey:@"picture"];
+        }
+    }
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    for (CALayer* band in self.bands) {
+        band.contents = (__bridge id)picture.CGImage;
+    }
     [self simulate:dt anchor:anchor length:length still:still];
     [self render:depth];
     // Thicker while it is pulled in or stretched, settling to a slim join at rest.
@@ -1442,6 +1524,11 @@ static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
     CGPathRelease(junction);
     self.container.frame = window.bounds;
     self.container.hidden = depth > 0.98;
+    self.showing = self.out > 0.5;
+    UIView* islandHost = [window viewWithTag:kBubbleHostTag];
+    if ([islandHost.accessibilityIdentifier isEqualToString:kIslandHostID]) {
+        islandHost.alpha = MAX(0, MIN(1, (self.out - 0.5) * 2)); // goes in with the slime
+    }
     // Whatever is pulled up past the island would show above it, in the status bar:
     // only draw from a little above the island's bottom edge (the island hides the rest).
     if (!self.container.mask) {
@@ -1470,6 +1557,15 @@ static NFBIslandSlime* gIsland;
 
 void NFBIslandLogoJiggle(void) {
     [gIsland jiggle];
+}
+
+// Where a bubble opens when the slime is out: just right of it, about head height.
+static BOOL IslandBubbleSpot(UIWindow* window, CGPoint* spot) {
+    if (!gIsland || gIsland.window != window || !gIsland.showing) {
+        return NO;
+    }
+    *spot = CGPointMake(CGRectGetMidX(window.bounds) + kSlimeWidth / 2 + 4, IslandBottom(window) + 18);
+    return YES;
 }
 
 static NSString* IslandDebugText(void) {

@@ -1,0 +1,65 @@
+name: Build Link Opener
+
+# The small "X 링크 열기" app (apps/LinkOpener): a Safari extension that sends x.com and
+# twitter.com pages to NeoFreeBird. Built unsigned; sign it with Feather or SideStore.
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Publish a GitHub release with the IPA"
+        default: true
+        required: false
+        type: boolean
+
+jobs:
+  build:
+    name: Build Link Opener
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install tools
+        run: brew install xcodegen ldid
+
+      - name: Read version
+        id: version
+        run: |
+          echo "version=$(awk '/MARKETING_VERSION/ {gsub(/"/, "", $2); print $2; exit}' apps/LinkOpener/project.yml)" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          cd apps/LinkOpener
+          xcodegen generate
+          xcodebuild -project LinkOpener.xcodeproj -target LinkOpener -sdk iphoneos -configuration Release \
+            SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package IPA
+        run: |
+          cd apps/LinkOpener
+          APP=build/Release-iphoneos/LinkOpener.app
+          ls "$APP" "$APP/PlugIns"
+          # Fake signatures so installers that expect a signed bundle accept it; the real
+          # signature comes from Feather or SideStore.
+          ldid -S "$APP/PlugIns/LinkOpenerExtension.appex/LinkOpenerExtension"
+          ldid -S "$APP/LinkOpener"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry "LinkOpener_${{ steps.version.outputs.version }}.ipa" Payload
+
+      - name: Create Release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: linkopener-v${{ steps.version.outputs.version }}
+          name: X 링크 열기 v${{ steps.version.outputs.version }}
+          files: apps/LinkOpener/LinkOpener_${{ steps.version.outputs.version }}.ipa
+          draft: false
+          prerelease: true
+          make_latest: false

@@ -35,6 +35,5 @@ in the order above.
   Bezier fillets tangent to the pill outline (flat middle, round ends) and to the
   body edge (`edges.json`), plus a solid neck.
 - Stretchy-arm wave; only "sleepy" kept among the new expressions; no climbing.
-- `sceneA.py`: island close-up. `sceneB.py`: full-screen fall (pinch off,
-  teardrop, splat on the tab bar, rise upright with legs, hops, melt, strand
-  from the island sucks it back, re-emerge).
+- `sceneA.py`: island close-up (the review video).
+- The falling sequence was tried and dropped; it is not part of the design.

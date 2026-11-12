@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.32",
+      "subtitle": "NeoFreeBird version 7.3.34",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.34",
+          "buildVersion": "34",
+          "date": "2026-11-12T06:20:02Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.34/NeoFreeBird-Twitter-sideloaded_7.3.34_12.38.1.ipa",
+          "size": 266209540,
+          "minOSVersion": "15.0",
+          "localizedDescription": "다이나믹 아일랜드 슬라임이 작아지고(60→44pt), 아일랜드와 몸이 이어지는 곳에 쫀득한 액체 곡선이 생겼어요. 들어갈 때도 곡선이 몸 윤곽을 따라 목처럼 빨려 올라가요."
+        },
         {
           "version": "7.3.32",
           "buildVersion": "32",

@@ -559,4 +559,3 @@
 "CUSTOM_SEND_SOUND_TOO_LONG" = "Odabrani zvuk je predug. Zvuk slanja može biti maksimalno 7 sekundi dug.";
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "Dobro došao!";
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "Provjeri je li NeoFreeBird instaliran s našeg službenog GitHuba. Ne možemo pomoći s problemima uzrokovanim drugim IPA datotekama, a možda ne možeš ni znati sadrži li tvoja verzija zlonamjerni kod. Ako imaš pitanja, otvori prijavu na GitHubu.";
-"KEMO_ISLAND_LOGO_TITLE" = "Slime character hanging from the Dynamic Island";

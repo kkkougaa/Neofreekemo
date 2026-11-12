@@ -581,4 +581,3 @@
 "SETTINGS_CODE_TOO_BIG" = "Copied to the clipboard. The backup is too large for a QR code.";
 "SETTINGS_CODE_EMPTY" = "The clipboard does not have a settings code.";
 "SETTINGS_CODE_RESTORED" = "%ld settings restored";
-"KEMO_ISLAND_LOGO_TITLE" = "Slime character hanging from the Dynamic Island";

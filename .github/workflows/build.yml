@@ -25,6 +25,7 @@ on:
         options:
           - rootfull
           - sideloaded
+          - adhoc
           - trollstore
           - rootless
       twitter_branding:
@@ -88,7 +89,7 @@ jobs:
           submodules: recursive
 
       - name: Install cyan
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: pip install https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
       - name: iOS SDK Caching
@@ -122,7 +123,7 @@ jobs:
           echo "$TWEAK_NAME $TWEAK_VERSION"
 
       - name: Prepare X IPA
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         id: x_version
         run: |
           wget "$IPA_URL" --no-verbose -O main/packages/com.atebits.Tweetie2.ipa
@@ -135,7 +136,7 @@ jobs:
           IPA_URL: ${{ inputs.decrypted_ipa_url }}
 
       - name: Prepare Image Pack
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: |
           if [ -n "$IMAGE_URL" ]; then
             wget "$IMAGE_URL" --no-verbose -O main/resource-pack.zip
@@ -168,7 +169,7 @@ jobs:
           BUILD_DIR: ${{ github.workspace }}/ffmpeg-build
 
       - name: Rebrand IPA
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: |
           cd ${{ github.workspace }}/main
           IMAGE_FLAG=""
@@ -177,7 +178,7 @@ jobs:
             "packages/$(ls -t packages | head -n1)"
 
       - name: Rename IPA to include IPA version
-        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'trollstore'
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: |
           mv "main/packages/$(ls -t main/packages | head -n1)" \
              "main/packages/${{ steps.tweak_info.outputs.name }}-${BRANDING}-${{ inputs.deploy_format }}_${{ steps.tweak_info.outputs.version }}_${{ steps.x_version.outputs.version }}.${IPA_EXT}"
@@ -206,7 +207,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ steps.tweak_info.outputs.version }}
-          name: v${{ steps.tweak_info.outputs.version }} - ${{ steps.tweak_info.outputs.name }}
+          # The ad-hoc IPA (with the Safari extension) gets its own tag, so it never takes
+          # the place of the SideStore release of the same version.
+          tag_name: v${{ steps.tweak_info.outputs.version }}${{ inputs.deploy_format == 'adhoc' && '-adhoc' || '' }}
+          name: v${{ steps.tweak_info.outputs.version }}${{ inputs.deploy_format == 'adhoc' && ' (ad-hoc, Safari extension)' || '' }} - ${{ steps.tweak_info.outputs.name }}
           files: main/packages/${{ steps.package_name.outputs.package }}
           draft: false
+          prerelease: ${{ inputs.deploy_format == 'adhoc' }}

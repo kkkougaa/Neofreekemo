@@ -101,11 +101,13 @@ die() { err "$1"; exit 1; }
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--sideloaded | --rootless | --trollstore | --rootfull]
+Usage: $(basename "$0") [--sideloaded | --adhoc | --rootless | --trollstore | --rootfull]
 TL;DR: You need to select one flag to build NeoFreeBird.
 
 Flags (required):
   --sideloaded   Compile NeoFreeBird as a .ipa so you can sideload it with AltStore, Sideloadly or similar.
+  --adhoc        Like --sideloaded, plus the Safari extension that opens x.com links in the app,
+                 for signing yourself (Feather, ad-hoc or development certificate).
   --rootless     Compile NeoFreeBird as a .deb file that does not require a jailbreak.
   --trollstore   Compile NeoFreeBird as a .tipa so you can install it using TrollStore.
   --rootfull     Compile NeoFreeBird as a .deb file that requires a jailbreak.
@@ -131,6 +133,10 @@ while [[ $# -gt 0 ]]; do
     --sideloaded|--sideloaded=*)
       [[ -n "$MODE" ]] && die "Multiple flags provided. Choose one."
       MODE="sideloaded"; shift
+      ;;
+    --adhoc)
+      [[ -n "$MODE" ]] && die "Multiple flags provided. Choose one."
+      MODE="adhoc"; shift
       ;;
     --rootless|--rootless=*)
       [[ -n "$MODE" ]] && die "Multiple flags provided. Choose one."
@@ -178,6 +184,34 @@ if [[ ! -f "$SCRIPT_DIR/deps/ffmpeg-kit-next/build/lib/libffmpegkit.a" ]]; then
 fi
 
 case "$MODE" in
+  adhoc)
+    # The sideloaded IPA plus the Safari extension. SideStore cannot install an IPA with
+    # extensions in it, so this one is for signing yourself (Feather and the like): the
+    # extension needs a profile of its own that covers its bundle ID.
+    say "Preparing to compile NeoFreeBird. Argument added: --adhoc."
+    clean_tree
+    make SIDELOADED=1
+    if [[ $? -ne 0 ]]; then
+      die "An error occurred when building."
+    fi
+    if [[ -e ./packages/com.atebits.Tweetie2.ipa ]]; then
+      say "Building the IPA."
+      if command -v cyan >/dev/null 2>&1; then
+        cyan -i packages/com.atebits.Tweetie2.ipa -o packages/NeoFreeBird-adhoc --ignore-encrypted \
+          -uwf .theos/obj/debug/zxPluginsInject.dylib .theos/obj/debug/libbhFLEX.dylib \
+          .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle
+        # X's own extensions go (widgets, notifications...), only the Safari one is added.
+        strip_plugins packages/NeoFreeBird-adhoc.ipa
+        say "Injecting OpenTwitterSafariExtension.appex into the IPA."
+        inject_appex packages/NeoFreeBird-adhoc.ipa
+      else
+        say "Skipping cyan step because it is not installed."
+      fi
+      say "NeoFreeBird has been successfully built. Enjoy!"
+    else
+      err "packages/com.atebits.Tweetie2.ipa not found."
+    fi
+    ;;
   sideloaded)
     say "Preparing to compile NeoFreeBird. Argument added: --sideloaded."
     clean_tree

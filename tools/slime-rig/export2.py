@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFilter
 N=1024; C=(88,64,1024,1024); CW,CH=C[2]-C[0],C[3]-C[1]
 pts=set(pickle.load(open(S+'/comps.png.pkl','rb'))[0]); P=pickle.load(open(S+'/parts.pkl','rb'))
 # the thin crescent along the logo's bottom-right corner is not part of the fox
-sliver=lambda p: p[0]>=978 and p[1]>=770
+sliver=lambda p: (p[0]>=978 and p[1]>=770) or (p[0]>=958 and p[1]>=850)
 pts={p for p in pts if not sliver(p)}
 for k in P: P[k]={p for p in P[k] if not sliver(p)}
 def poly_mask(poly):
@@ -41,6 +41,7 @@ for name,ear,piv,tip in (('earL',earLfull,(585,338),(575,78)),('earR',earRfull,(
     parts[name+'Base']=lo; parts[name+'Tip']=hi
     pivots[name+'Base']=piv; pivots[name+'Tip']=mid; tips[name+'Base']=mid; tips[name+'Tip']=tip
 parts['phone']=P['phone']; pivots['phone']=(300,828); tips['phone']=(190,640)
+parts['paw']=P['paw']; pivots['paw']=(455,975); tips['paw']=(200,880)
 parts['base']=base
 for k in ('lid','oval','mouth'): parts[k]=P[k]
 pivots.update({'lid':(595,541),'oval':(575,556),'mouth':(377,625)})
@@ -65,7 +66,8 @@ im=Image.new('RGB',(N,N),'white'); ip=im.load()
 cols={'base':(0,0,0),'earLBase':(220,40,40),'earLTip':(255,140,140),'earRBase':(40,90,220),'earRTip':(140,170,255),'phone':(30,160,60),'lid':(240,170,0),'oval':(200,0,200),'mouth':(0,180,180)}
 fc=[(255,120,0),(160,80,0),(0,150,150),(120,0,160),(200,0,90),(90,160,0)]
 for i,n in enumerate(tufts): cols[n]=fc[i]
-for k in ['earLTip','earRTip','earLBase','earRBase','phone']+list(tufts)+['base','lid','oval','mouth']:
+cols['paw']=(255,120,0)
+for k in ['earLTip','earRTip','earLBase','earRBase','phone']+list(tufts)+['base','paw','lid','oval','mouth']:
     for x,y in parts[k]: ip[x,y]=cols[k]
 im.resize((640,640)).save(S+'/parts2.png')
 print(sorted(parts))

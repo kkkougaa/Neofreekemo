@@ -14,3 +14,14 @@ for review before it goes into the tweak. Nothing here is built into the app.
 
 The scripts expect a scratch directory with the intermediate pickles; run them
 in the order above.
+
+## Draft v2
+
+- Cheek triangles filled, paw cut out (wrist pivot) for waving, nose at 78%.
+- `rig3.py`: the engine (14-bone spine with a settable root direction, gravity
+  and stiffness, free root and floor for falling; bones for ears, fur, phone and
+  paw; ten expressions with eye shapes, lid tilt and ear poses).
+- `scene3.py`: the v2 review video (greeting wave, phone, facing-side bubble,
+  expression sheet, climbing the pill ends to look at the clock and battery,
+  falling and reuniting by a goo thread, music mode on a wide island).
+- `sheet.py`: the close-up expression sheet.

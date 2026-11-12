@@ -1,7 +1,7 @@
 import sys,json,math
 from PIL import Image, ImageFilter
 B,S=sys.argv[1],sys.argv[2]
-names=['phone','earLTip','earRTip','earLBase','earRBase','furA','furB','furC','furD','furE','furF','base']
+names=['paw','phone','earLTip','earRTip','earLBase','earRBase','furA','furB','furC','furD','furE','furF','base']
 first=Image.open(f'{B}/slime_base.png'); TW,TH=first.size
 a=Image.new('L',(TW,TH),0)
 for n in names: a=Image.composite(Image.new('L',(TW,TH),255),a,Image.open(f'{B}/slime_{n}.png').split()[3].point(lambda v:255 if v>110 else 0))

@@ -19,6 +19,7 @@ extern UIWindow* NFBKeyWindow(void);
 extern void NFBRecentTick(void);
 extern UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color);
 void NFBIslandLogoJiggle(void);
+static NSString* IslandDebugText(void);
 
 static const NSInteger kBubbleTag = 0x4E464C42;
 static const NSInteger kBubbleHostTag = 0x4E464C48;
@@ -1061,6 +1062,20 @@ static UIImage* SlimeImage(void) {
 static const NSInteger kSlimeBones = 9;
 static const NSInteger kSlimeSubsteps = 4;
 
+// Set on the header logo while the slime has hidden it, so only that is undone.
+static const void* kHiddenByIslandKey = &kHiddenByIslandKey;
+
+static void SetLogoHiddenByIsland(UIImageView* logo, BOOL hide) {
+    if (!logo || [objc_getAssociatedObject(logo, kHiddenByIslandKey) boolValue] == hide) {
+        return;
+    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    logo.layer.opacity = hide ? 0 : 1;
+    [CATransaction commit];
+    objc_setAssociatedObject(logo, kHiddenByIslandKey, @(hide), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 @interface NFBIslandSlime : NSObject {
     CGPoint _points[kSlimeBones + 1];
     CGPoint _previous[kSlimeBones + 1];
@@ -1069,6 +1084,7 @@ static const NSInteger kSlimeSubsteps = 4;
 @property (nonatomic, strong) CADisplayLink* link;
 @property (nonatomic, weak) UIWindow* window;
 @property (nonatomic, weak) UIView* bar;
+@property (nonatomic, weak) UIImageView* logo; // the header logo hidden while the slime shows
 @property (nonatomic, strong) CALayer* container;
 @property (nonatomic, strong) NSArray<CALayer*>* bands;
 @property (nonatomic, assign) CGSize slimeSize;
@@ -1084,6 +1100,8 @@ static const NSInteger kSlimeSubsteps = 4;
 
 @implementation NFBIslandSlime
 
+// Removes the slime at once (the option was turned off, or there is no island) and
+// puts the header logo back.
 - (void)stop {
     [self.link invalidate];
     self.link = nil;
@@ -1091,6 +1109,7 @@ static const NSInteger kSlimeSubsteps = 4;
     self.container = nil;
     self.bands = nil;
     _pointsReady = NO;
+    SetLogoHiddenByIsland(self.logo, NO);
 }
 
 - (void)start {
@@ -1360,15 +1379,7 @@ static void UpdateIslandSlime(UIView* control, UIImageView* logo) {
     UIWindow* window = control.window;
     BOOL on = IslandLogoOn(window) && SlimeImage() != nil;
     // Only undo what was done here, so other effects on the logo are left alone.
-    static const void* kHiddenByIslandKey = &kHiddenByIslandKey;
-    BOOL hidden = [objc_getAssociatedObject(logo, kHiddenByIslandKey) boolValue];
-    if (on != hidden) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        logo.layer.opacity = on ? 0 : 1;
-        [CATransaction commit];
-        objc_setAssociatedObject(logo, kHiddenByIslandKey, @(on), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    SetLogoHiddenByIsland(logo, on);
     if (!on) {
         if (gIsland) {
             [gIsland stop];
@@ -1385,6 +1396,7 @@ static void UpdateIslandSlime(UIView* control, UIImageView* logo) {
         gIsland = [NFBIslandSlime new];
     }
     gIsland.window = window;
+    gIsland.logo = logo;
     if (bar) {
         gIsland.bar = bar;
     }
@@ -1552,7 +1564,7 @@ static void ApplyLogoShift(UIView* control) {
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification* note) {
-                    if (gIsland.hasBase) {
+                    if (gIsland) {
                         [gIsland drop];
                     }
                     static NSTimer* timer;

@@ -37,3 +37,15 @@ in the order above.
 - Stretchy-arm wave; only "sleepy" kept among the new expressions; no climbing.
 - `sceneA.py`: island close-up (the review video).
 - The falling sequence was tried and dropped; it is not part of the design.
+
+## Draft v4 (from 형's artwork)
+
+- `art_pose.py`: cuts the poses out of the artwork sheet (standing, prone, absorb,
+  blob, puddle, ball, splat), fills the cheek triangles, splits the standing pose's
+  right arm off as its own part, traces outlines for morphing, and warps a pose
+  on a mesh (squash, shear, tail and ear sway, breathing).
+- `anim4.py`: drip from the island, ball falls onto the 추천/팔로우 중 tab row,
+  splat, rise into the full-body pose, idle, stretched-arm wave, lie down,
+  absorb into a puddle, strand back up into the island.
+- The artwork itself is not committed; the scripts expect it as `art.png` in the
+  scratch directory.

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.36",
+      "subtitle": "NeoFreeBird version 7.3.37",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.37",
+          "buildVersion": "37",
+          "date": "2026-11-13T04:12:02Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.37/NeoFreeBird-Twitter-sideloaded_7.3.37_12.43.ipa",
+          "size": 268010852,
+          "minOSVersion": "15.0",
+          "localizedDescription": "X 12.43 기반으로 올렸어요. 트윅 기능은 7.3.36과 같아요."
+        },
         {
           "version": "7.3.36",
           "buildVersion": "36",

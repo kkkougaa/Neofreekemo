@@ -215,7 +215,7 @@ jobs:
           # The ad-hoc IPA (with the Safari extension) gets its own tag, so it never takes
           # the place of the SideStore release of the same version.
           tag_name: v${{ steps.tweak_info.outputs.version }}${{ inputs.deploy_format == 'adhoc' && '-adhoc' || '' }}${{ inputs.release_suffix && format('-{0}', inputs.release_suffix) || '' }}
-          name: v${{ steps.tweak_info.outputs.version }}${{ inputs.deploy_format == 'adhoc' && ' (ad-hoc, Safari extension)' || '' }}${{ inputs.release_suffix && format(' (test: {0})', inputs.release_suffix) || '' }} - ${{ steps.tweak_info.outputs.name }}
+          name: v${{ steps.tweak_info.outputs.version }}${{ inputs.deploy_format == 'adhoc' && ' (ad-hoc, Safari extension)' || '' }}${{ inputs.release_suffix && format(' (test {0})', inputs.release_suffix) || '' }} - ${{ steps.tweak_info.outputs.name }}
           files: main/packages/${{ steps.package_name.outputs.package }}
           draft: false
           prerelease: ${{ inputs.deploy_format == 'adhoc' || inputs.release_suffix != '' }}

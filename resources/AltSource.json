@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.37",
+      "subtitle": "NeoFreeBird version 7.3.38",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.38",
+          "buildVersion": "38",
+          "date": "2026-11-13T23:19:50Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.38/NeoFreeBird-Twitter-sideloaded_7.3.38_12.43.ipa",
+          "size": 268024616,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 탭을 길게 누르면 화면이 위로 올라가고 아래 검은 도크에 계정이 줄지어 나와요. 손가락을 떼지 않고 계정 위로 밀어서 놓거나, 손을 뗀 뒤 눌러서 전환해요. 올라간 화면을 누르거나 아래로 끌면 닫혀요."
+        },
         {
           "version": "7.3.37",
           "buildVersion": "37",

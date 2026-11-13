@@ -31,6 +31,11 @@
 //
 //  7.3.27: profile pictures are kept on disk (Application Support) and only
 //  downloaded again when an account's picture address changes.
+//
+//  7.3.38: long-pressing the Home tab lifts the whole screen up like a card and
+//  shows the accounts in a row on a black dock underneath. Slide the held
+//  finger onto one and let go, or let go first and tap one. Tapping or pulling
+//  down the lifted screen puts it back.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -39,6 +44,9 @@
 static const NSInteger kBubbleLimit = 8;
 static const CGFloat kBubbleSize = 56.0;
 static const CGFloat kHitRadius = 44.0;
+
+@class NFBAccountDock;
+static __weak NFBAccountDock* gLiveDock = nil;
 
 static BOOL BubblesOn(void) {
     return [BHTSettings boolForKey:@"kemo_account_bubbles"];
@@ -1455,7 +1463,8 @@ static BOOL FingerHeld(NSTimeInterval grace) {
 }
 
 static BOOL FanIsUp(void) {
-    return [NFBAccountPressHandler shared].fan.superview != nil || gCaughtFan.superview != nil;
+    return [NFBAccountPressHandler shared].fan.superview != nil || gCaughtFan.superview != nil ||
+           gLiveDock != nil;
 }
 
 static BOOL OpenCaughtFan(UIWindow* window) {
@@ -1559,6 +1568,560 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
         }
     }
 }
+
+// MARK: - Account dock (long press on the Home tab)
+
+// The whole screen slides up like a card, its bottom corners rounded, and a
+// black dock underneath shows every account in a row. Every window subview
+// moves together so overlays stay lined up with the screen they belong to.
+
+static const CGFloat kDockGap = 18.0;
+static const CGFloat kDockCardRadius = 34.0;
+
+@interface NFBAccountDock : UIView
+@property (nonatomic, weak) UIWindow* hostWindow;
+@property (nonatomic, strong) UIScrollView* strip;
+@property (nonatomic, strong) NSArray<NFBAccountBubble*>* bubbles;
+@property (nonatomic, strong) UIView* catcher;
+@property (nonatomic, strong) NSArray<UIView*>* lifted;
+@property (nonatomic, strong) NSArray<NSValue*>* liftedTransforms;
+@property (nonatomic, weak) UIView* rounded;
+@property (nonatomic, assign) CGFloat oldRadius;
+@property (nonatomic, assign) BOOL oldClips;
+@property (nonatomic, assign) CACornerMask oldCorners;
+@property (nonatomic, copy) NSString* oldCurve;
+@property (nonatomic, assign) CGFloat lift;
+@property (nonatomic, weak) NFBAccountBubble* hovered;
+@property (nonatomic, assign) BOOL closing;
++ (BOOL)openInWindow:(UIWindow*)window;
+- (void)hoverAt:(CGPoint)point;
+- (void)releaseAt:(CGPoint)point;
+- (void)closeWith:(NFBAccountBubble*)chosen;
+@end
+
+@implementation NFBAccountDock
+
++ (BOOL)openInWindow:(UIWindow*)window {
+    if (!window || gLiveDock || FanIsUp()) {
+        return NO;
+    }
+    NSArray* accounts = TwitterAccounts();
+    if (accounts.count < 2) {
+        return NO;
+    }
+    UIViewController* root = window.rootViewController;
+    // A presented sheet lives beside the root view; lifting only one of them
+    // would tear the screen apart, so leave X alone then.
+    if (!root.isViewLoaded || root.presentedViewController) {
+        gBubbleLog = @"dock skipped: something is presented";
+        return NO;
+    }
+    NFBAccountDock* dock = [[NFBAccountDock alloc] initWithWindow:window accounts:accounts];
+    [dock open];
+    gBubbleLog = [NSString stringWithFormat:@"dock opened (%lu accounts)", (unsigned long)accounts.count];
+    return YES;
+}
+
+- (instancetype)initWithWindow:(UIWindow*)window accounts:(NSArray*)accounts {
+    if ((self = [super initWithFrame:window.bounds])) {
+        _hostWindow = window;
+        self.backgroundColor = [UIColor blackColor];
+        self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        CGFloat width = CGRectGetWidth(self.bounds);
+        CGFloat height = CGRectGetHeight(self.bounds);
+        CGFloat stripHeight = kBubbleSize + 32.0;
+        _lift = stripHeight + 20.0 + MAX(window.safeAreaInsets.bottom, 12.0);
+
+        _strip = [[UIScrollView alloc] initWithFrame:CGRectMake(0, height - _lift + 12.0, width, stripHeight)];
+        _strip.showsHorizontalScrollIndicator = NO;
+        _strip.alwaysBounceHorizontal = YES;
+        _strip.clipsToBounds = NO;
+        [self addSubview:_strip];
+
+        id current = CurrentAccount();
+        NSArray* ordered = OrderedAccounts(accounts);
+        // One more place at the end for the gear that opens the order editor.
+        NSInteger count = (NSInteger)ordered.count + 1;
+        CGFloat total = count * kBubbleSize + (count - 1) * kDockGap;
+        CGFloat side = MAX(20.0, (width - total) / 2.0);
+        _strip.contentSize = CGSizeMake(total + side * 2.0, stripHeight);
+
+        NSMutableArray* bubbles = [NSMutableArray array];
+        for (NSInteger i = 0; i < count; i++) {
+            BOOL gear = i == count - 1;
+            id account = gear ? nil : ordered[i];
+            NFBAccountBubble* bubble = gear ? [[NFBAccountBubble alloc] initSettings]
+                                            : [[NFBAccountBubble alloc] initWithAccount:account
+                                                                                current:SameAccount(account, current)];
+            CGFloat x = side + i * (kBubbleSize + kDockGap);
+            bubble.frame = CGRectMake(x, 6.0, kBubbleSize, kBubbleSize);
+            bubble.slot = bubble.center;
+            bubble.initial.textColor = [UIColor whiteColor];
+            bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
+            bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
+            [_strip addSubview:bubble];
+            [bubbles addObject:bubble];
+
+            if (!gear) {
+                UILabel* name = [[UILabel alloc]
+                    initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + kBubbleSize + 6.0, kBubbleSize + kDockGap, 15.0)];
+                name.text = AccountTitle(account);
+                name.font = [UIFont systemFontOfSize:11 weight:bubble.current ? UIFontWeightBold : UIFontWeightMedium];
+                name.textColor = [UIColor colorWithWhite:1 alpha:bubble.current ? 0.95 : 0.6];
+                name.textAlignment = NSTextAlignmentCenter;
+                name.lineBreakMode = NSLineBreakByTruncatingTail;
+                name.isAccessibilityElement = NO;
+                [_strip addSubview:name];
+
+                __weak NFBAccountBubble* weakBubble = bubble;
+                LoadAvatar(account, ^(UIImage* image) {
+                    [weakBubble setImage:image];
+                });
+                [bubble setCount:bubble.current ? 0 : BadgeCountFor(account)];
+            }
+        }
+        _bubbles = bubbles;
+
+        // Start the row on the account in use when it would be off screen.
+        for (NFBAccountBubble* bubble in bubbles) {
+            if (bubble.current) {
+                CGFloat maxOffset = MAX(0, _strip.contentSize.width - width);
+                _strip.contentOffset = CGPointMake(MIN(maxOffset, MAX(0, bubble.center.x - width / 2.0)), 0);
+            }
+        }
+
+        UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                              action:@selector(dockTapped:)];
+        [self addGestureRecognizer:tap];
+    }
+    return self;
+}
+
+- (void)open {
+    UIWindow* window = self.hostWindow;
+    UIView* rootView = window.rootViewController.view;
+
+    NSMutableArray* lifted = [NSMutableArray array];
+    NSMutableArray* transforms = [NSMutableArray array];
+    for (UIView* view in window.subviews) {
+        [lifted addObject:view];
+        [transforms addObject:[NSValue valueWithCGAffineTransform:view.transform]];
+    }
+    self.lifted = lifted;
+    self.liftedTransforms = transforms;
+    [window insertSubview:self atIndex:0];
+
+    self.rounded = rootView;
+    self.oldRadius = rootView.layer.cornerRadius;
+    self.oldClips = rootView.clipsToBounds;
+    self.oldCorners = rootView.layer.maskedCorners;
+    self.oldCurve = rootView.layer.cornerCurve;
+    rootView.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    rootView.layer.cornerCurve = kCACornerCurveContinuous;
+    rootView.clipsToBounds = YES;
+
+    // Covers the lifted screen: tap it or pull it down to put it back.
+    self.catcher = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(window.bounds),
+                                                            CGRectGetHeight(window.bounds) - self.lift)];
+    self.catcher.backgroundColor = [UIColor clearColor];
+    self.catcher.accessibilityLabel = @"Close";
+    [self.catcher addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                               action:@selector(catcherTapped:)]];
+    [self.catcher addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self
+                                                                               action:@selector(catcherPanned:)]];
+    [window addSubview:self.catcher];
+
+    gLiveDock = self;
+    if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        UIImpactFeedbackGenerator* thump =
+            [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        [thump impactOccurred];
+    }
+
+    [UIView animateWithDuration:0.42
+        delay:0
+        usingSpringWithDamping:0.86
+        initialSpringVelocity:0.4
+        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+        animations:^{
+            [self applyLift:self.lift];
+            rootView.layer.cornerRadius = kDockCardRadius;
+        }
+        completion:nil];
+
+    NSInteger index = 0;
+    for (NFBAccountBubble* bubble in self.bubbles) {
+        bubble.alpha = 0;
+        bubble.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.6, 0.6),
+                                                   CGAffineTransformMakeTranslation(0, 24));
+        [UIView animateWithDuration:0.46
+            delay:0.06 + index * 0.035
+            usingSpringWithDamping:0.7
+            initialSpringVelocity:0.6
+            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+            animations:^{
+                bubble.alpha = 1;
+                bubble.transform = CGAffineTransformIdentity;
+            }
+            completion:^(BOOL finished) {
+                bubble.settled = YES;
+            }];
+        index++;
+    }
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(appWillResign:)
+                                                 name:UIApplicationWillResignActiveNotification
+                                               object:nil];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+// lift 0 is the screen where it was; self.lift is fully up.
+- (void)applyLift:(CGFloat)lift {
+    for (NSUInteger i = 0; i < self.lifted.count; i++) {
+        CGAffineTransform base = self.liftedTransforms[i].CGAffineTransformValue;
+        self.lifted[i].transform = CGAffineTransformConcat(base, CGAffineTransformMakeTranslation(0, -lift));
+    }
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    // Rotated or resized: the row no longer fits, so just put things back.
+    if (self.hostWindow && !self.closing &&
+        fabs(CGRectGetHeight(self.bounds) - CGRectGetHeight(self.hostWindow.bounds)) > 1) {
+        [self closeWith:nil];
+    }
+}
+
+- (void)appWillResign:(NSNotification*)note {
+    [self closeWith:nil];
+}
+
+- (NFBAccountBubble*)bubbleAt:(CGPoint)point {
+    NFBAccountBubble* best = nil;
+    CGFloat bestDistance = kHitRadius;
+    for (NFBAccountBubble* bubble in self.bubbles) {
+        CGPoint center = [self.strip convertPoint:bubble.slot toView:self];
+        CGFloat distance = hypot(point.x - center.x, point.y - center.y);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = bubble;
+        }
+    }
+    return best;
+}
+
+- (void)hoverAt:(CGPoint)point {
+    if (self.closing) {
+        return;
+    }
+    NFBAccountBubble* bubble = [self bubbleAt:point];
+    if (bubble == self.hovered) {
+        return;
+    }
+    self.hovered = bubble;
+    if (bubble) {
+        Tick();
+    }
+    [UIView animateWithDuration:0.16
+                          delay:0
+                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+                     animations:^{
+                         for (NFBAccountBubble* each in self.bubbles) {
+                             each.transform = each == bubble ? CGAffineTransformMakeScale(1.18, 1.18)
+                                                             : CGAffineTransformIdentity;
+                         }
+                     }
+                     completion:nil];
+}
+
+// The held finger came up: on an account it switches, anywhere else the dock
+// stays open for a tap.
+- (void)releaseAt:(CGPoint)point {
+    NFBAccountBubble* bubble = [self bubbleAt:point];
+    if (bubble) {
+        [self closeWith:bubble];
+    } else {
+        [self hoverAt:CGPointMake(-1000, -1000)];
+    }
+}
+
+- (void)dockTapped:(UITapGestureRecognizer*)tap {
+    NFBAccountBubble* bubble = [self bubbleAt:[tap locationInView:self]];
+    if (bubble) {
+        Tick();
+        [self closeWith:bubble];
+    }
+}
+
+- (void)catcherTapped:(UITapGestureRecognizer*)tap {
+    [self closeWith:nil];
+}
+
+- (void)catcherPanned:(UIPanGestureRecognizer*)pan {
+    if (self.closing) {
+        return;
+    }
+    CGFloat down = MAX(0, [pan translationInView:self].y);
+    switch (pan.state) {
+        case UIGestureRecognizerStateChanged:
+            [self applyLift:MAX(0, self.lift - down)];
+            break;
+        case UIGestureRecognizerStateEnded:
+        case UIGestureRecognizerStateCancelled:
+            if (down > self.lift * 0.3 || [pan velocityInView:self].y > 300) {
+                [self closeWith:nil];
+            } else {
+                [UIView animateWithDuration:0.3
+                    delay:0
+                    usingSpringWithDamping:0.86
+                    initialSpringVelocity:0.3
+                    options:UIViewAnimationOptionBeginFromCurrentState
+                    animations:^{
+                        [self applyLift:self.lift];
+                    }
+                    completion:nil];
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)closeWith:(NFBAccountBubble*)chosen {
+    if (self.closing) {
+        return;
+    }
+    self.closing = YES;
+    self.userInteractionEnabled = NO;
+    [self.catcher removeFromSuperview];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    id account = chosen && !chosen.current && !chosen.settings ? chosen.account : nil;
+    BOOL openOrder = chosen.settings;
+    UIView* rootView = self.rounded;
+
+    [UIView animateWithDuration:0.34
+        delay:0
+        usingSpringWithDamping:0.9
+        initialSpringVelocity:0.2
+        options:UIViewAnimationOptionBeginFromCurrentState
+        animations:^{
+            [self applyLift:0];
+            rootView.layer.cornerRadius = self.oldRadius;
+            for (NFBAccountBubble* bubble in self.bubbles) {
+                bubble.alpha = bubble == chosen ? 1 : 0;
+                bubble.transform = bubble == chosen ? CGAffineTransformMakeScale(1.25, 1.25)
+                                                    : CGAffineTransformMakeScale(0.6, 0.6);
+            }
+        }
+        completion:^(BOOL finished) {
+            for (NSUInteger i = 0; i < self.lifted.count; i++) {
+                self.lifted[i].transform = self.liftedTransforms[i].CGAffineTransformValue;
+            }
+            rootView.layer.cornerRadius = self.oldRadius;
+            rootView.layer.maskedCorners = self.oldCorners;
+            if (self.oldCurve) {
+                rootView.layer.cornerCurve = self.oldCurve;
+            }
+            rootView.clipsToBounds = self.oldClips;
+            [self removeFromSuperview];
+            if (gLiveDock == self) {
+                gLiveDock = nil;
+            }
+            if (account) {
+                gBubbleLog = @"dock: switched account";
+                SwitchToAccount(account);
+            } else if (openOrder) {
+                ShowOrderEditor();
+            }
+        }];
+}
+
+@end
+
+// MARK: - Long press on the Home tab
+
+// Sits on the tab bar (not the Home button itself, whose touches X may route
+// elsewhere) and only starts when the finger is on the Home button.
+@interface NFBDockPress : UILongPressGestureRecognizer
+@property (nonatomic, weak) UIView* home;
+@end
+
+@implementation NFBDockPress
+@end
+
+@interface NFBDockPressHandler : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, assign) BOOL opened;
++ (instancetype)shared;
+@end
+
+@implementation NFBDockPressHandler
+
++ (instancetype)shared {
+    static NFBDockPressHandler* handler;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        handler = [NFBDockPressHandler new];
+    });
+    return handler;
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer*)gesture {
+    if (![gesture isKindOfClass:[NFBDockPress class]] || !BubblesOn() || gLiveDock || FanIsUp()) {
+        return NO;
+    }
+    UIView* home = ((NFBDockPress*)gesture).home;
+    if (!home.window || home.hidden || home.alpha < 0.01) {
+        return NO;
+    }
+    CGPoint point = [gesture locationInView:home];
+    if (!CGRectContainsPoint(CGRectInset(home.bounds, -6, -6), point)) {
+        return NO;
+    }
+    return TwitterAccounts().count >= 2;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
+    return YES;
+}
+
+// Once the dock is up, X's own tap on Home must not also fire when the finger
+// lifts: switching the others off and on again cancels them.
+static void CancelOtherGestures(UIGestureRecognizer* mine) {
+    UIView* view = mine.view;
+    for (NSInteger depth = 0; view && depth < 8 && ![view isKindOfClass:[UIWindow class]]; depth++) {
+        for (UIGestureRecognizer* other in view.gestureRecognizers) {
+            if (other != mine && other.enabled) {
+                other.enabled = NO;
+                other.enabled = YES;
+            }
+        }
+        view = view.superview;
+    }
+    UIView* home = [mine isKindOfClass:[NFBDockPress class]] ? ((NFBDockPress*)mine).home : nil;
+    for (UIGestureRecognizer* other in home.gestureRecognizers) {
+        if (other.enabled) {
+            other.enabled = NO;
+            other.enabled = YES;
+        }
+    }
+}
+
+- (void)pressed:(NFBDockPress*)press {
+    switch (press.state) {
+        case UIGestureRecognizerStateBegan:
+            self.opened = [NFBAccountDock openInWindow:press.view.window];
+            if (self.opened) {
+                CancelOtherGestures(press);
+            }
+            break;
+        case UIGestureRecognizerStateChanged:
+            if (self.opened) {
+                [gLiveDock hoverAt:[press locationInView:gLiveDock]];
+            }
+            break;
+        case UIGestureRecognizerStateEnded:
+            if (self.opened) {
+                [gLiveDock releaseAt:[press locationInView:gLiveDock]];
+            }
+            self.opened = NO;
+            break;
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed:
+            self.opened = NO;
+            break;
+        default:
+            break;
+    }
+}
+
+@end
+
+static const void* kDockPressKey = &kDockPressKey;
+
+static void AttachDockPress(UIView* host, UIView* home) {
+    if (!host || !home) {
+        return;
+    }
+    NFBDockPress* press = objc_getAssociatedObject(host, kDockPressKey);
+    if (!press) {
+        press = [[NFBDockPress alloc] initWithTarget:[NFBDockPressHandler shared] action:@selector(pressed:)];
+        press.minimumPressDuration = 0.35;
+        press.allowableMovement = 16;
+        press.cancelsTouchesInView = YES;
+        press.delegate = [NFBDockPressHandler shared];
+        [host addGestureRecognizer:press];
+        objc_setAssociatedObject(host, kDockPressKey, press, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    press.home = home;
+}
+
+static void CollectViews(UIView* view, Class itemClass, NSMutableArray<UIView*>* items, NSInteger depth) {
+    if (depth > 12) {
+        return;
+    }
+    for (UIView* subview in view.subviews) {
+        if ([subview isKindOfClass:itemClass]) {
+            [items addObject:subview];
+        } else {
+            CollectViews(subview, itemClass, items, depth + 1);
+        }
+    }
+}
+
+// The newer tab bar: Home is pinned first, so it is the leading button.
+static void AttachDockPressToGlassBar(UIView* bar) {
+    Class itemClass = NSClassFromString(@"_TtC11XNavigation14TabBarItemView");
+    if (!itemClass || !bar.window) {
+        return;
+    }
+    NSMutableArray<UIView*>* items = [NSMutableArray array];
+    CollectViews(bar, itemClass, items, 0);
+    if (items.count == 0) {
+        return;
+    }
+    BOOL rtl = bar.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    UIView* home = nil;
+    CGFloat edge = 0;
+    for (UIView* item in items) {
+        if (item.hidden || CGRectGetWidth(item.bounds) < 1) {
+            continue;
+        }
+        CGFloat x = CGRectGetMidX([item convertRect:item.bounds toView:bar]);
+        if (!home || (rtl ? x > edge : x < edge)) {
+            home = item;
+            edge = x;
+        }
+    }
+    AttachDockPress(bar, home);
+}
+
+%hook T1TabView
+
+- (void)layoutSubviews {
+    %orig;
+    if (BubblesOn() && [self.scribePage isEqualToString:CustomTabBarHomePageID]) {
+        AttachDockPress(self.superview, (UIView*)self);
+    }
+}
+
+%end
+
+%hook _TtC11XNavigation10TabBarView
+
+- (void)layoutSubviews {
+    %orig;
+    if (BubblesOn()) {
+        AttachDockPressToGlassBar((UIView*)self);
+    }
+}
+
+%end
 
 %hook UINavigationBar
 

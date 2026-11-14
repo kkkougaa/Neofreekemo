@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.45",
+      "subtitle": "NeoFreeBird version 7.3.46",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.46",
+          "buildVersion": "46",
+          "date": "2026-11-14T06:43:01Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.46/NeoFreeBird-Twitter-sideloaded_7.3.46_12.43.ipa",
+          "size": 268028551,
+          "minOSVersion": "15.0",
+          "localizedDescription": "사라졌던 계정 도크의 리퀴드 글래스를 되살리고, 굴절은 처음보다 약하게 맞췄어요."
+        },
         {
           "version": "7.3.45",
           "buildVersion": "45",

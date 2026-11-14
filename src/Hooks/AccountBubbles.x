@@ -62,6 +62,8 @@
 //
 //  7.3.47: with the bigger 7.3.44 circles the glass bends less for its size,
 //  so the pane is the circle's own size again (no overhang).
+//
+//  7.3.48: dock circles squash under the finger and spring back when let go.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1669,6 +1671,8 @@ static const CGFloat kDockCardRadius = 34.0;
 @property (nonatomic, copy) NSString* oldCurve;
 @property (nonatomic, assign) CGFloat lift;
 @property (nonatomic, assign) BOOL closing;
+@property (nonatomic, weak) NFBAccountBubble* pressed;
+@property (nonatomic, assign) CGPoint pressStart;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -1847,9 +1851,14 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             }
         }
 
-        UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                                                              action:@selector(dockTapped:)];
-        [self addGestureRecognizer:tap];
+        // Follows the finger from the moment it lands, so a circle can squash
+        // under it and spring back; the row still scrolls alongside.
+        UILongPressGestureRecognizer* touch =
+            [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(dockTouched:)];
+        touch.minimumPressDuration = 0;
+        touch.cancelsTouchesInView = NO;
+        touch.delegate = (id<UIGestureRecognizerDelegate>)self;
+        [self addGestureRecognizer:touch];
     }
     return self;
 }
@@ -1971,12 +1980,82 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     return best;
 }
 
-- (void)dockTapped:(UITapGestureRecognizer*)tap {
-    NFBAccountBubble* bubble = [self bubbleAt:[tap locationInView:self]];
-    if (bubble) {
-        Tick();
-        [self closeWith:bubble];
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
+    return YES;
+}
+
+// Squashes a circle like a soft sweet under the finger, or lets it spring
+// back up (wobbling past its size before settling).
+- (void)squash:(NFBAccountBubble*)bubble down:(BOOL)down {
+    if (!bubble) {
+        return;
     }
+    [UIView animateWithDuration:down ? 0.28 : 0.5
+                          delay:0
+         usingSpringWithDamping:down ? 0.62 : 0.38
+          initialSpringVelocity:down ? 0.4 : 1.2
+                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+                     animations:^{
+                         // A little wider than tall, as if pressed flat.
+                         bubble.transform = down ? CGAffineTransformMakeScale(0.9, 0.84) : CGAffineTransformIdentity;
+                     }
+                     completion:nil];
+}
+
+- (void)dockTouched:(UILongPressGestureRecognizer*)touch {
+    if (self.closing) {
+        return;
+    }
+    CGPoint point = [touch locationInView:self];
+    switch (touch.state) {
+        case UIGestureRecognizerStateBegan: {
+            NFBAccountBubble* bubble = [self bubbleAt:point];
+            self.pressed = bubble;
+            self.pressStart = point;
+            if (bubble) {
+                if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+                    UIImpactFeedbackGenerator* soft =
+                        [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft];
+                    [soft impactOccurred];
+                }
+                [self squash:bubble down:YES];
+            }
+            break;
+        }
+        case UIGestureRecognizerStateChanged:
+            // Moving the finger (scrolling the row) lets go without choosing.
+            if (self.pressed && (self.strip.isDragging ||
+                                 hypot(point.x - self.pressStart.x, point.y - self.pressStart.y) > 12)) {
+                [self squash:self.pressed down:NO];
+                self.pressed = nil;
+            }
+            break;
+        case UIGestureRecognizerStateEnded: {
+            NFBAccountBubble* bubble = self.pressed;
+            self.pressed = nil;
+            if (bubble && [self bubbleAt:point] == bubble) {
+                Tick();
+                // Pop back up first, then go.
+                [self squash:bubble down:NO];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.16 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                                   [self closeWith:bubble];
+                               });
+            } else {
+                [self squash:bubble down:NO];
+            }
+            break;
+        }
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed:
+            [self squash:self.pressed down:NO];
+            self.pressed = nil;
+            break;
+        default:
+            break;
+    }
+}
 }
 
 - (void)catcherTapped:(UITapGestureRecognizer*)tap {

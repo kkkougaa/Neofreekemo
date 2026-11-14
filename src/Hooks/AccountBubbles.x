@@ -64,6 +64,10 @@
 //  so the pane is the circle's own size again (no overhang).
 //
 //  7.3.48: dock circles squash under the finger and spring back when let go.
+//
+//  7.3.49: the dock no longer uses UIKit's Liquid Glass (no way to soften its
+//  bending); the glass look is drawn: a magnified rim band, a sheen and a
+//  rim light, each with its own strength.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -745,6 +749,8 @@ static void Tick(void) {
 @property (nonatomic, strong) UIImageView* avatar;
 @property (nonatomic, strong) UILabel* initial;
 @property (nonatomic, strong) UILabel* badge;
+// The dock's magnified copy of the picture along the rim (see PutGlassOverBubble).
+@property (nonatomic, weak) UIImageView* lens;
 - (void)setCount:(NSInteger)count;
 @end
 
@@ -836,6 +842,7 @@ static void Tick(void) {
 
 - (void)setImage:(UIImage*)image {
     self.avatar.image = image;
+    self.lens.image = image;
     self.initial.hidden = image != nil;
 }
 
@@ -1677,17 +1684,52 @@ static const CGFloat kDockCardRadius = 34.0;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
 
-// Dock circles: the picture fills the whole circle under one clear Liquid
-// Glass pane. UIKit has no knob for how strongly the glass bends light, and
-// the bending is strongest near the pane's own edge, so the pane is made
-// larger than the circle and cut back to it: what shows is mostly the calm
-// middle of the glass, with only the start of its edge lensing at the rim.
-// A faint sheen sits on top. Before iOS 26 only the sheen and rim remain.
-static const CGFloat kDockGlassOverhang = 0.0;   // of the circle's width, per side
+// Dock circles: a glass bead drawn by hand. UIKit's Liquid Glass has no
+// setting for how hard it bends light, and over a 60-odd point picture it
+// bent faces out of shape, so the bead is built from parts whose strength is
+// set here:
+//  - the picture, sharp, filling the circle;
+//  - along the rim, a slightly magnified copy of it (the lens bulge real
+//    glass gives an edge), only kDockLensBand wide;
+//  - a faint sheen from the top and a light rim that is bright at the top
+//    left, fades along the sides and catches again at the bottom right.
+static const CGFloat kDockLensBand = 7.0;     // points of rim that bulge
+static const CGFloat kDockLensScale = 1.08;   // how much the rim magnifies
+
+static UIView* RingMask(CGRect bounds, CGFloat band) {
+    UIView* ring = [[UIView alloc] initWithFrame:bounds];
+    CAShapeLayer* shape = [CAShapeLayer layer];
+    UIBezierPath* path = [UIBezierPath bezierPathWithOvalInRect:bounds];
+    [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectInset(bounds, band, band)]];
+    shape.path = path.CGPath;
+    shape.fillRule = kCAFillRuleEvenOdd;
+    shape.fillColor = [UIColor blackColor].CGColor;
+    [ring.layer addSublayer:shape];
+    return ring;
+}
+
+// Clear in the middle, fading in over the outer `band` points, so the
+// magnified rim blends into the face instead of meeting it at a seam.
+static UIView* SoftRingMask(CGRect bounds, CGFloat band) {
+    UIView* ring = [[UIView alloc] initWithFrame:bounds];
+    CAGradientLayer* fade = [CAGradientLayer layer];
+    fade.type = kCAGradientLayerRadial;
+    fade.frame = ring.bounds;
+    fade.startPoint = CGPointMake(0.5, 0.5);
+    fade.endPoint = CGPointMake(1.0, 1.0);
+    CGFloat radius = CGRectGetWidth(bounds) / 2.0;
+    CGFloat inner = MAX(0.0, (radius - band) / radius);
+    fade.colors = @[ (id)[UIColor clearColor].CGColor, (id)[UIColor clearColor].CGColor,
+                     (id)[UIColor blackColor].CGColor, (id)[UIColor blackColor].CGColor ];
+    fade.locations = @[ @0, @(inner), @(inner + (1.0 - inner) * 0.6), @1 ];
+    [ring.layer addSublayer:fade];
+    return ring;
+}
 
 static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
-    CGFloat radius = CGRectGetWidth(bounds) / 2.0;
+    CGFloat width = CGRectGetWidth(bounds);
+    CGFloat radius = width / 2.0;
     for (UIView* view in bubble.subviews) {
         if ([view isKindOfClass:[UIVisualEffectView class]]) {
             view.layer.borderWidth = 0;
@@ -1696,6 +1738,23 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     bubble.avatar.frame = bounds;
     bubble.avatar.layer.cornerRadius = radius;
 
+    // The bulging rim: the same picture a little larger, seen only in a band.
+    UIView* lensWindow = [[UIView alloc] initWithFrame:bounds];
+    lensWindow.userInteractionEnabled = NO;
+    lensWindow.layer.cornerRadius = radius;
+    lensWindow.clipsToBounds = YES;
+    lensWindow.maskView = SoftRingMask(bounds, kDockLensBand);
+    CGFloat grow = width * (kDockLensScale - 1.0) / 2.0;
+    UIImageView* lens = [[UIImageView alloc] initWithFrame:CGRectInset(bounds, -grow, -grow)];
+    lens.contentMode = UIViewContentModeScaleAspectFill;
+    lens.image = bubble.avatar.image;
+    [lensWindow addSubview:lens];
+    // The bulge reads as glass only if it is a touch softer than the face.
+    lens.layer.shouldRasterize = YES;
+    lens.layer.rasterizationScale = UIScreen.mainScreen.scale * 0.6;
+    bubble.lens = lens;
+    [bubble insertSubview:lensWindow aboveSubview:bubble.avatar];
+
     // Light from above, across the whole face but faint.
     UIView* sheenView = [[UIView alloc] initWithFrame:bounds];
     sheenView.userInteractionEnabled = NO;
@@ -1703,40 +1762,35 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     sheenView.clipsToBounds = YES;
     CAGradientLayer* sheen = [CAGradientLayer layer];
     sheen.frame = bounds;
-    sheen.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.30].CGColor,
-                      (id)[UIColor colorWithWhite:1 alpha:0.06].CGColor,
+    sheen.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.26].CGColor,
+                      (id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,
                       (id)[UIColor colorWithWhite:1 alpha:0].CGColor ];
     sheen.locations = @[ @0, @0.3, @0.55 ];
     [sheenView.layer addSublayer:sheen];
-    [bubble insertSubview:sheenView aboveSubview:bubble.avatar];
+    [bubble insertSubview:sheenView aboveSubview:lensWindow];
 
-    // A round window the size of the circle; the oversized glass sits inside.
-    UIView* band = [[UIView alloc] initWithFrame:bounds];
-    band.userInteractionEnabled = NO;
-    band.layer.cornerRadius = radius;
-    band.clipsToBounds = YES;
-    Class glassClass = NSClassFromString(@"UIGlassEffect");
-    SEL styled = NSSelectorFromString(@"effectWithStyle:");
-    if (glassClass && [glassClass respondsToSelector:styled]) {
-        // UIGlassEffectStyleClear: the see-through glass meant for media.
-        id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 1);
-        if ([effect isKindOfClass:[UIVisualEffect class]]) {
-            CGFloat overhang = CGRectGetWidth(bounds) * kDockGlassOverhang;
-            UIVisualEffectView* pane = [[UIVisualEffectView alloc] initWithEffect:effect];
-            pane.frame = CGRectInset(bounds, -overhang, -overhang);
-            pane.layer.cornerRadius = CGRectGetWidth(pane.frame) / 2.0;
-            pane.clipsToBounds = YES;
-            pane.userInteractionEnabled = NO;
-            [band addSubview:pane];
-        }
-    }
-    [bubble insertSubview:band aboveSubview:sheenView];
+    // The rim light, a thin ring lit from the top left.
+    UIView* rimLight = [[UIView alloc] initWithFrame:bounds];
+    rimLight.userInteractionEnabled = NO;
+    CAGradientLayer* rim = [CAGradientLayer layer];
+    rim.frame = bounds;
+    rim.startPoint = CGPointMake(0.15, 0.0);
+    rim.endPoint = CGPointMake(0.85, 1.0);
+    rim.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.95].CGColor,
+                    (id)[UIColor colorWithWhite:1 alpha:0.15].CGColor,
+                    (id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,
+                    (id)[UIColor colorWithWhite:1 alpha:0.55].CGColor ];
+    rim.locations = @[ @0, @0.4, @0.65, @1 ];
+    [rimLight.layer addSublayer:rim];
+    rimLight.maskView = RingMask(CGRectInset(bounds, 0.5, 0.5), 1.6);
+    [bubble insertSubview:rimLight aboveSubview:sheenView];
+    UIView* band = rimLight;
 
     // The edge line sits on its own view so the glass mask cannot clip it.
     UIView* edge = [[UIView alloc] initWithFrame:bounds];
     edge.userInteractionEnabled = NO;
     edge.layer.cornerRadius = radius;
-    edge.layer.borderWidth = bubble.current ? 2.5 : 1.0;
+    edge.layer.borderWidth = bubble.current ? 2.5 : 0.0;
     edge.layer.borderColor =
         bubble.current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.4].CGColor;
     [bubble insertSubview:edge aboveSubview:band];

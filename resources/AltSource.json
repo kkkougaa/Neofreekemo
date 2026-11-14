@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.38",
+      "subtitle": "NeoFreeBird version 7.3.39",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.39",
+          "buildVersion": "39",
+          "date": "2026-11-14T01:16:02Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.39/NeoFreeBird-Twitter-sideloaded_7.3.39_12.43.ipa",
+          "size": 268024935,
+          "minOSVersion": "15.0",
+          "localizedDescription": "알림 탭을 열면 그 계정의 하단 도크와 계정 방울 알림 배지가 사라져요."
+        },
         {
           "version": "7.3.38",
           "buildVersion": "38",

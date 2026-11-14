@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.49",
+      "subtitle": "NeoFreeBird version 7.3.50",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.50",
+          "buildVersion": "50",
+          "date": "2026-11-14T10:29:49Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.50/NeoFreeBird-Twitter-sideloaded_7.3.50_12.43.ipa",
+          "size": 268030138,
+          "minOSVersion": "15.0",
+          "localizedDescription": "계정 도크에서 지금 쓰는 계정에도 알림 숫자 배지가 떠요."
+        },
         {
           "version": "7.3.49",
           "buildVersion": "49",

@@ -2056,7 +2056,6 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             break;
     }
 }
-}
 
 - (void)catcherTapped:(UITapGestureRecognizer*)tap {
     [self closeWith:nil];

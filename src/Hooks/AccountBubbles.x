@@ -71,6 +71,10 @@
 //
 //  7.3.50: the dock shows the account in use's unread number too, read live
 //  off the tab bar (it was always left blank before).
+//
+//  7.3.51: the other accounts' numbers are read off the side drawer's
+//  avatars (X keeps their badges up to date there), each matched to its
+//  account by id, picture address or the picture itself.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -726,6 +730,258 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
                 done(image);
             });
         }] resume];
+}
+
+// MARK: - Unread numbers from the side drawer
+//
+// The side drawer (TwitterDash) shows the other accounts as small avatars
+// (TwitterDash.DashAvatarImageView) with X's own unread badge beside each,
+// kept up to date by X. Those numbers are read from there, so the dock does
+// not depend on X's account list having been opened lately.
+
+// A small fingerprint of a picture: 8x8 pixels, RGB.
+static NSData* ImagePrint(UIImage* image) {
+    CGImageRef cg = image.CGImage;
+    if (!cg) {
+        return nil;
+    }
+    enum { side = 8 };
+    uint8_t pixels[side * side * 4];
+    memset(pixels, 0, sizeof(pixels));
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(pixels, side, side, 8, side * 4, space,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(space);
+    if (!context) {
+        return nil;
+    }
+    CGContextSetInterpolationQuality(context, kCGInterpolationMedium);
+    // Only the middle of the picture: both sides are cut to a circle.
+    CGFloat w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    CGFloat crop = MIN(w, h) * 0.7;
+    CGImageRef middle = CGImageCreateWithImageInRect(cg, CGRectMake((w - crop) / 2.0, (h - crop) / 2.0, crop, crop));
+    CGContextDrawImage(context, CGRectMake(0, 0, side, side), middle ?: cg);
+    if (middle) {
+        CGImageRelease(middle);
+    }
+    CGContextRelease(context);
+    return [NSData dataWithBytes:pixels length:sizeof(pixels)];
+}
+
+static CGFloat PrintDistance(NSData* a, NSData* b) {
+    if (a.length != b.length || a.length == 0) {
+        return CGFLOAT_MAX;
+    }
+    const uint8_t* x = a.bytes;
+    const uint8_t* y = b.bytes;
+    NSUInteger total = 0, used = 0;
+    for (NSUInteger i = 0; i < a.length; i++) {
+        if (i % 4 == 3) {
+            continue;
+        }
+        total += (NSUInteger)abs((int)x[i] - (int)y[i]);
+        used++;
+    }
+    return used ? (CGFloat)total / used : CGFLOAT_MAX;
+}
+
+static UIImage* PictureIn(UIView* view) {
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:view];
+    while (queue.count > 0) {
+        UIView* sub = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([sub isKindOfClass:[UIImageView class]] && ((UIImageView*)sub).image) {
+            return ((UIImageView*)sub).image;
+        }
+        [queue addObjectsFromArray:sub.subviews];
+    }
+    id image = ObjectProp(view, @"image");
+    return [image isKindOfClass:[UIImage class]] ? image : nil;
+}
+
+static BOOL ShownUpTo(UIView* view, UIView* root) {
+    for (UIView* v = view; v && v != root.superview; v = v.superview) {
+        if (v.hidden || v.alpha < 0.01) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+// "profile_images/<number>/" from an address, to compare two addresses of
+// the same picture in different sizes.
+static NSString* PictureID(NSString* address) {
+    NSRange range = [address rangeOfString:@"profile_images/"];
+    if (range.location == NSNotFound) {
+        return nil;
+    }
+    NSString* rest = [address substringFromIndex:NSMaxRange(range)];
+    return [rest componentsSeparatedByString:@"/"].firstObject;
+}
+
+static NSString* DrawerAvatarKey(UIView* avatar, NSArray* accounts, NSString** how) {
+    // 1. An identifier ending in the user id, like TUIAvatarImageView.<id>.
+    for (UIView* v = avatar; v && v != avatar.superview.superview.superview; v = v.superview) {
+        NSString* identifier = v.accessibilityIdentifier;
+        NSRange dot = [identifier rangeOfString:@"." options:NSBackwardsSearch];
+        if (dot.location != NSNotFound) {
+            NSString* tail = [identifier substringFromIndex:dot.location + 1];
+            for (id account in accounts) {
+                if ([[AccountKey(account) lowercaseString] isEqualToString:tail.lowercaseString]) {
+                    *how = @"id";
+                    return AccountKey(account);
+                }
+            }
+        }
+    }
+    // 2. A getter on the view giving the picture's address.
+    // Only X's own classes: UIKit getters are left alone.
+    NSMutableArray<NSString*>* getters = [NSMutableArray array];
+    for (Class cls = object_getClass(avatar); cls && ![NSStringFromClass(cls) hasPrefix:@"UI"];
+         cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Method* methods = class_copyMethodList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            NSString* name = NSStringFromSelector(method_getName(methods[i]));
+            NSString* lower = name.lowercaseString;
+            if (![name containsString:@":"] && ![name hasPrefix:@"set"] && ![name hasPrefix:@"_"] &&
+                ([lower containsString:@"url"] || [lower containsString:@"image"])) {
+                [getters addObject:name];
+            }
+        }
+        free(methods);
+    }
+    for (NSString* name in getters) {
+        NSString* picture = PictureID(ProfileImageString(ObjectProp(avatar, name)));
+        if (picture.length == 0) {
+            continue;
+        }
+        for (id account in accounts) {
+            if ([PictureID(AccountImageURL(account).absoluteString) isEqualToString:picture]) {
+                *how = [NSString stringWithFormat:@"-%@", name];
+                return AccountKey(account);
+            }
+        }
+    }
+    // 3. The picture itself, against the pictures kept for the dock.
+    NSData* print = ImagePrint(PictureIn(avatar));
+    if (!print) {
+        return nil;
+    }
+    NSString* best = nil;
+    CGFloat bestDistance = CGFLOAT_MAX, second = CGFLOAT_MAX;
+    for (id account in accounts) {
+        NSString* key = AccountKey(account);
+        CGFloat distance = PrintDistance(print, ImagePrint(StoredAvatar(key)));
+        if (distance < bestDistance) {
+            second = bestDistance;
+            bestDistance = distance;
+            best = key;
+        } else if (distance < second) {
+            second = distance;
+        }
+    }
+    if (best && bestDistance < 40 && bestDistance * 1.5 < second) {
+        *how = [NSString stringWithFormat:@"picture %.0f/%.0f", bestDistance, second];
+        return best;
+    }
+    *how = [NSString stringWithFormat:@"no match %.0f/%.0f", bestDistance, second];
+    return nil;
+}
+
+static UIView* DrawerRoot(UIWindow* window) {
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
+    NSInteger budget = 4000;
+    while (queue.count > 0 && budget-- > 0) {
+        UIView* view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([NSStringFromClass(view.nextResponder.class) containsString:@"DashHostingController"]) {
+            return view;
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+    return nil;
+}
+
+static void HarvestDrawerCounts(UIWindow* window) {
+    UIView* root = DrawerRoot(window);
+    NSArray* accounts = TwitterAccounts();
+    if (!root || accounts.count < 2) {
+        ProbeNote(root ? @"drawer: fewer than two accounts" : @"drawer: not found");
+        return;
+    }
+    NSMutableArray<UIView*>* avatars = [NSMutableArray array];
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:root];
+    NSInteger budget = 3000;
+    while (queue.count > 0 && budget-- > 0) {
+        UIView* view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([NSStringFromClass(view.class) containsString:@"DashAvatarImageView"]) {
+            [avatars addObject:view];
+        } else if ([view isKindOfClass:[UILabel class]]) {
+            [labels addObject:(UILabel*)view];
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+    NSString* currentKey = AccountKey(CurrentAccount());
+    NSMutableArray<NSString*>* notes = [NSMutableArray array];
+    BOOL changed = NO;
+    for (UIView* avatar in avatars) {
+        CGRect frame = [root convertRect:avatar.bounds fromView:avatar];
+        CGFloat side = CGRectGetWidth(frame);
+        if (side < 4) {
+            continue;
+        }
+        NSString* how = @"";
+        NSString* key = DrawerAvatarKey(avatar, accounts, &how);
+        if (key.length == 0 || [key isEqualToString:currentKey]) {
+            [notes addObject:[NSString stringWithFormat:@"%.0f@%.0f %@%@", side, CGRectGetMinX(frame),
+                                                        key.length ? @"current " : @"", how]];
+            continue;
+        }
+        // X's badge sits over the avatar's top right corner; its digits may
+        // be separate labels, read left to right.
+        CGRect area = CGRectMake(CGRectGetMaxX(frame) - side * 0.5, CGRectGetMinY(frame) - side * 0.6,
+                                 side * 1.3, side * 1.2);
+        NSMutableArray<UILabel*>* digits = [NSMutableArray array];
+        for (UILabel* label in labels) {
+            CGRect labelFrame = [root convertRect:label.bounds fromView:label];
+            CGPoint middle = CGPointMake(CGRectGetMidX(labelFrame), CGRectGetMidY(labelFrame));
+            NSString* text = [label.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            if (CGRectContainsPoint(area, middle) && text.length > 0 && ShownUpTo(label, root) &&
+                [text rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location ==
+                    NSNotFound) {
+                [digits addObject:label];
+            }
+        }
+        [digits sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
+            CGFloat ax = [root convertRect:a.bounds fromView:a].origin.x;
+            CGFloat bx = [root convertRect:b.bounds fromView:b].origin.x;
+            return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
+        }];
+        NSMutableString* number = [NSMutableString string];
+        for (UILabel* label in digits) {
+            [number appendString:label.text];
+        }
+        NSInteger count = number.integerValue;
+        if (![SheetCounts()[key] isEqual:@(count)]) {
+            SheetCounts()[key] = @(count);
+            changed = YES;
+        }
+        NSString* title = @"?";
+        for (id account in accounts) {
+            if ([AccountKey(account) isEqualToString:key]) {
+                title = AccountTitle(account);
+            }
+        }
+        [notes addObject:[NSString stringWithFormat:@"%@=%ld (%@)", title, (long)count, how]];
+    }
+    if (changed) {
+        SaveSheetCounts();
+    }
+    ProbeNote([NSString stringWithFormat:@"drawer: %lu avatars %@", (unsigned long)avatars.count,
+                                         [notes componentsJoinedByString:@", "]]);
 }
 
 static UIVisualEffect* BubbleEffect(void) {
@@ -1834,6 +2090,12 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     if (!root.isViewLoaded || root.presentedViewController) {
         gBubbleLog = @"dock skipped: something is presented";
         return NO;
+    }
+    // The side drawer keeps X's live unread numbers for the other accounts.
+    @try {
+        HarvestDrawerCounts(window);
+    } @catch (__unused NSException* exception) {
+        ProbeNote(@"drawer: reading threw");
     }
     NFBAccountDock* dock = [[NFBAccountDock alloc] initWithWindow:window accounts:accounts];
     [dock open];

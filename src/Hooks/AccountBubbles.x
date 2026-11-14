@@ -50,6 +50,9 @@
 //
 //  7.3.43: the glass covers only a thin band at the edge (it lensed whole
 //  faces out of shape), with a faint sheen over the picture.
+//
+//  7.3.44: bigger dock circles, five to a screen with the gear a scroll away;
+//  unread numbers read off X's list are kept on disk across relaunches.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -414,6 +417,23 @@ static NSInteger AccountUnreadCount(id account) {
 // Unread counts read off X's own account list (T1PickableAccountEntryCell:
 // a TUIAvatarImageView.<user id> plus a TFNBadgeView with the number).
 static NSMutableDictionary<NSString*, NSNumber*>* gSheetCounts = nil;
+static NSString* const kSheetCountsKey = @"kemo_account_unread_counts";
+
+// The numbers last read off X's list, kept on disk so a relaunch (or an
+// update) does not leave the circles and the dock without badges until X's
+// list is opened again.
+static NSMutableDictionary<NSString*, NSNumber*>* SheetCounts(void) {
+    if (!gSheetCounts) {
+        NSDictionary* saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kSheetCountsKey];
+        gSheetCounts = [saved isKindOfClass:[NSDictionary class]] ? [saved mutableCopy]
+                                                                   : [NSMutableDictionary dictionary];
+    }
+    return gSheetCounts;
+}
+
+static void SaveSheetCounts(void) {
+    [[NSUserDefaults standardUserDefaults] setObject:[SheetCounts() copy] forKey:kSheetCountsKey];
+}
 
 static NSInteger HarvestSheetCounts(UIView* root) {
     if (!root) {
@@ -455,14 +475,12 @@ static NSInteger HarvestSheetCounts(UIView* root) {
             [inner addObjectsFromArray:sub.subviews];
         }
         if (key.length > 0) {
-            if (!gSheetCounts) {
-                gSheetCounts = [NSMutableDictionary dictionary];
-            }
-            gSheetCounts[key] = @(count);
+            SheetCounts()[key] = @(count);
             cells++;
         }
     }
     if (cells > 0) {
+        SaveSheetCounts();
         ProbeNote([NSString stringWithFormat:@"badge: read %ld rows of X's account list", (long)cells]);
     }
     return cells;
@@ -475,15 +493,13 @@ static void MarkCurrentAccountSeen(void) {
     if (key.length == 0) {
         return;
     }
-    if (!gSheetCounts) {
-        gSheetCounts = [NSMutableDictionary dictionary];
-    }
-    gSheetCounts[key] = @0;
+    SheetCounts()[key] = @0;
+    SaveSheetCounts();
 }
 
 static NSInteger BadgeCountFor(id account) {
     NSString* key = AccountKey(account);
-    NSNumber* seen = key ? gSheetCounts[key] : nil;
+    NSNumber* seen = key ? SheetCounts()[key] : nil;
     if (seen) {
         return seen.integerValue;
     }
@@ -786,7 +802,7 @@ static void Tick(void) {
     self.badge.text = count > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)count];
     CGFloat height = 22;
     CGFloat width = MAX(height, [self.badge.text sizeWithAttributes:@{NSFontAttributeName : self.badge.font}].width + 12);
-    self.badge.frame = CGRectMake(kBubbleSize - width + 6, -4, width, height);
+    self.badge.frame = CGRectMake(CGRectGetWidth(self.bounds) - width + 6, -4, width, height);
     self.badge.layer.cornerRadius = height / 2.0;
     self.badge.hidden = NO;
     self.accessibilityValue = self.badge.text;
@@ -1608,7 +1624,26 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
 // black dock underneath shows every account in a row. Every window subview
 // moves together so overlays stay lined up with the screen they belong to.
 
-static const CGFloat kDockGap = 18.0;
+static const CGFloat kDockGap = 10.0;
+static const CGFloat kDockSide = 12.0;
+static const NSInteger kDockVisible = 5;
+
+// Gives a circle (built at kBubbleSize) a new size, keeping every round part round.
+static void ResizeBubble(NFBAccountBubble* bubble, CGRect frame) {
+    bubble.frame = frame;
+    CGRect bounds = bubble.bounds;
+    CGFloat radius = CGRectGetWidth(bounds) / 2.0;
+    for (UIView* view in bubble.subviews) {
+        if ([view isKindOfClass:[UIVisualEffectView class]]) {
+            view.frame = bounds;
+            view.layer.cornerRadius = radius;
+        }
+    }
+    bubble.initial.frame = bounds;
+    bubble.initial.font = [UIFont systemFontOfSize:round(CGRectGetWidth(bounds) * 0.4) weight:UIFontWeightBold];
+    bubble.avatar.frame = CGRectInset(bounds, 4, 4);
+    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bubble.avatar.bounds) / 2.0;
+}
 static const CGFloat kDockCardRadius = 34.0;
 
 @interface NFBAccountDock : UIView
@@ -1719,7 +1754,17 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     }
     NFBAccountDock* dock = [[NFBAccountDock alloc] initWithWindow:window accounts:accounts];
     [dock open];
-    gBubbleLog = [NSString stringWithFormat:@"dock opened (%lu accounts)", (unsigned long)accounts.count];
+    NSMutableArray* counts = [NSMutableArray array];
+    for (id account in accounts) {
+        NSString* key = AccountKey(account);
+        NSNumber* seen = key ? SheetCounts()[key] : nil;
+        [counts addObject:[NSString stringWithFormat:@"%@=%@", AccountTitle(account),
+                                                     seen ? (id)seen
+                                                          : (id)[NSString stringWithFormat:@"getter %ld",
+                                                                     (long)AccountUnreadCount(account)]]];
+    }
+    gBubbleLog = [NSString stringWithFormat:@"dock opened (%lu accounts) badges: %@", (unsigned long)accounts.count,
+                                            [counts componentsJoinedByString:@", "]];
     return YES;
 }
 
@@ -1731,7 +1776,10 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 
         CGFloat width = CGRectGetWidth(self.bounds);
         CGFloat height = CGRectGetHeight(self.bounds);
-        CGFloat stripHeight = kBubbleSize + 32.0;
+        // Five circles fill the row edge to edge; the gear (and any more
+        // accounts) are a scroll away.
+        CGFloat size = floor((width - kDockSide * 2.0 - kDockGap * (kDockVisible - 1)) / kDockVisible);
+        CGFloat stripHeight = size + 32.0;
         _lift = stripHeight + 20.0 + MAX(window.safeAreaInsets.bottom, 12.0);
 
         _strip = [[UIScrollView alloc] initWithFrame:CGRectMake(0, height - _lift + 12.0, width, stripHeight)];
@@ -1744,8 +1792,8 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         NSArray* ordered = OrderedAccounts(accounts);
         // One more place at the end for the gear that opens the order editor.
         NSInteger count = (NSInteger)ordered.count + 1;
-        CGFloat total = count * kBubbleSize + (count - 1) * kDockGap;
-        CGFloat side = MAX(20.0, (width - total) / 2.0);
+        CGFloat total = count * size + (count - 1) * kDockGap;
+        CGFloat side = MAX(kDockSide, (width - total) / 2.0);
         _strip.contentSize = CGSizeMake(total + side * 2.0, stripHeight);
 
         NSMutableArray* bubbles = [NSMutableArray array];
@@ -1755,8 +1803,8 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             NFBAccountBubble* bubble = gear ? [[NFBAccountBubble alloc] initSettings]
                                             : [[NFBAccountBubble alloc] initWithAccount:account
                                                                                 current:SameAccount(account, current)];
-            CGFloat x = side + i * (kBubbleSize + kDockGap);
-            bubble.frame = CGRectMake(x, 6.0, kBubbleSize, kBubbleSize);
+            CGFloat x = side + i * (size + kDockGap);
+            ResizeBubble(bubble, CGRectMake(x, 6.0, size, size));
             bubble.slot = bubble.center;
             bubble.initial.textColor = [UIColor whiteColor];
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
@@ -1769,7 +1817,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 
             if (!gear) {
                 UILabel* name = [[UILabel alloc]
-                    initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + kBubbleSize + 6.0, kBubbleSize + kDockGap, 15.0)];
+                    initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + size + 6.0, size + kDockGap, 15.0)];
                 name.text = AccountTitle(account);
                 name.font = [UIFont systemFontOfSize:11 weight:bubble.current ? UIFontWeightBold : UIFontWeightMedium];
                 name.textColor = [UIColor colorWithWhite:1 alpha:bubble.current ? 0.95 : 0.6];

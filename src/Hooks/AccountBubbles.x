@@ -53,6 +53,9 @@
 //
 //  7.3.44: bigger dock circles, five to a screen with the gear a scroll away;
 //  unread numbers read off X's list are kept on disk across relaunches.
+//
+//  7.3.45: the glass covers the whole picture again, but as a larger pane cut
+//  back to the circle, so only the gentle middle of it bends the face.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1664,11 +1667,13 @@ static const CGFloat kDockCardRadius = 34.0;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
 
-// Dock circles: the picture fills the whole circle, a clear Liquid Glass
-// band lies over its outer edge (only the edge, so the glass lenses the rim
-// without melting the face) and a soft sheen sits on top. Before iOS 26 the
-// band is a plain light rim.
-static const CGFloat kDockGlassBand = 5.0;
+// Dock circles: the picture fills the whole circle under one clear Liquid
+// Glass pane. UIKit has no knob for how strongly the glass bends light, and
+// the bending is strongest near the pane's own edge, so the pane is made
+// larger than the circle and cut back to it: what shows is mostly the calm
+// middle of the glass, with only the start of its edge lensing at the rim.
+// A faint sheen sits on top. Before iOS 26 only the sheen and rim remain.
+static const CGFloat kDockGlassOverhang = 0.22;  // of the circle's width, per side
 
 static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
@@ -1695,33 +1700,26 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     [sheenView.layer addSublayer:sheen];
     [bubble insertSubview:sheenView aboveSubview:bubble.avatar];
 
-    UIView* band = nil;
+    // A round window the size of the circle; the oversized glass sits inside.
+    UIView* band = [[UIView alloc] initWithFrame:bounds];
+    band.userInteractionEnabled = NO;
+    band.layer.cornerRadius = radius;
+    band.clipsToBounds = YES;
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     SEL styled = NSSelectorFromString(@"effectWithStyle:");
     if (glassClass && [glassClass respondsToSelector:styled]) {
         // UIGlassEffectStyleClear: the see-through glass meant for media.
         id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 1);
         if ([effect isKindOfClass:[UIVisualEffect class]]) {
-            band = [[UIVisualEffectView alloc] initWithEffect:effect];
-            UIView* ring = [[UIView alloc] initWithFrame:bounds];
-            CAShapeLayer* shape = [CAShapeLayer layer];
-            UIBezierPath* path = [UIBezierPath bezierPathWithOvalInRect:bounds];
-            [path appendPath:[UIBezierPath
-                                 bezierPathWithOvalInRect:CGRectInset(bounds, kDockGlassBand, kDockGlassBand)]];
-            shape.path = path.CGPath;
-            shape.fillRule = kCAFillRuleEvenOdd;
-            shape.fillColor = [UIColor blackColor].CGColor;
-            [ring.layer addSublayer:shape];
-            band.maskView = ring;
+            CGFloat overhang = CGRectGetWidth(bounds) * kDockGlassOverhang;
+            UIVisualEffectView* pane = [[UIVisualEffectView alloc] initWithEffect:effect];
+            pane.frame = CGRectInset(bounds, -overhang, -overhang);
+            pane.layer.cornerRadius = CGRectGetWidth(pane.frame) / 2.0;
+            pane.clipsToBounds = YES;
+            pane.userInteractionEnabled = NO;
+            [band addSubview:pane];
         }
     }
-    if (!band) {
-        band = [[UIView alloc] init];
-    }
-    band.frame = bounds;
-    band.userInteractionEnabled = NO;
-    band.layer.cornerRadius = radius;
-    band.clipsToBounds = YES;
     [bubble insertSubview:band aboveSubview:sheenView];
 
     // The edge line sits on its own view so the glass mask cannot clip it.

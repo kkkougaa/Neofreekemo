@@ -68,6 +68,9 @@
 //  7.3.49: the dock no longer uses UIKit's Liquid Glass (no way to soften its
 //  bending); the glass look is drawn: a magnified rim band, a sheen and a
 //  rim light, each with its own strength.
+//
+//  7.3.50: the dock shows the account in use's unread number too, read live
+//  off the tab bar (it was always left blank before).
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -510,6 +513,24 @@ static void MarkCurrentAccountSeen(void) {
     }
     SheetCounts()[key] = @0;
     SaveSheetCounts();
+}
+
+extern NSInteger NFBTabNotificationCount(UIWindow* window);
+
+// The account in use: the tab bar's live number, remembered for when the
+// account is switched away from. Falls back to the remembered number.
+static NSInteger CurrentBadgeCount(id account, UIWindow* window) {
+    NSInteger live = NFBTabNotificationCount(window);
+    NSString* key = AccountKey(account);
+    if (live >= 0 && key.length > 0) {
+        SheetCounts()[key] = @(live);
+        SaveSheetCounts();
+    }
+    if (live >= 0) {
+        return live;
+    }
+    NSNumber* seen = key ? SheetCounts()[key] : nil;
+    return seen ? seen.integerValue : 0;
 }
 
 static NSInteger BadgeCountFor(id account) {
@@ -1892,7 +1913,8 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
                 LoadAvatar(account, ^(UIImage* image) {
                     [weakBubble setImage:image];
                 });
-                [bubble setCount:bubble.current ? 0 : BadgeCountFor(account)];
+                // The screen is not lifted yet, so the tab bar can still be read.
+                [bubble setCount:bubble.current ? CurrentBadgeCount(account, window) : BadgeCountFor(account)];
             }
         }
         _bubbles = bubbles;

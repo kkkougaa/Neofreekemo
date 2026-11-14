@@ -836,6 +836,17 @@ static NSString* CurrentAccountKey(void) {
     return nil;
 }
 
+// The notifications tab's unread number as the tab bar shows it right now
+// (-1 when the tab bar is not where it can be read). The account dock uses it
+// for the account in use, whose number X's account list does not give.
+NSInteger NFBTabNotificationCount(UIWindow* window) {
+    if (!window) {
+        return -1;
+    }
+    NSNumber* count = ScanBadges(window)[@"notifications"];
+    return count ? count.integerValue : -1;
+}
+
 static void CheckBadges(UIWindow* window) {
     NSDictionary<NSString*, NSNumber*>* now = ScanBadges(window);
     static NSNumber* lastDM;

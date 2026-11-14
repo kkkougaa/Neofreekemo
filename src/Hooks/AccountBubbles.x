@@ -47,6 +47,9 @@
 //
 //  7.3.42: dock circles show the picture edge to edge under a clear Liquid
 //  Glass pane, instead of a small picture inside a glass ring.
+//
+//  7.3.43: the glass covers only a thin band at the edge (it lensed whole
+//  faces out of shape), with a faint sheen over the picture.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1626,9 +1629,12 @@ static const CGFloat kDockCardRadius = 34.0;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
 
-// Dock circles: the picture fills the whole circle and a clear Liquid Glass
-// pane sits on top of it, so the glass lenses and rims the face instead of
-// framing it. Before iOS 26 a soft top sheen stands in for the glass.
+// Dock circles: the picture fills the whole circle, a clear Liquid Glass
+// band lies over its outer edge (only the edge, so the glass lenses the rim
+// without melting the face) and a soft sheen sits on top. Before iOS 26 the
+// band is a plain light rim.
+static const CGFloat kDockGlassBand = 5.0;
+
 static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
     CGFloat radius = CGRectGetWidth(bounds) / 2.0;
@@ -1640,37 +1646,57 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     bubble.avatar.frame = bounds;
     bubble.avatar.layer.cornerRadius = radius;
 
-    UIView* pane = nil;
+    // Light from above, across the whole face but faint.
+    UIView* sheenView = [[UIView alloc] initWithFrame:bounds];
+    sheenView.userInteractionEnabled = NO;
+    sheenView.layer.cornerRadius = radius;
+    sheenView.clipsToBounds = YES;
+    CAGradientLayer* sheen = [CAGradientLayer layer];
+    sheen.frame = bounds;
+    sheen.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.30].CGColor,
+                      (id)[UIColor colorWithWhite:1 alpha:0.06].CGColor,
+                      (id)[UIColor colorWithWhite:1 alpha:0].CGColor ];
+    sheen.locations = @[ @0, @0.3, @0.55 ];
+    [sheenView.layer addSublayer:sheen];
+    [bubble insertSubview:sheenView aboveSubview:bubble.avatar];
+
+    UIView* band = nil;
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     SEL styled = NSSelectorFromString(@"effectWithStyle:");
     if (glassClass && [glassClass respondsToSelector:styled]) {
         // UIGlassEffectStyleClear: the see-through glass meant for media.
         id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 1);
         if ([effect isKindOfClass:[UIVisualEffect class]]) {
-            pane = [[UIVisualEffectView alloc] initWithEffect:effect];
+            band = [[UIVisualEffectView alloc] initWithEffect:effect];
+            UIView* ring = [[UIView alloc] initWithFrame:bounds];
+            CAShapeLayer* shape = [CAShapeLayer layer];
+            UIBezierPath* path = [UIBezierPath bezierPathWithOvalInRect:bounds];
+            [path appendPath:[UIBezierPath
+                                 bezierPathWithOvalInRect:CGRectInset(bounds, kDockGlassBand, kDockGlassBand)]];
+            shape.path = path.CGPath;
+            shape.fillRule = kCAFillRuleEvenOdd;
+            shape.fillColor = [UIColor blackColor].CGColor;
+            [ring.layer addSublayer:shape];
+            band.maskView = ring;
         }
     }
-    if (!pane) {
-        pane = [[UIView alloc] init];
-        CAGradientLayer* sheen = [CAGradientLayer layer];
-        sheen.frame = bounds;
-        sheen.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.42].CGColor,
-                          (id)[UIColor colorWithWhite:1 alpha:0.08].CGColor,
-                          (id)[UIColor colorWithWhite:1 alpha:0].CGColor,
-                          (id)[UIColor colorWithWhite:1 alpha:0.12].CGColor ];
-        sheen.locations = @[ @0, @0.38, @0.62, @1 ];
-        [pane.layer addSublayer:sheen];
+    if (!band) {
+        band = [[UIView alloc] init];
     }
-    pane.frame = bounds;
-    pane.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    pane.userInteractionEnabled = NO;
-    pane.layer.cornerRadius = radius;
-    pane.layer.cornerCurve = kCACornerCurveCircular;
-    pane.clipsToBounds = YES;
-    pane.layer.borderWidth = bubble.current ? 2.5 : 1.0;
-    pane.layer.borderColor =
-        bubble.current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.38].CGColor;
-    [bubble insertSubview:pane aboveSubview:bubble.avatar];
+    band.frame = bounds;
+    band.userInteractionEnabled = NO;
+    band.layer.cornerRadius = radius;
+    band.clipsToBounds = YES;
+    [bubble insertSubview:band aboveSubview:sheenView];
+
+    // The edge line sits on its own view so the glass mask cannot clip it.
+    UIView* edge = [[UIView alloc] initWithFrame:bounds];
+    edge.userInteractionEnabled = NO;
+    edge.layer.cornerRadius = radius;
+    edge.layer.borderWidth = bubble.current ? 2.5 : 1.0;
+    edge.layer.borderColor =
+        bubble.current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.4].CGColor;
+    [bubble insertSubview:edge aboveSubview:band];
     [bubble bringSubviewToFront:bubble.badge];
 }
 

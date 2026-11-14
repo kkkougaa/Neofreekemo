@@ -36,6 +36,9 @@
 //  shows the accounts in a row on a black dock underneath. Slide the held
 //  finger onto one and let go, or let go first and tap one. Tapping or pulling
 //  down the lifted screen puts it back.
+//
+//  7.3.39: opening the notifications tab clears that account's remembered
+//  unread number, so its badge no longer comes back after switching away.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -446,6 +449,19 @@ static NSInteger HarvestSheetCounts(UIView* root) {
         ProbeNote([NSString stringWithFormat:@"badge: read %ld rows of X's account list", (long)cells]);
     }
     return cells;
+}
+
+// The notifications tab was looked at: the account in use has nothing unread
+// any more, whatever X's list said the last time it was read.
+static void MarkCurrentAccountSeen(void) {
+    NSString* key = AccountKey(CurrentAccount());
+    if (key.length == 0) {
+        return;
+    }
+    if (!gSheetCounts) {
+        gSheetCounts = [NSMutableDictionary dictionary];
+    }
+    gSheetCounts[key] = @0;
 }
 
 static NSInteger BadgeCountFor(id account) {
@@ -2118,6 +2134,17 @@ static void AttachDockPressToGlassBar(UIView* bar) {
     %orig;
     if (BubblesOn()) {
         AttachDockPressToGlassBar((UIView*)self);
+    }
+}
+
+%end
+
+%hook T1NotificationsViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (BubblesOn()) {
+        MarkCurrentAccountSeen();
     }
 }
 

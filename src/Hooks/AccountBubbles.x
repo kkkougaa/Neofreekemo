@@ -59,6 +59,9 @@
 //
 //  7.3.46: 22% overhang cut away all of the visible glass (the clear pane's
 //  calm middle shows nothing over a photo); 8% keeps part of the edge bend.
+//
+//  7.3.47: with the bigger 7.3.44 circles the glass bends less for its size,
+//  so the pane is the circle's own size again (no overhang).
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1676,7 +1679,7 @@ static const CGFloat kDockCardRadius = 34.0;
 // larger than the circle and cut back to it: what shows is mostly the calm
 // middle of the glass, with only the start of its edge lensing at the rim.
 // A faint sheen sits on top. Before iOS 26 only the sheen and rim remain.
-static const CGFloat kDockGlassOverhang = 0.08;  // of the circle's width, per side
+static const CGFloat kDockGlassOverhang = 0.0;   // of the circle's width, per side
 
 static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;

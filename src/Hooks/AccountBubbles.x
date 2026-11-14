@@ -78,6 +78,11 @@
 //
 //  7.3.52: the order editor has a switch per account for whether it shows in
 //  the dock; accounts switched off are still in the circles and X's own list.
+//
+//  7.3.53: the dock turns like a dial. The account in the middle (under a
+//  fixed ring and pointer) is the one in use: turning clicks from account to
+//  account and stopping on one switches to it. Bezel ticks run under the
+//  names; the gear is smaller and sits past the last account.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2007,6 +2012,9 @@ static void ResizeBubble(NFBAccountBubble* bubble, CGRect frame) {
     bubble.avatar.layer.cornerRadius = CGRectGetWidth(bubble.avatar.bounds) / 2.0;
 }
 static const CGFloat kDockCardRadius = 34.0;
+// The dial: room for the bezel ticks under the names, and the gear's size.
+static const CGFloat kDialTicks = 14.0;
+static const CGFloat kDialGear = 40.0;
 
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
@@ -2024,6 +2032,12 @@ static const CGFloat kDockCardRadius = 34.0;
 @property (nonatomic, assign) BOOL closing;
 @property (nonatomic, weak) NFBAccountBubble* pressed;
 @property (nonatomic, assign) CGPoint pressStart;
+// The dial: the account circles centred one after another, a pitch apart.
+@property (nonatomic, strong) NSArray<UILabel*>* names;
+@property (nonatomic, assign) CGFloat pitch;
+@property (nonatomic, assign) NSInteger centred;
+@property (nonatomic, assign) NSInteger settleGeneration;
+@property (nonatomic, strong) UISelectionFeedbackGenerator* detent;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -2134,7 +2148,8 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     UIView* edge = [[UIView alloc] initWithFrame:bounds];
     edge.userInteractionEnabled = NO;
     edge.layer.cornerRadius = radius;
-    edge.layer.borderWidth = bubble.current ? 2.5 : 0.0;
+    // The dock's fixed centre ring marks the chosen account instead.
+    edge.layer.borderWidth = 0.0;
     edge.layer.borderColor =
         bubble.current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.4].CGColor;
     [bubble insertSubview:edge aboveSubview:band];
@@ -2188,16 +2203,19 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 
         CGFloat width = CGRectGetWidth(self.bounds);
         CGFloat height = CGRectGetHeight(self.bounds);
-        // Five circles fill the row edge to edge; the gear (and any more
-        // accounts) are a scroll away.
+        // A dial: five circles across, the one in the middle is the account
+        // in use. Turning it clicks from account to account and stopping on
+        // one switches to it. The gear sits small past the last account.
         CGFloat size = floor((width - kDockSide * 2.0 - kDockGap * (kDockVisible - 1)) / kDockVisible);
-        CGFloat stripHeight = size + 32.0;
-        _lift = stripHeight + 20.0 + MAX(window.safeAreaInsets.bottom, 12.0);
+        CGFloat stripHeight = size + 32.0 + kDialTicks;
+        _lift = stripHeight + 26.0 + MAX(window.safeAreaInsets.bottom, 12.0);
+        _pitch = size + kDockGap;
 
-        _strip = [[UIScrollView alloc] initWithFrame:CGRectMake(0, height - _lift + 12.0, width, stripHeight)];
+        _strip = [[UIScrollView alloc] initWithFrame:CGRectMake(0, height - _lift + 18.0, width, stripHeight)];
         _strip.showsHorizontalScrollIndicator = NO;
         _strip.alwaysBounceHorizontal = YES;
         _strip.clipsToBounds = NO;
+        _strip.decelerationRate = UIScrollViewDecelerationRateFast;
         [self addSubview:_strip];
 
         id current = CurrentAccount();
@@ -2209,21 +2227,27 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
                 [ordered addObject:account];
             }
         }
-        // One more place at the end for the gear that opens the order editor.
-        NSInteger count = (NSInteger)ordered.count + 1;
-        CGFloat total = count * size + (count - 1) * kDockGap;
-        CGFloat side = MAX(kDockSide, (width - total) / 2.0);
-        _strip.contentSize = CGSizeMake(total + side * 2.0, stripHeight);
+        NSInteger accountCount = (NSInteger)ordered.count;
+        // Room on both ends so the first and the last account can reach the middle.
+        CGFloat inset = (width - size) / 2.0;
+        CGFloat gearX = inset + MAX(0, accountCount - 1) * _pitch + size + kDockGap + 4.0;
+        if (accountCount == 0) {
+            gearX = (width - kDialGear) / 2.0;
+        }
+        _strip.contentSize = CGSizeMake(MAX(width, gearX + kDialGear + inset), stripHeight);
 
         NSMutableArray* bubbles = [NSMutableArray array];
-        for (NSInteger i = 0; i < count; i++) {
-            BOOL gear = i == count - 1;
+        NSMutableArray* names = [NSMutableArray array];
+        NSInteger currentIndex = 0;
+        for (NSInteger i = 0; i <= accountCount; i++) {
+            BOOL gear = i == accountCount;
             id account = gear ? nil : ordered[i];
             NFBAccountBubble* bubble = gear ? [[NFBAccountBubble alloc] initSettings]
                                             : [[NFBAccountBubble alloc] initWithAccount:account
                                                                                 current:SameAccount(account, current)];
-            CGFloat x = side + i * (size + kDockGap);
-            ResizeBubble(bubble, CGRectMake(x, 6.0, size, size));
+            CGFloat x = inset + i * _pitch;
+            ResizeBubble(bubble, gear ? CGRectMake(gearX, 6.0 + (size - kDialGear) / 2.0, kDialGear, kDialGear)
+                                      : CGRectMake(x, 6.0, size, size));
             bubble.slot = bubble.center;
             bubble.initial.textColor = [UIColor whiteColor];
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
@@ -2235,15 +2259,19 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             [bubbles addObject:bubble];
 
             if (!gear) {
+                if (bubble.current) {
+                    currentIndex = i;
+                }
                 UILabel* name = [[UILabel alloc]
                     initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + size + 6.0, size + kDockGap, 15.0)];
                 name.text = AccountTitle(account);
-                name.font = [UIFont systemFontOfSize:11 weight:bubble.current ? UIFontWeightBold : UIFontWeightMedium];
-                name.textColor = [UIColor colorWithWhite:1 alpha:bubble.current ? 0.95 : 0.6];
+                name.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+                name.textColor = [UIColor whiteColor];
                 name.textAlignment = NSTextAlignmentCenter;
                 name.lineBreakMode = NSLineBreakByTruncatingTail;
                 name.isAccessibilityElement = NO;
                 [_strip addSubview:name];
+                [names addObject:name];
 
                 __weak NFBAccountBubble* weakBubble = bubble;
                 LoadAvatar(account, ^(UIImage* image) {
@@ -2254,14 +2282,73 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             }
         }
         _bubbles = bubbles;
+        _names = names;
 
-        // Start the row on the account in use when it would be off screen.
-        for (NFBAccountBubble* bubble in bubbles) {
-            if (bubble.current) {
-                CGFloat maxOffset = MAX(0, _strip.contentSize.width - width);
-                _strip.contentOffset = CGPointMake(MIN(maxOffset, MAX(0, bubble.center.x - width / 2.0)), 0);
+        // A watch bezel's ticks under the names, turning with the dial: a
+        // longer one under each account, four short ones between.
+        if (accountCount > 0) {
+            CAShapeLayer* ticks = [CAShapeLayer layer];
+            UIBezierPath* path = [UIBezierPath bezierPath];
+            CGFloat top = 6.0 + size + 26.0;
+            CGFloat from = inset + size / 2.0 - _pitch;
+            CGFloat to = inset + size / 2.0 + accountCount * _pitch;
+            for (NSInteger step = 0; from + step * _pitch / 5.0 <= to + 0.5; step++) {
+                CGFloat x = from + step * _pitch / 5.0;
+                BOOL major = step % 5 == 0;
+                [path moveToPoint:CGPointMake(x, top)];
+                [path addLineToPoint:CGPointMake(x, top + (major ? 8.0 : 4.0))];
             }
+            ticks.path = path.CGPath;
+            ticks.strokeColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+            ticks.lineWidth = 1.0;
+            ticks.lineCap = kCALineCapRound;
+            [_strip.layer insertSublayer:ticks atIndex:0];
         }
+
+        // The fixed middle mark: a ring around the centre place and a small
+        // pointer above it (and above the ticks, a brighter centre tick).
+        CGFloat middle = width / 2.0;
+        CGFloat stripTop = CGRectGetMinY(_strip.frame);
+        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - size / 2.0 - 4.0, stripTop + 2.0,
+                                                                size + 8.0, size + 8.0)];
+        ring.userInteractionEnabled = NO;
+        ring.layer.cornerRadius = (size + 8.0) / 2.0;
+        ring.layer.borderWidth = 2.5;
+        ring.layer.borderColor = AccentColor().CGColor;
+        ring.layer.shadowColor = AccentColor().CGColor;
+        ring.layer.shadowOpacity = 0.55;
+        ring.layer.shadowRadius = 8;
+        ring.layer.shadowOffset = CGSizeZero;
+        ring.hidden = accountCount == 0;
+        [self addSubview:ring];
+
+        CAShapeLayer* pointer = [CAShapeLayer layer];
+        UIBezierPath* triangle = [UIBezierPath bezierPath];
+        [triangle moveToPoint:CGPointMake(middle - 6.0, stripTop - 9.0)];
+        [triangle addLineToPoint:CGPointMake(middle + 6.0, stripTop - 9.0)];
+        [triangle addLineToPoint:CGPointMake(middle, stripTop - 1.0)];
+        [triangle closePath];
+        pointer.path = triangle.CGPath;
+        pointer.fillColor = AccentColor().CGColor;
+        pointer.hidden = accountCount == 0;
+        [self.layer addSublayer:pointer];
+
+        CAShapeLayer* centreTick = [CAShapeLayer layer];
+        UIBezierPath* tick = [UIBezierPath bezierPath];
+        [tick moveToPoint:CGPointMake(middle, stripTop + 6.0 + size + 24.0)];
+        [tick addLineToPoint:CGPointMake(middle, stripTop + 6.0 + size + 36.0)];
+        centreTick.path = tick.CGPath;
+        centreTick.strokeColor = AccentColor().CGColor;
+        centreTick.lineWidth = 2.0;
+        centreTick.lineCap = kCALineCapRound;
+        centreTick.hidden = accountCount == 0;
+        [self.layer addSublayer:centreTick];
+
+        // Start with the account in use in the middle.
+        _centred = currentIndex;
+        _strip.contentOffset = CGPointMake(currentIndex * _pitch, 0);
+        _strip.delegate = (id<UIScrollViewDelegate>)self;
+        [self turnDial];
 
         // Follows the finger from the moment it lands, so a circle can squash
         // under it and spring back; the row still scrolls alongside.
@@ -2446,7 +2533,13 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         case UIGestureRecognizerStateEnded: {
             NFBAccountBubble* bubble = self.pressed;
             self.pressed = nil;
-            if (bubble && [self bubbleAt:point] == bubble) {
+            NSInteger tapped = bubble ? (NSInteger)[self.bubbles indexOfObject:bubble] : NSNotFound;
+            if (bubble && [self bubbleAt:point] == bubble && !bubble.settings && tapped != NSNotFound &&
+                tapped < self.accountCount && tapped != [self indexAtOffset:self.strip.contentOffset.x]) {
+                // A circle off to the side: turn the dial to it; stopping there switches.
+                [self squash:bubble down:NO];
+                [self.strip setContentOffset:CGPointMake(tapped * self.pitch, 0) animated:YES];
+            } else if (bubble && [self bubbleAt:point] == bubble) {
                 Tick();
                 // Pop back up first, then go.
                 [self squash:bubble down:NO];
@@ -2467,6 +2560,114 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         default:
             break;
     }
+}
+
+// MARK: Dial
+
+- (NSInteger)accountCount {
+    return (NSInteger)self.names.count;
+}
+
+- (NSInteger)indexAtOffset:(CGFloat)offset {
+    if (self.accountCount == 0 || self.pitch <= 0) {
+        return 0;
+    }
+    NSInteger index = (NSInteger)lround(offset / self.pitch);
+    return MAX(0, MIN(self.accountCount - 1, index));
+}
+
+// Circles shrink away from the middle (their names fade); crossing into a new account
+// clicks like a watch crown.
+- (void)turnDial {
+    CGFloat middle = self.strip.contentOffset.x + CGRectGetWidth(self.strip.bounds) / 2.0;
+    for (NSInteger i = 0; i < self.accountCount; i++) {
+        NFBAccountBubble* bubble = self.bubbles[i];
+        CGFloat distance = fabs(bubble.slot.x - middle);
+        CGFloat t = MIN(distance / (self.pitch * 2.0), 1.0);
+        CGFloat scale = 1.0 - 0.3 * t;
+        bubble.layer.sublayerTransform = CATransform3DMakeScale(scale, scale, 1);
+        bubble.layer.shadowOpacity = 0.22 * (1.0 - t);
+        UILabel* name = self.names[i];
+        BOOL here = distance < self.pitch / 2.0;
+        name.alpha = here ? 1.0 : 0.55 - 0.3 * t;
+        name.font = [UIFont systemFontOfSize:11 weight:here ? UIFontWeightBold : UIFontWeightMedium];
+    }
+    NSInteger index = [self indexAtOffset:self.strip.contentOffset.x];
+    if (index != self.centred) {
+        self.centred = index;
+        if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+            if (!self.detent) {
+                self.detent = [UISelectionFeedbackGenerator new];
+            }
+            [self.detent selectionChanged];
+            [self.detent prepare];
+        }
+    }
+}
+
+- (void)scrollViewDidScroll:(UIScrollView*)scrollView {
+    self.settleGeneration++;
+    [self turnDial];
+}
+
+- (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
+    self.settleGeneration++;
+    if (!self.detent && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        self.detent = [UISelectionFeedbackGenerator new];
+    }
+    [self.detent prepare];
+}
+
+// Always come to rest with an account exactly in the middle.
+- (void)scrollViewWillEndDragging:(UIScrollView*)scrollView
+                     withVelocity:(CGPoint)velocity
+              targetContentOffset:(inout CGPoint*)target {
+    if (self.accountCount == 0) {
+        return;
+    }
+    target->x = [self indexAtOffset:target->x] * self.pitch;
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView*)scrollView willDecelerate:(BOOL)decelerate {
+    if (!decelerate) {
+        [self dialStopped];
+    }
+}
+
+- (void)scrollViewDidEndDecelerating:(UIScrollView*)scrollView {
+    [self dialStopped];
+}
+
+- (void)scrollViewDidEndScrollingAnimation:(UIScrollView*)scrollView {
+    [self dialStopped];
+}
+
+// The dial came to rest: switch to the account in the middle straight away
+// (after a breath, in case the finger turns it again).
+- (void)dialStopped {
+    if (self.closing || self.accountCount == 0) {
+        return;
+    }
+    NSInteger index = [self indexAtOffset:self.strip.contentOffset.x];
+    CGFloat exact = index * self.pitch;
+    if (fabs(self.strip.contentOffset.x - exact) > 1.0) {
+        [self.strip setContentOffset:CGPointMake(exact, 0) animated:YES];
+        return;
+    }
+    NFBAccountBubble* bubble = self.bubbles[index];
+    if (bubble.current) {
+        return;
+    }
+    NSInteger generation = ++self.settleGeneration;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NFBAccountDock* dock = weakSelf;
+        if (!dock || dock.closing || dock.settleGeneration != generation || dock.strip.isTracking) {
+            return;
+        }
+        Tick();
+        [dock closeWith:bubble];
+    });
 }
 
 - (void)catcherTapped:(UITapGestureRecognizer*)tap {

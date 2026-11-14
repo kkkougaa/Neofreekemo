@@ -33,12 +33,14 @@
 //  downloaded again when an account's picture address changes.
 //
 //  7.3.38: long-pressing the Home tab lifts the whole screen up like a card and
-//  shows the accounts in a row on a black dock underneath. Slide the held
-//  finger onto one and let go, or let go first and tap one. Tapping or pulling
-//  down the lifted screen puts it back.
+//  shows the accounts in a row on a black dock underneath; tap one to switch.
+//  Tapping or pulling down the lifted screen puts it back.
 //
 //  7.3.39: opening the notifications tab clears that account's remembered
 //  unread number, so its badge no longer comes back after switching away.
+//
+//  7.3.40: the dock no longer switches by sliding the held finger onto an
+//  account; the press only lifts the screen and accounts are picked by tap.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1607,11 +1609,8 @@ static const CGFloat kDockCardRadius = 34.0;
 @property (nonatomic, assign) CACornerMask oldCorners;
 @property (nonatomic, copy) NSString* oldCurve;
 @property (nonatomic, assign) CGFloat lift;
-@property (nonatomic, weak) NFBAccountBubble* hovered;
 @property (nonatomic, assign) BOOL closing;
 + (BOOL)openInWindow:(UIWindow*)window;
-- (void)hoverAt:(CGPoint)point;
-- (void)releaseAt:(CGPoint)point;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
 
@@ -1831,41 +1830,6 @@ static const CGFloat kDockCardRadius = 34.0;
     return best;
 }
 
-- (void)hoverAt:(CGPoint)point {
-    if (self.closing) {
-        return;
-    }
-    NFBAccountBubble* bubble = [self bubbleAt:point];
-    if (bubble == self.hovered) {
-        return;
-    }
-    self.hovered = bubble;
-    if (bubble) {
-        Tick();
-    }
-    [UIView animateWithDuration:0.16
-                          delay:0
-                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
-                     animations:^{
-                         for (NFBAccountBubble* each in self.bubbles) {
-                             each.transform = each == bubble ? CGAffineTransformMakeScale(1.18, 1.18)
-                                                             : CGAffineTransformIdentity;
-                         }
-                     }
-                     completion:nil];
-}
-
-// The held finger came up: on an account it switches, anywhere else the dock
-// stays open for a tap.
-- (void)releaseAt:(CGPoint)point {
-    NFBAccountBubble* bubble = [self bubbleAt:point];
-    if (bubble) {
-        [self closeWith:bubble];
-    } else {
-        [self hoverAt:CGPointMake(-1000, -1000)];
-    }
-}
-
 - (void)dockTapped:(UITapGestureRecognizer*)tap {
     NFBAccountBubble* bubble = [self bubbleAt:[tap locationInView:self]];
     if (bubble) {
@@ -1971,7 +1935,6 @@ static const CGFloat kDockCardRadius = 34.0;
 @end
 
 @interface NFBDockPressHandler : NSObject <UIGestureRecognizerDelegate>
-@property (nonatomic, assign) BOOL opened;
 + (instancetype)shared;
 @end
 
@@ -2029,30 +1992,9 @@ static void CancelOtherGestures(UIGestureRecognizer* mine) {
 }
 
 - (void)pressed:(NFBDockPress*)press {
-    switch (press.state) {
-        case UIGestureRecognizerStateBegan:
-            self.opened = [NFBAccountDock openInWindow:press.view.window];
-            if (self.opened) {
-                CancelOtherGestures(press);
-            }
-            break;
-        case UIGestureRecognizerStateChanged:
-            if (self.opened) {
-                [gLiveDock hoverAt:[press locationInView:gLiveDock]];
-            }
-            break;
-        case UIGestureRecognizerStateEnded:
-            if (self.opened) {
-                [gLiveDock releaseAt:[press locationInView:gLiveDock]];
-            }
-            self.opened = NO;
-            break;
-        case UIGestureRecognizerStateCancelled:
-        case UIGestureRecognizerStateFailed:
-            self.opened = NO;
-            break;
-        default:
-            break;
+    // The press only lifts the screen; an account is always picked with a tap.
+    if (press.state == UIGestureRecognizerStateBegan && [NFBAccountDock openInWindow:press.view.window]) {
+        CancelOtherGestures(press);
     }
 }
 

@@ -44,6 +44,9 @@
 //
 //  7.3.41: the circles and the dock have their own switches, so either one,
 //  both or neither can be used.
+//
+//  7.3.42: dock circles show the picture edge to edge under a clear Liquid
+//  Glass pane, instead of a small picture inside a glass ring.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1623,6 +1626,54 @@ static const CGFloat kDockCardRadius = 34.0;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
 
+// Dock circles: the picture fills the whole circle and a clear Liquid Glass
+// pane sits on top of it, so the glass lenses and rims the face instead of
+// framing it. Before iOS 26 a soft top sheen stands in for the glass.
+static void PutGlassOverBubble(NFBAccountBubble* bubble) {
+    CGRect bounds = bubble.bounds;
+    CGFloat radius = CGRectGetWidth(bounds) / 2.0;
+    for (UIView* view in bubble.subviews) {
+        if ([view isKindOfClass:[UIVisualEffectView class]]) {
+            view.layer.borderWidth = 0;
+        }
+    }
+    bubble.avatar.frame = bounds;
+    bubble.avatar.layer.cornerRadius = radius;
+
+    UIView* pane = nil;
+    Class glassClass = NSClassFromString(@"UIGlassEffect");
+    SEL styled = NSSelectorFromString(@"effectWithStyle:");
+    if (glassClass && [glassClass respondsToSelector:styled]) {
+        // UIGlassEffectStyleClear: the see-through glass meant for media.
+        id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 1);
+        if ([effect isKindOfClass:[UIVisualEffect class]]) {
+            pane = [[UIVisualEffectView alloc] initWithEffect:effect];
+        }
+    }
+    if (!pane) {
+        pane = [[UIView alloc] init];
+        CAGradientLayer* sheen = [CAGradientLayer layer];
+        sheen.frame = bounds;
+        sheen.colors = @[ (id)[UIColor colorWithWhite:1 alpha:0.42].CGColor,
+                          (id)[UIColor colorWithWhite:1 alpha:0.08].CGColor,
+                          (id)[UIColor colorWithWhite:1 alpha:0].CGColor,
+                          (id)[UIColor colorWithWhite:1 alpha:0.12].CGColor ];
+        sheen.locations = @[ @0, @0.38, @0.62, @1 ];
+        [pane.layer addSublayer:sheen];
+    }
+    pane.frame = bounds;
+    pane.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    pane.userInteractionEnabled = NO;
+    pane.layer.cornerRadius = radius;
+    pane.layer.cornerCurve = kCACornerCurveCircular;
+    pane.clipsToBounds = YES;
+    pane.layer.borderWidth = bubble.current ? 2.5 : 1.0;
+    pane.layer.borderColor =
+        bubble.current ? AccentColor().CGColor : [UIColor colorWithWhite:1 alpha:0.38].CGColor;
+    [bubble insertSubview:pane aboveSubview:bubble.avatar];
+    [bubble bringSubviewToFront:bubble.badge];
+}
+
 @implementation NFBAccountDock
 
 + (BOOL)openInWindow:(UIWindow*)window {
@@ -1684,6 +1735,9 @@ static const CGFloat kDockCardRadius = 34.0;
             bubble.initial.textColor = [UIColor whiteColor];
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
             bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
+            if (!gear) {
+                PutGlassOverBubble(bubble);
+            }
             [_strip addSubview:bubble];
             [bubbles addObject:bubble];
 

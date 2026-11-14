@@ -75,6 +75,9 @@
 //  7.3.51: the other accounts' numbers are read off the side drawer's
 //  avatars (X keeps their badges up to date there), each matched to its
 //  account by id, picture address or the picture itself.
+//
+//  7.3.52: the order editor has a switch per account for whether it shows in
+//  the dock; accounts switched off are still in the circles and X's own list.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -581,6 +584,41 @@ static NSArray* OrderedAccounts(NSArray* accounts) {
     }
     [placed addObjectsFromArray:rest];
     return placed;
+}
+
+// Accounts left out of the dock (the circles still show every account).
+// Kept as the accounts to hide, so an account added later shows by default.
+static NSString* const kDockHiddenKey = @"kemo_account_dock_hidden";
+
+static BOOL HiddenFromDock(id account) {
+    NSString* key = AccountKey(account);
+    NSArray* hidden = [[NSUserDefaults standardUserDefaults] arrayForKey:kDockHiddenKey];
+    return key.length > 0 && [hidden containsObject:key];
+}
+
+static void SetHiddenFromDock(id account, BOOL hide) {
+    NSString* key = AccountKey(account);
+    if (key.length == 0) {
+        return;
+    }
+    NSMutableArray* hidden =
+        [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:kDockHiddenKey] ?: @[]];
+    [hidden removeObject:key];
+    if (hide) {
+        [hidden addObject:key];
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:hidden forKey:kDockHiddenKey];
+}
+
+static NSString* DockSwitchFooter(void) {
+    NSString* language = NSLocale.preferredLanguages.firstObject ?: @"en";
+    if ([language hasPrefix:@"ko"]) {
+        return @"스위치를 켠 계정만 아래 독에 나와요. 끈 계정은 왼쪽 위 프로필 아이콘에서 전환할 수 있어요.";
+    }
+    if ([language hasPrefix:@"ja"]) {
+        return @"スイッチをオンにしたアカウントだけが下のドックに出ます。オフのアカウントは左上のプロフィールアイコンから切り替えられます。";
+    }
+    return @"Only accounts switched on appear in the dock. Switch to the others from the profile icon at the top left.";
 }
 
 static void SaveOrder(NSArray* accounts) {
@@ -1189,6 +1227,17 @@ static void Tick(void) {
     cell.detailTextLabel.text = name.length > 0 ? handle : nil;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
+    // In the dock or not (the list is always editing, so the editing accessory).
+    if (DockOn()) {
+        UISwitch* toggle = [UISwitch new];
+        toggle.on = !HiddenFromDock(account);
+        toggle.tag = indexPath.row;
+        [toggle addTarget:self action:@selector(dockToggled:) forControlEvents:UIControlEventValueChanged];
+        cell.editingAccessoryView = toggle;
+    } else {
+        cell.editingAccessoryView = nil;
+    }
+
     cell.imageView.image = [UIImage systemImageNamed:@"person.crop.circle.fill"];
     cell.imageView.tintColor = [UIColor tertiaryLabelColor];
     __weak UITableViewCell* weakCell = cell;
@@ -1203,6 +1252,24 @@ static void Tick(void) {
         [shown setNeedsLayout];
     });
     return cell;
+}
+
+- (void)dockToggled:(UISwitch*)toggle {
+    // The row may have moved since the switch was made: find it by the cell.
+    UIView* cell = toggle.superview;
+    while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
+        cell = cell.superview;
+    }
+    NSIndexPath* path = cell ? [self.tableView indexPathForCell:(UITableViewCell*)cell] : nil;
+    NSInteger row = path ? path.row : toggle.tag;
+    if (row < 0 || row >= (NSInteger)self.accounts.count) {
+        return;
+    }
+    SetHiddenFromDock(self.accounts[row], !toggle.on);
+}
+
+- (NSString*)tableView:(UITableView*)tableView titleForFooterInSection:(NSInteger)section {
+    return DockOn() ? DockSwitchFooter() : nil;
 }
 
 - (UITableViewCellEditingStyle)tableView:(UITableView*)tableView
@@ -2134,7 +2201,14 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         [self addSubview:_strip];
 
         id current = CurrentAccount();
-        NSArray* ordered = OrderedAccounts(accounts);
+        // Only the accounts chosen for the dock (all of them unless some were
+        // switched off in the order editor).
+        NSMutableArray* ordered = [NSMutableArray array];
+        for (id account in OrderedAccounts(accounts)) {
+            if (!HiddenFromDock(account)) {
+                [ordered addObject:account];
+            }
+        }
         // One more place at the end for the gear that opens the order editor.
         NSInteger count = (NSInteger)ordered.count + 1;
         CGFloat total = count * size + (count - 1) * kDockGap;

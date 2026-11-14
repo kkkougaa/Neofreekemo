@@ -316,6 +316,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_account_dock",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"type": @"compactButton",
                         @"key": @"spotify_client_id",
                         @"titleKey": @"SPOTIFY_CLIENT_ID_TITLE",

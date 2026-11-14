@@ -564,7 +564,9 @@
 "KEMO_RETURN_READ_TITLE" = "Return to last read";
 "KEMO_RETURN_READ_DETAIL" = "Tap the status bar again within 10 seconds to jump back.";
 "KEMO_ACCOUNT_BUBBLES_TITLE" = "Account bubbles";
-"KEMO_ACCOUNT_BUBBLES_DETAIL" = "Long-press your profile picture at the top left, then drag onto an account or tap one to switch. Long-press the Home tab to lift the screen and pick an account from the row below.";
+"KEMO_ACCOUNT_BUBBLES_DETAIL" = "Long-press your profile picture at the top left, then drag onto an account or tap one to switch.";
+"KEMO_ACCOUNT_DOCK_TITLE" = "Account dock";
+"KEMO_ACCOUNT_DOCK_DETAIL" = "Long-press the Home tab to lift the screen, then tap an account in the row below to switch.";
 "SETTINGS_CODE_EXPORT_TITLE" = "Copy settings code";
 "SETTINGS_CODE_IMPORT_TITLE" = "Paste settings code";
 "SETTINGS_CODE_COPIED" = "Copied to the clipboard. Scan the code on another device, or paste it there.";

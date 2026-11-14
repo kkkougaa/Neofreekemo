@@ -41,6 +41,9 @@
 //
 //  7.3.40: the dock no longer switches by sliding the held finger onto an
 //  account; the press only lifts the screen and accounts are picked by tap.
+//
+//  7.3.41: the circles and the dock have their own switches, so either one,
+//  both or neither can be used.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -53,8 +56,14 @@ static const CGFloat kHitRadius = 44.0;
 @class NFBAccountDock;
 static __weak NFBAccountDock* gLiveDock = nil;
 
+// The circles from the top left avatar.
 static BOOL BubblesOn(void) {
     return [BHTSettings boolForKey:@"kemo_account_bubbles"];
+}
+
+// The dock from a long press on the Home tab.
+static BOOL DockOn(void) {
+    return [BHTSettings boolForKey:@"kemo_account_dock"];
 }
 
 // MARK: - Account data
@@ -1950,7 +1959,7 @@ static const CGFloat kDockCardRadius = 34.0;
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer*)gesture {
-    if (![gesture isKindOfClass:[NFBDockPress class]] || !BubblesOn() || gLiveDock || FanIsUp()) {
+    if (![gesture isKindOfClass:[NFBDockPress class]] || !DockOn() || gLiveDock || FanIsUp()) {
         return NO;
     }
     UIView* home = ((NFBDockPress*)gesture).home;
@@ -2063,7 +2072,7 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 
 - (void)layoutSubviews {
     %orig;
-    if (BubblesOn() && [self.scribePage isEqualToString:CustomTabBarHomePageID]) {
+    if (DockOn() && [self.scribePage isEqualToString:CustomTabBarHomePageID]) {
         AttachDockPress(self.superview, (UIView*)self);
     }
 }
@@ -2074,7 +2083,7 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 
 - (void)layoutSubviews {
     %orig;
-    if (BubblesOn()) {
+    if (DockOn()) {
         AttachDockPressToGlassBar((UIView*)self);
     }
 }
@@ -2085,7 +2094,7 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (BubblesOn()) {
+    if (BubblesOn() || DockOn()) {
         MarkCurrentAccountSeen();
     }
 }
@@ -2143,12 +2152,14 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 // Fallback for a sheet that came up some other way than presentViewController.
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (!BubblesOn() || ![NSStringFromClass(self.class) containsString:@"AccountSwitcherTrayContent"]) {
+    if (!(BubblesOn() || DockOn()) ||
+        ![NSStringFromClass(self.class) containsString:@"AccountSwitcherTrayContent"]) {
         return;
     }
-    // Whenever X's list is on screen, remember its unread numbers.
+    // Whenever X's list is on screen, remember its unread numbers (the dock
+    // shows them too).
     HarvestSheetCounts(self.view);
-    if (FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
+    if (!BubblesOn() || FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
         __weak UIView* weakView = self.view;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             HarvestSheetCounts(weakView);

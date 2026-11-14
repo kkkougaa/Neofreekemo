@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.43",
+      "subtitle": "NeoFreeBird version 7.3.44",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.44",
+          "buildVersion": "44",
+          "date": "2026-11-14T05:50:41Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.44/NeoFreeBird-Twitter-sideloaded_7.3.44_12.43.ipa",
+          "size": 268027910,
+          "minOSVersion": "15.0",
+          "localizedDescription": "계정 도크 아이콘이 커져서 한 화면에 다섯 개가 꽉 차고, 설정 버튼은 옆으로 넘기면 나와요. 알림 숫자를 앱을 다시 켜도 기억해요."
+        },
         {
           "version": "7.3.43",
           "buildVersion": "43",

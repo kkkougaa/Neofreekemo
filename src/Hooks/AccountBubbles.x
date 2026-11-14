@@ -83,6 +83,9 @@
 //  fixed ring and pointer) is the one in use: turning clicks from account to
 //  account and stopping on one switches to it. Bezel ticks run under the
 //  names; the gear is smaller and sits past the last account.
+//
+//  7.3.54: turning clicks like an Apple Watch crown: a fine click at every
+//  bezel tick and a firmer one as each account reaches the middle.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2015,6 +2018,10 @@ static const CGFloat kDockCardRadius = 34.0;
 // The dial: room for the bezel ticks under the names, and the gear's size.
 static const CGFloat kDialTicks = 14.0;
 static const CGFloat kDialGear = 40.0;
+// Bezel ticks (and crown clicks) from one account to the next.
+static const NSInteger kDialNotches = 5;
+static const CGFloat kDialFineClick = 0.45;   // strength of a tick click
+static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
 
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
@@ -2037,7 +2044,11 @@ static const CGFloat kDialGear = 40.0;
 @property (nonatomic, assign) CGFloat pitch;
 @property (nonatomic, assign) NSInteger centred;
 @property (nonatomic, assign) NSInteger settleGeneration;
-@property (nonatomic, strong) UISelectionFeedbackGenerator* detent;
+@property (nonatomic, assign) NSInteger notch;
+// Like turning an Apple Watch crown: a fine click at every bezel tick, a
+// firmer one when an account reaches the middle.
+@property (nonatomic, strong) UIImpactFeedbackGenerator* fineClick;
+@property (nonatomic, strong) UIImpactFeedbackGenerator* firmClick;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -2292,9 +2303,9 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             CGFloat top = 6.0 + size + 26.0;
             CGFloat from = inset + size / 2.0 - _pitch;
             CGFloat to = inset + size / 2.0 + accountCount * _pitch;
-            for (NSInteger step = 0; from + step * _pitch / 5.0 <= to + 0.5; step++) {
-                CGFloat x = from + step * _pitch / 5.0;
-                BOOL major = step % 5 == 0;
+            for (NSInteger step = 0; from + step * _pitch / kDialNotches <= to + 0.5; step++) {
+                CGFloat x = from + step * _pitch / kDialNotches;
+                BOOL major = step % kDialNotches == 0;
                 [path moveToPoint:CGPointMake(x, top)];
                 [path addLineToPoint:CGPointMake(x, top + (major ? 8.0 : 4.0))];
             }
@@ -2346,6 +2357,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 
         // Start with the account in use in the middle.
         _centred = currentIndex;
+        _notch = currentIndex * kDialNotches;
         _strip.contentOffset = CGPointMake(currentIndex * _pitch, 0);
         _strip.delegate = (id<UIScrollViewDelegate>)self;
         [self turnDial];
@@ -2592,17 +2604,40 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         name.alpha = here ? 1.0 : 0.55 - 0.3 * t;
         name.font = [UIFont systemFontOfSize:11 weight:here ? UIFontWeightBold : UIFontWeightMedium];
     }
-    NSInteger index = [self indexAtOffset:self.strip.contentOffset.x];
-    if (index != self.centred) {
-        self.centred = index;
-        if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
-            if (!self.detent) {
-                self.detent = [UISelectionFeedbackGenerator new];
-            }
-            [self.detent selectionChanged];
-            [self.detent prepare];
-        }
+    self.centred = [self indexAtOffset:self.strip.contentOffset.x];
+
+    // Crown clicks: one for every tick that passes the middle, only between
+    // the first and the last account (past the ends the row just stretches).
+    if (self.accountCount == 0 || self.pitch <= 0) {
+        return;
     }
+    CGFloat step = self.pitch / kDialNotches;
+    NSInteger notch = (NSInteger)lround(self.strip.contentOffset.x / step);
+    notch = MAX(0, MIN((self.accountCount - 1) * kDialNotches, notch));
+    if (notch == self.notch) {
+        return;
+    }
+    self.notch = notch;
+    if (NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        return;
+    }
+    [self prepareClicks];
+    if (notch % kDialNotches == 0) {
+        [self.firmClick impactOccurredWithIntensity:kDialFirmClick];
+        [self.firmClick prepare];
+    } else {
+        [self.fineClick impactOccurredWithIntensity:kDialFineClick];
+        [self.fineClick prepare];
+    }
+}
+
+- (void)prepareClicks {
+    if (!self.fineClick) {
+        self.fineClick = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        self.firmClick = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
+    }
+    [self.fineClick prepare];
+    [self.firmClick prepare];
 }
 
 - (void)scrollViewDidScroll:(UIScrollView*)scrollView {
@@ -2612,10 +2647,9 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
     self.settleGeneration++;
-    if (!self.detent && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
-        self.detent = [UISelectionFeedbackGenerator new];
+    if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        [self prepareClicks];
     }
-    [self.detent prepare];
 }
 
 // Always come to rest with an account exactly in the middle.

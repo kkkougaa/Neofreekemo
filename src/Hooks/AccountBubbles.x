@@ -2179,7 +2179,7 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
 
 static const CGFloat kDockGap = 10.0;
 // The pictures are drawn at this share of their place in the row.
-static const CGFloat kDockFace = 0.8;
+static const CGFloat kDockFace = 1.0;
 static const CGFloat kDockSide = 12.0;
 static const NSInteger kDockVisible = 5;
 

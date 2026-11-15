@@ -528,9 +528,6 @@ static BOOL ResponseSucceeded(NSURLResponse* response, NSData* data) {
 // notification, so a send is recognised as: a post request starts while the
 // box that was just typed in is now empty.
 
-@interface _TtC13QuickComposer21QuickComposerSlotView : UIView
-@end
-
 static __weak UIView* gQuickSlot;
 static __weak UITextView* gQuickTextView;
 static NSDate* gQuickTypedAt;

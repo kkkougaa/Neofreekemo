@@ -89,6 +89,13 @@
 //
 //  7.3.55: when the account in use is one left out of the dock, it is put
 //  first on the left for as long as it is in use.
+//
+//  7.3.58: the bezel ticks are Exposure slider notches, and the dial settles
+//  on an account with that slider's spring.
+//
+//  7.3.59: back to real Liquid Glass, as a ring around the picture (the face
+//  sits on the glass, not under it); the middle mark is a thin ring set a
+//  little off the circle, under the badges.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2126,7 +2133,30 @@ static UIView* SoftRingMask(CGRect bounds, CGFloat band) {
     return ring;
 }
 
-static void PutGlassOverBubble(NFBAccountBubble* bubble) {
+// 7.3.59: back to real Liquid Glass, but only as a ring around the picture:
+// the picture sits on top of the glass, not under it, so the glass bends
+// only its own rim and never the face. No drawn border; the glass has its own
+// edge light.
+static const CGFloat kDockGlassRing = 0.075;  // ring width, as a share of the circle
+
+static void PutGlassRingAroundBubble(NFBAccountBubble* bubble) {
+    CGRect bounds = bubble.bounds;
+    CGFloat width = CGRectGetWidth(bounds);
+    for (UIView* view in bubble.subviews) {
+        if ([view isKindOfClass:[UIVisualEffectView class]]) {
+            view.layer.borderWidth = 0;
+        }
+    }
+    CGFloat ring = MAX(4.0, round(width * kDockGlassRing));
+    bubble.avatar.frame = CGRectInset(bounds, ring, ring);
+    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bubble.avatar.bounds) / 2.0;
+    // A hairline where picture meets glass, so the two read as separate pieces.
+    bubble.avatar.layer.borderWidth = 0.5;
+    bubble.avatar.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.35].CGColor;
+    [bubble bringSubviewToFront:bubble.badge];
+}
+
+__attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
     CGFloat width = CGRectGetWidth(bounds);
     CGFloat radius = width / 2.0;
@@ -2299,7 +2329,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
             bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
             if (!gear) {
-                PutGlassOverBubble(bubble);
+                PutGlassRingAroundBubble(bubble);
             }
             [_strip addSubview:bubble];
             [bubbles addObject:bubble];
@@ -2356,16 +2386,16 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         // pointer above it (and above the ticks, a brighter centre tick).
         CGFloat middle = width / 2.0;
         CGFloat stripTop = CGRectGetMinY(_strip.frame);
-        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - size / 2.0 - 4.0, stripTop + 2.0,
-                                                                size + 8.0, size + 8.0)];
+        // A thin ring standing a little off the circle, no glow.
+        CGFloat ringGap = 3.0, ringLine = 1.25;
+        CGFloat ringOut = ringGap + ringLine;
+        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - size / 2.0 - ringOut,
+                                                                stripTop + 6.0 - ringOut, size + ringOut * 2.0,
+                                                                size + ringOut * 2.0)];
         ring.userInteractionEnabled = NO;
-        ring.layer.cornerRadius = (size + 8.0) / 2.0;
-        ring.layer.borderWidth = 2.5;
+        ring.layer.cornerRadius = CGRectGetWidth(ring.bounds) / 2.0;
+        ring.layer.borderWidth = ringLine;
         ring.layer.borderColor = AccentColor().CGColor;
-        ring.layer.shadowColor = AccentColor().CGColor;
-        ring.layer.shadowOpacity = 0.55;
-        ring.layer.shadowRadius = 8;
-        ring.layer.shadowOffset = CGSizeZero;
         ring.hidden = accountCount == 0;
         // Under the row, so the circles' unread badges sit on top of it.
         [self insertSubview:ring belowSubview:_strip];

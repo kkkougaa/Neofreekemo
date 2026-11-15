@@ -340,6 +340,75 @@ static void PerformDump(UIWindow* window) {
             }
         }
 
+        // X's own edge-only glass (tab bar pill): how it is built, so the
+        // account dock can borrow it.
+        [out appendFormat:@"== LIQUID LENS ==%c", 10];
+        Class lensClass = NSClassFromString(@"XDesignSystem.LiquidLens");
+        if (lensClass) {
+            DumpClassInfo(lensClass, out);
+            unsigned int lensCount = 0;
+            Method* lensMethods = class_copyMethodList(lensClass, &lensCount);
+            for (unsigned int i = 0; i < lensCount && i < 80; i++) {
+                [out appendFormat:@"  imethod %@ %s%c", NSStringFromSelector(method_getName(lensMethods[i])),
+                                  method_getTypeEncoding(lensMethods[i]) ?: "", 10];
+            }
+            free(lensMethods);
+            lensMethods = class_copyMethodList(object_getClass(lensClass), &lensCount);
+            for (unsigned int i = 0; i < lensCount && i < 40; i++) {
+                [out appendFormat:@"  cmethod %@%c", NSStringFromSelector(method_getName(lensMethods[i])), 10];
+            }
+            free(lensMethods);
+            NSMutableArray<UIView*>* lensQueue = [NSMutableArray arrayWithObject:window];
+            UIView* lens = nil;
+            for (NSUInteger visited = 0; lensQueue.count > 0 && visited < 8000 && !lens; visited++) {
+                UIView* view = lensQueue.firstObject;
+                [lensQueue removeObjectAtIndex:0];
+                if ([view isKindOfClass:lensClass]) {
+                    lens = view;
+                }
+                [lensQueue addObjectsFromArray:view.subviews];
+            }
+            if (lens) {
+                [out appendFormat:@"instance %@ super=%@ layer=%@%c", NSStringFromCGRect(lens.frame),
+                                  NSStringFromClass(lens.superview.class), NSStringFromClass(lens.layer.class), 10];
+                NSMutableArray* layers = [NSMutableArray arrayWithObject:@[ lens.layer, @0 ]];
+                for (NSUInteger n = 0; layers.count > 0 && n < 40; n++) {
+                    NSArray* item = layers.firstObject;
+                    [layers removeObjectAtIndex:0];
+                    CALayer* layer = item[0];
+                    NSInteger depth = [item[1] integerValue];
+                    NSMutableString* line = [NSMutableString string];
+                    for (NSInteger d = 0; d < depth; d++) {
+                        [line appendString:@" "];
+                    }
+                    [line appendFormat:@"%@ %@ op=%.2f", NSStringFromClass(layer.class), NSStringFromCGRect(layer.frame),
+                                       layer.opacity];
+                    if (layer.filters.count > 0) {
+                        [line appendFormat:@" filters=%@", [[layer.filters valueForKey:@"description"]
+                                                                componentsJoinedByString:@" | "]];
+                    }
+                    if (layer.backgroundFilters.count > 0) {
+                        [line appendFormat:@" bgFilters=%@", [[layer.backgroundFilters valueForKey:@"description"]
+                                                                  componentsJoinedByString:@" | "]];
+                    }
+                    if (layer.compositingFilter) {
+                        [line appendFormat:@" comp=%@", layer.compositingFilter];
+                    }
+                    if (layer.delegate) {
+                        [line appendFormat:@" view=%@", NSStringFromClass([(NSObject*)layer.delegate class])];
+                    }
+                    [out appendFormat:@"%@%c", line.length > 300 ? [line substringToIndex:300] : line, 10];
+                    for (CALayer* sub in layer.sublayers) {
+                        [layers insertObject:@[ sub, @(depth + 1) ] atIndex:0];
+                    }
+                }
+            } else {
+                [out appendFormat:@"(no lens on screen)%c", 10];
+            }
+        } else {
+            [out appendFormat:@"(class not found)%c", 10];
+        }
+
         [out appendFormat:@"== TOP REGION ==%c", 10];
         NSMutableArray<UIView*>* topQueue = [NSMutableArray arrayWithObject:window];
         NSUInteger topVisited = 0;

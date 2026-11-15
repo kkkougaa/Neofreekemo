@@ -261,6 +261,17 @@ static NSString* AccountTitle(id account) {
 
 static NSString* ProbedImageString(id account);
 
+// X serves each profile picture in several sizes (_mini 24, _normal 48,
+// _bigger 73, _400x400); the circles want the sharp one.
+static NSString* SharpPictureAddress(NSString* address) {
+    for (NSString* size in @[ @"_normal.", @"_bigger.", @"_mini.", @"_200x200." ]) {
+        if ([address containsString:size]) {
+            return [address stringByReplacingOccurrencesOfString:size withString:@"_400x400."];
+        }
+    }
+    return address;
+}
+
 static NSURL* AccountImageURL(id account) {
     if (!account) {
         return nil;
@@ -282,8 +293,9 @@ static NSURL* AccountImageURL(id account) {
             if (string.length == 0) {
                 continue;
             }
-            // The stored URL is usually the 48px "_normal" size.
-            string = [string stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
+            // The stored URL is usually the 48px "_normal" size; the dock circles
+            // are about 70 pt (210 px), so ask for the 400px picture.
+            string = SharpPictureAddress(string);
             if ([string hasPrefix:@"http://"]) {
                 string = [@"https://" stringByAppendingString:[string substringFromIndex:7]];
             }
@@ -296,7 +308,7 @@ static NSURL* AccountImageURL(id account) {
     // Names differ between X builds: look for any getter giving a profile_images address.
     NSString* probed = ProbedImageString(account);
     if (probed.length > 0) {
-        probed = [probed stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
+        probed = SharpPictureAddress(probed);
         if ([probed hasPrefix:@"http://"]) {
             probed = [@"https://" stringByAppendingString:[probed substringFromIndex:7]];
         }

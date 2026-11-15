@@ -86,6 +86,9 @@
 //
 //  7.3.54: turning clicks like an Apple Watch crown: a fine click at every
 //  bezel tick and a firmer one as each account reaches the middle.
+//
+//  7.3.55: when the account in use is one left out of the dock, it is put
+//  first on the left for as long as it is in use.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2236,6 +2239,10 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         for (id account in OrderedAccounts(accounts)) {
             if (!HiddenFromDock(account)) {
                 [ordered addObject:account];
+            } else if (SameAccount(account, current)) {
+                // The account in use was left out of the dock: it still gets
+                // a place, first on the left, for as long as it is in use.
+                [ordered insertObject:account atIndex:0];
             }
         }
         NSInteger accountCount = (NSInteger)ordered.count;

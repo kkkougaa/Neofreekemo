@@ -139,6 +139,100 @@ static BOOL IsChatRelatedPath(NSString* path) {
 
 %end
 
+// MARK: - Media request log (shake dump "== CHAT ==")
+//
+// Received chat pictures show "tap to retry". To see where they fail, every
+// request that looks like chat media (ton.* hosts, chat / dm / attachment
+// paths) is noted when it starts and when it ends, and any request at all
+// that ends in an error or an HTTP error status is noted too.
+
+static BOOL LooksLikeChatMedia(NSURL* url) {
+    NSString* host = url.host.lowercaseString ?: @"";
+    NSString* path = url.path.lowercaseString ?: @"";
+    if ([host hasPrefix:@"ton."] || [host containsString:@"chat"]) {
+        return YES;
+    }
+    for (NSString* word in @[ @"xchat", @"/dm", @"dm_", @"attachment", @"/ton/", @"blob", @"encrypted" ]) {
+        if ([path containsString:word]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSString* ShortURL(NSURL* url) {
+    NSString* path = url.path ?: @"";
+    if (path.length > 70) {
+        path = [@"…" stringByAppendingString:[path substringFromIndex:path.length - 70]];
+    }
+    return [NSString stringWithFormat:@"%@%@", url.host ?: @"?", path];
+}
+
+@interface NFBTaskWatcher : NSObject
+@property (nonatomic, assign) BOOL media;
+@property (nonatomic, copy) NSString* label;
+@end
+
+@implementation NFBTaskWatcher
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary*)change
+                       context:(void*)context {
+    NSURLSessionTask* task = object;
+    if (task.state != NSURLSessionTaskStateCompleted) {
+        return;
+    }
+    @try {
+        [task removeObserver:self forKeyPath:@"state"];
+    } @catch (__unused NSException* exception) {
+    }
+    NSInteger status = [task.response isKindOfClass:[NSHTTPURLResponse class]]
+                           ? ((NSHTTPURLResponse*)task.response).statusCode
+                           : -1;
+    NSError* error = task.error;
+    // Cancelled requests (scrolled away, replaced) are normal: only noted for media.
+    BOOL cancelled = [error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled;
+    BOOL failed = (error && !cancelled) || status >= 400;
+    if (!self.media && !failed) {
+        return;
+    }
+    NSString* why = error ? [NSString stringWithFormat:@" err %@ %ld %@", error.domain, (long)error.code,
+                                                       error.localizedDescription ?: @""]
+                          : @"";
+    NFBChatNote([NSString stringWithFormat:@"%@ done %@ -> %ld (%lld B)%@", self.media ? @"media" : @"req",
+                                           self.label, (long)status, task.countOfBytesReceived, why]);
+}
+@end
+
+static void* NFBTaskWatcherKey = &NFBTaskWatcherKey;
+
+%hook NSURLSessionTask
+
+- (void)resume {
+    if (self.state == NSURLSessionTaskStateSuspended && !objc_getAssociatedObject(self, NFBTaskWatcherKey) &&
+        ![self isKindOfClass:[NSURLSessionWebSocketTask class]]) {
+        NSURL* url = (self.currentRequest ?: self.originalRequest).URL;
+        if (url) {
+            NFBTaskWatcher* watcher = [NFBTaskWatcher new];
+            watcher.media = LooksLikeChatMedia(url);
+            watcher.label = [NSString stringWithFormat:@"%@ %@", self.originalRequest.HTTPMethod ?: @"GET",
+                                                       ShortURL(url)];
+            if (watcher.media) {
+                NFBChatNote([NSString stringWithFormat:@"media start %@ (%@)", watcher.label,
+                                                       NSStringFromClass(object_getClass(self))]);
+            }
+            objc_setAssociatedObject(self, NFBTaskWatcherKey, watcher, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            @try {
+                [self addObserver:watcher forKeyPath:@"state" options:0 context:NULL];
+            } @catch (__unused NSException* exception) {
+            }
+        }
+    }
+    %orig;
+}
+
+%end
+
 // MARK: - Chat websocket tagging
 
 static void* ChatSocketTagKey = &ChatSocketTagKey;

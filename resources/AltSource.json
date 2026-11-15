@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.65",
+      "subtitle": "NeoFreeBird version 7.3.66",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.66",
+          "buildVersion": "66",
+          "date": "2026-11-15T09:53:00Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.66/NeoFreeBird-Twitter-sideloaded_7.3.66_12.43.ipa",
+          "size": 297613357,
+          "minOSVersion": "15.0",
+          "localizedDescription": "오늘 추가했던 기능을 되돌리고, 계정 독 사진을 왼쪽 위 프로필과 같은 모양으로 변경. + 버튼 옆 입력창은 계속 보임."
+        },
         {
           "version": "7.3.65",
           "buildVersion": "65",

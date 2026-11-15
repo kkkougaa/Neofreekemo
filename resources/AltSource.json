@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.55",
+      "subtitle": "NeoFreeBird version 7.3.57",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,24 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.57",
+          "buildVersion": "57",
+          "date": "2026-11-15T07:07:05Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.57/NeoFreeBird-Twitter-sideloaded_7.3.57_12.43.ipa",
+          "size": 297615457,
+          "minOSVersion": "15.0",
+          "localizedDescription": "NeoFreeBird 최신 수정 반영: 채팅 사진이 안 뜨던 문제 수정, 미디어 미리보기 숨기기, 두 번 탭해서 마음에 들어요 끄기, 아이콘·LTR·iPad 수정 등."
+        },
+        {
+          "version": "7.3.56",
+          "buildVersion": "56",
+          "date": "2026-11-15T07:01:41Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.56/NeoFreeBird-Twitter-sideloaded_7.3.56_12.43.ipa",
+          "size": 268049112,
+          "minOSVersion": "15.0",
+          "localizedDescription": "덤프에 채팅 사진 요청 기록을 남겨요 (진단용)."
+        },
         {
           "version": "7.3.55",
           "buildVersion": "55",

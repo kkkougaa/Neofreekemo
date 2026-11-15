@@ -528,3 +528,11 @@
 "SETTINGS_CODE_TOO_BIG" = "클립보드에 복사했어요. 백업이 길어 QR은 만들지 못했어요.";
 "SETTINGS_CODE_EMPTY" = "클립보드에 설정 코드가 없어요.";
 "SETTINGS_CODE_RESTORED" = "%ld개 설정을 복원했어요";
+
+"HIDE_MEDIA_PREVIEWS_TITLE" = "미디어 미리보기 숨기기";
+"HIDE_MEDIA_PREVIEWS_DETAIL" = "타임라인의 사진, 동영상, GIF를 숨겨요. (데이터 절약 모드)";
+"DISABLE_DOUBLE_TAP_LIKE_TITLE" = "두 번 탭해서 마음에 들어요 끄기";
+"DISABLE_DOUBLE_TAP_LIKE_DETAIL" = "동영상을 두 번 탭해도 마음에 들어요가 눌리지 않아요.";
+"COMPOSITION_COMPLETE_SENDING_TWEET_TOAST_NOTIFICATION_MESSAGE" = "답글을 보냈어요!";
+"DM_MESSAGE_ACTION_OPEN_GENERIC_TITLE" = "게시물 열기";
+"DISMISS_LABEL" = "닫기";

@@ -113,10 +113,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{@"key": @"hide_verified_tweets",
                       @"default": @NO},
                     @{@"key": @"restore_refresh_sounds",
-                      @"default": @YES},
-                    @{@"key": @"kemo_drop_refresh",
-                      @"default": @YES},
-                    @{@"key": @"kemo_reply_status",
                       @"default": @YES}
                 ]
             },
@@ -367,6 +363,16 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"key": @"kemo_draft_autosave",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_drop_refresh",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_reply_status",
                         @"default": @YES,
                         @"type": @"toggle"
                     },

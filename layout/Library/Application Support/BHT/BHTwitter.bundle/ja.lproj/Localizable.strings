@@ -288,13 +288,6 @@
 "HIDE_CUSTOM_TIMELINES_DETAIL" = "ホームタイムラインのタブから「追加」ボタンを削除します。";
 
 "RESTORE_REFRESH_SOUNDS_TITLE" = "引っ張って更新のサウンド";
-"KEMO_DROP_REFRESH_TITLE" = "しずく更新アニメーション";
-"KEMO_DROP_REFRESH_DETAIL" = "リストを引っ張るとしずくが伸びてぷつんと離れ、新しいポストを読み込む間くるくる回ります。";
-"KEMO_REPLY_STATUS_TITLE" = "返信バーに送信の案内";
-"KEMO_REPLY_STATUS_DETAIL" = "作成画面を開かずに返信バーから送ると、送信中と送信完了をバーの中で知らせます。";
-"KEMO_REPLY_SENDING" = "返信を送信中";
-"KEMO_REPLY_SENT" = "返信しました";
-"KEMO_REPLY_FAILED" = "送信できませんでした";
 
 "HIDE_TRENDS_TITLE" = "トレンドを非表示";
 "HIDE_TRENDS_DETAIL" = "「話題を検索」タブでは検索バーのみを表示し、トレンド、ニュース、ページタブを非表示にします。";

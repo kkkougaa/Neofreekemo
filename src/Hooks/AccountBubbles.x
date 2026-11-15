@@ -89,16 +89,6 @@
 //
 //  7.3.55: when the account in use is one left out of the dock, it is put
 //  first on the left for as long as it is in use.
-//
-//  7.3.58: the bezel ticks are Exposure slider notches, and the dial settles
-//  on an account with that slider's spring.
-//
-//  7.3.59: back to real Liquid Glass, as a ring around the picture (the face
-//  sits on the glass, not under it); the middle mark is a thin ring set a
-//  little off the circle, under the badges.
-//
-//  7.3.61: no glass; the circles look like X's own profile picture at the top
-//  left (picture edge to edge, hairline grey edge, soft shadow).
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -261,54 +251,6 @@ static NSString* AccountTitle(id account) {
 
 static NSString* ProbedImageString(id account);
 
-// X serves each profile picture in several sizes (_mini 24, _normal 48,
-// _bigger 73, _400x400); the circles want the sharp one.
-static NSString* SharpPictureAddressWithExtension(NSString* address, NSString* forcedExtension) {
-    NSURLComponents* parts = [NSURLComponents componentsWithString:address ?: @""];
-    NSString* path = parts.path;
-    if (path.length == 0 || ![path containsString:@"profile_images/"]) {
-        return address;
-    }
-    NSString* folder = [path stringByDeletingLastPathComponent];
-    NSString* name = path.lastPathComponent;
-    NSString* extension = name.pathExtension;
-    name = [name stringByDeletingPathExtension];
-    // Drop any size the name already carries.
-    for (NSString* size in @[ @"_normal", @"_bigger", @"_mini", @"_200x200", @"_400x400", @"_x96",
-                              @"_reasonably_small" ]) {
-        if ([name hasSuffix:size]) {
-            name = [name substringToIndex:name.length - size.length];
-            break;
-        }
-    }
-    // The image pipeline's addresses have no extension; the format, if any,
-    // is in the query (format=jpg).
-    if (extension.length == 0) {
-        for (NSURLQueryItem* item in parts.queryItems) {
-            if ([item.name isEqualToString:@"format"] && item.value.length > 0) {
-                extension = item.value;
-            }
-        }
-    }
-    if (forcedExtension) {
-        extension = forcedExtension;
-    }
-    if (extension.length == 0) {
-        extension = @"jpg";
-    }
-    parts.path = [folder stringByAppendingPathComponent:
-                             [NSString stringWithFormat:@"%@_400x400.%@", name, extension]];
-    parts.query = nil;
-    if ([parts.scheme isEqualToString:@"http"] || parts.scheme.length == 0) {
-        parts.scheme = @"https";
-    }
-    return parts.string ?: address;
-}
-
-static NSString* SharpPictureAddress(NSString* address) {
-    return SharpPictureAddressWithExtension(address, nil);
-}
-
 static NSURL* AccountImageURL(id account) {
     if (!account) {
         return nil;
@@ -330,9 +272,8 @@ static NSURL* AccountImageURL(id account) {
             if (string.length == 0) {
                 continue;
             }
-            // The stored URL is usually the 48px "_normal" size; the dock circles
-            // are about 70 pt (210 px), so ask for the 400px picture.
-            string = SharpPictureAddress(string);
+            // The stored URL is usually the 48px "_normal" size.
+            string = [string stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
             if ([string hasPrefix:@"http://"]) {
                 string = [@"https://" stringByAppendingString:[string substringFromIndex:7]];
             }
@@ -345,7 +286,7 @@ static NSURL* AccountImageURL(id account) {
     // Names differ between X builds: look for any getter giving a profile_images address.
     NSString* probed = ProbedImageString(account);
     if (probed.length > 0) {
-        probed = SharpPictureAddress(probed);
+        probed = [probed stringByReplacingOccurrencesOfString:@"_normal." withString:@"_bigger."];
         if ([probed hasPrefix:@"http://"]) {
             probed = [@"https://" stringByAppendingString:[probed substringFromIndex:7]];
         }
@@ -445,96 +386,6 @@ static UIImage* OnScreenAvatar(NSString* key) {
                 UIImage* image = ((UIImageView*)view).image;
                 if (image) {
                     return image;
-                }
-            }
-            [queue addObjectsFromArray:view.subviews];
-        }
-    }
-    return nil;
-}
-
-// The profile_images address behind an on-screen avatar. X's avatar views
-// and the image pipeline object that fills them keep it behind getters with
-// "url", "request", "fetch" or "helper" in their names; looked for two levels
-// deep, in X's and the image pipeline's own classes only.
-static NSString* PictureAddressIn(id object, int depth) {
-    if (!object) {
-        return nil;
-    }
-    NSString* found = ProfileImageString(object);
-    if (found || depth > 2 || [object isKindOfClass:[NSString class]] || [object isKindOfClass:[NSNumber class]] ||
-        [object isKindOfClass:[UIImage class]] || [object isKindOfClass:[NSURL class]]) {
-        return found;
-    }
-    NSArray* skip = @[ @"load", @"start", @"cancel", @"reset", @"reload", @"create", @"make", @"fetchimage",
-                       @"prefetch", @"copy", @"new" ];
-    for (Class cls = object_getClass(object); cls; cls = class_getSuperclass(cls)) {
-        NSString* className = NSStringFromClass(cls);
-        if ([className hasPrefix:@"UI"] || [className hasPrefix:@"NS"] || [className hasPrefix:@"CA"] ||
-            [className hasPrefix:@"_"]) {
-            break;
-        }
-        unsigned int count = 0;
-        Method* methods = class_copyMethodList(cls, &count);
-        for (unsigned int i = 0; i < count && !found; i++) {
-            NSString* name = NSStringFromSelector(method_getName(methods[i]));
-            NSString* lower = name.lowercaseString;
-            if ([name containsString:@":"] || [name hasPrefix:@"set"] || [name hasPrefix:@"_"] ||
-                [name hasPrefix:@"."]) {
-                continue;
-            }
-            BOOL wanted = [lower containsString:@"url"] || [lower containsString:@"request"] ||
-                          [lower containsString:@"fetch"] || [lower containsString:@"helper"];
-            for (NSString* word in skip) {
-                if ([lower hasPrefix:word]) {
-                    wanted = NO;
-                }
-            }
-            if (!wanted) {
-                continue;
-            }
-            id value = ObjectProp(object, name);
-            if (value && value != object) {
-                found = PictureAddressIn(value, depth + 1);
-            }
-        }
-        free(methods);
-        if (found) {
-            break;
-        }
-    }
-    return found;
-}
-
-// The address of the picture an on-screen avatar of this account shows (X's
-// avatar views carry TUIAvatarImageView.<user id> as their identifier).
-static NSString* OnScreenAvatarAddress(NSString* key) {
-    if (key.length == 0) {
-        return nil;
-    }
-    // Any avatar whose identifier ends in the user id: TUIAvatarImageView.<id>
-    // in timelines, and the side drawer's avatars.
-    NSString* wanted = [@"." stringByAppendingString:key];
-    for (UIWindow* window in UIApplication.sharedApplication.windows) {
-        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
-        NSInteger budget = 8000;
-        while (queue.count > 0 && budget-- > 0) {
-            UIView* view = queue.firstObject;
-            [queue removeObjectAtIndex:0];
-            if ([view.accessibilityIdentifier hasSuffix:wanted]) {
-                // X's image pipeline (TIP) puts its fetch helper on UIImageView
-                // itself (tip_fetchHelper); the helper's fetch request has the
-                // imageURL. That getter sits on UIKit's class, so ask for it by name.
-                id helper = ObjectProp(view, @"tip_fetchHelper");
-                NSString* address = PictureAddressIn(helper, 0) ?: PictureAddressIn(view, 0);
-                for (UIView* sub in view.subviews) {
-                    if (address) {
-                        break;
-                    }
-                    address = PictureAddressIn(ObjectProp(sub, @"tip_fetchHelper"), 0) ?: PictureAddressIn(sub, 0);
-                }
-                if (address) {
-                    return address;
                 }
             }
             [queue addObjectsFromArray:view.subviews];
@@ -894,29 +745,6 @@ static void StoreAvatar(NSString* key, NSData* data, UIImage* image, NSString* s
 // Hands back the stored picture right away, then a fresh one only if the
 // account's picture address differs from the one the stored file came from.
 // `done` runs on the main thread, once or twice.
-// Downloads the picture; if that address has nothing, tries `next` once.
-static void FetchSharpAvatar(NSURL* address, NSURL* next, NSString* key, NSString* source,
-                             void (^done)(UIImage* image)) {
-    [[[NSURLSession sharedSession]
-          dataTaskWithURL:address
-        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
-            NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
-                                   ? ((NSHTTPURLResponse*)response).statusCode
-                                   : 0;
-            UIImage* image = data.length > 0 && !error && status < 400 ? [UIImage imageWithData:data] : nil;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (!image) {
-                    if (next) {
-                        FetchSharpAvatar(next, nil, key, source, done);
-                    }
-                    return;
-                }
-                StoreAvatar(key, data, image, source);
-                done(image);
-            });
-        }] resume];
-}
-
 static void LoadAvatar(id account, void (^done)(UIImage* image)) {
     NSString* key = AccountKey(account);
     UIImage* stored = StoredAvatar(key);
@@ -930,15 +758,6 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
         done(stored);
     }
     NSURL* url = AccountImageURL(account);
-    if (!url) {
-        // The account objects carry no picture address on this X build; read
-        // it off an avatar X has on screen, and ask for the sharp size.
-        NSString* address = SharpPictureAddress(OnScreenAvatarAddress(key) ?: @"");
-        if ([address hasPrefix:@"http://"]) {
-            address = [@"https://" stringByAppendingString:[address substringFromIndex:7]];
-        }
-        url = address.length > 0 ? [NSURL URLWithString:address] : nil;
-    }
     if (!url || key.length == 0) {
         return;
     }
@@ -946,13 +765,20 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
     if (stored && [AvatarIndex()[key] isEqualToString:source]) {
         return;
     }
-    // The picture's real format is not always in its address: try the jpg
-    // first, then the png.
-    NSURL* fallback = nil;
-    if ([url.path hasSuffix:@"_400x400.jpg"]) {
-        fallback = [NSURL URLWithString:SharpPictureAddressWithExtension(url.absoluteString, @"png")];
-    }
-    FetchSharpAvatar(url, fallback, key, source, done);
+    [[[NSURLSession sharedSession]
+          dataTaskWithURL:url
+        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+            UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!image) {
+                    ProbeNote([NSString stringWithFormat:@"download failed %@: %@", url.host,
+                                                         error.localizedDescription ?: @"no image data"]);
+                    return;
+                }
+                StoreAvatar(key, data, image, source);
+                done(image);
+            });
+        }] resume];
 }
 
 // MARK: - Unread numbers from the side drawer
@@ -1207,15 +1033,13 @@ static void HarvestDrawerCounts(UIWindow* window) {
                                          [notes componentsJoinedByString:@", "]]);
 }
 
-// Style 0 is Apple's regular (frosted) glass, 1 the clear glass of the tab bar
-// pill: see-through in the middle, bending light only toward the edge.
-static UIVisualEffect* GlassEffectWithStyle(NSInteger style) {
+static UIVisualEffect* BubbleEffect(void) {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     if (glassClass) {
         id effect = nil;
         SEL styled = NSSelectorFromString(@"effectWithStyle:");
         if ([glassClass respondsToSelector:styled]) {
-            effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, style);
+            effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 0);
         }
         if (!effect) {
             effect = [[glassClass alloc] init];
@@ -1225,10 +1049,6 @@ static UIVisualEffect* GlassEffectWithStyle(NSInteger style) {
         }
     }
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
-}
-
-static UIVisualEffect* BubbleEffect(void) {
-    return GlassEffectWithStyle(0);
 }
 
 static UIColor* AccentColor(void) {
@@ -2178,8 +1998,6 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
 // moves together so overlays stay lined up with the screen they belong to.
 
 static const CGFloat kDockGap = 10.0;
-// The pictures are drawn at this share of their place in the row.
-static const CGFloat kDockFace = 1.0;
 static const CGFloat kDockSide = 12.0;
 static const NSInteger kDockVisible = 5;
 
@@ -2201,33 +2019,12 @@ static void ResizeBubble(NFBAccountBubble* bubble, CGRect frame) {
 }
 static const CGFloat kDockCardRadius = 34.0;
 // The dial: room for the bezel ticks under the names, and the gear's size.
-static const CGFloat kDialTicks = 34.0;
-// Exposure-slider notches: 3 pt wide, this tall at the middle, shorter and
-// dimmer the further they are from it; the one in the middle takes the accent.
-static const CGFloat kNotchHeight = 26.0;
-static const CGFloat kNotchWidth = 3.0;
-// Settling on an account: the Exposure slider's spring (stiffness 300,
-// damping 30, mass 0.5), per unit mass.
-static const CGFloat kDialSpringK = 600.0;
-static const CGFloat kDialSpringC = 60.0;
+static const CGFloat kDialTicks = 14.0;
 static const CGFloat kDialGear = 40.0;
 // Bezel ticks (and crown clicks) from one account to the next.
 static const NSInteger kDialNotches = 5;
 static const CGFloat kDialFineClick = 0.45;   // strength of a tick click
 static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
-
-// Display link target that holds only a block, so the dock is not retained.
-@interface NFBDialTicker : NSObject
-@property (nonatomic, copy) void (^block)(CADisplayLink* link);
-@end
-
-@implementation NFBDialTicker
-- (void)fire:(CADisplayLink*)link {
-    if (self.block) {
-        self.block(link);
-    }
-}
-@end
 
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
@@ -2255,13 +2052,6 @@ static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
 // firmer one when an account reaches the middle.
 @property (nonatomic, strong) UIImpactFeedbackGenerator* fineClick;
 @property (nonatomic, strong) UIImpactFeedbackGenerator* firmClick;
-// Exposure-slider notches under the names, and the spring that settles the dial.
-@property (nonatomic, strong) NSArray<CALayer*>* notches;
-@property (nonatomic, assign) CGFloat notchBase;
-@property (nonatomic, strong) CADisplayLink* settleLink;
-@property (nonatomic, assign) CGFloat settleV;
-@property (nonatomic, assign) CGFloat settleTarget;
-@property (nonatomic, assign) CFTimeInterval settleTime;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -2308,29 +2098,7 @@ static UIView* SoftRingMask(CGRect bounds, CGFloat band) {
     return ring;
 }
 
-// 7.3.59: back to real Liquid Glass, but only as a ring around the picture:
-// the picture sits on top of the glass, not under it, so the glass bends
-// only its own rim and never the face. No drawn border; the glass has its own
-// edge light.
-
-static void PutGlassRingAroundBubble(NFBAccountBubble* bubble) {
-    // 7.3.61: styled like X's own profile picture at the top left instead of
-    // glass: the picture fills the circle, a hairline light grey edge, and the
-    // bubble's soft shadow underneath.
-    CGRect bounds = bubble.bounds;
-    for (UIView* view in bubble.subviews) {
-        if ([view isKindOfClass:[UIVisualEffectView class]]) {
-            view.hidden = YES;
-        }
-    }
-    bubble.avatar.frame = bounds;
-    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bounds) / 2.0;
-    bubble.avatar.layer.borderWidth = 1.0;
-    bubble.avatar.layer.borderColor = [UIColor colorWithWhite:0.82 alpha:0.9].CGColor;
-    [bubble bringSubviewToFront:bubble.badge];
-}
-
-__attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble) {
+static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
     CGFloat width = CGRectGetWidth(bounds);
     CGFloat radius = width / 2.0;
@@ -2497,15 +2265,13 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                                                                                 current:SameAccount(account, current)];
             CGFloat x = inset + i * _pitch;
             ResizeBubble(bubble, gear ? CGRectMake(gearX, 6.0 + (size - kDialGear) / 2.0, kDialGear, kDialGear)
-                                      : CGRectMake(x + (size - kDockFace * size) / 2.0,
-                                                   6.0 + (size - kDockFace * size) / 2.0, kDockFace * size,
-                                                   kDockFace * size));
+                                      : CGRectMake(x, 6.0, size, size));
             bubble.slot = bubble.center;
             bubble.initial.textColor = [UIColor whiteColor];
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
             bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
             if (!gear) {
-                PutGlassRingAroundBubble(bubble);
+                PutGlassOverBubble(bubble);
             }
             [_strip addSubview:bubble];
             [bubbles addObject:bubble];
@@ -2536,46 +2302,43 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         _bubbles = bubbles;
         _names = names;
 
-        // Exposure-slider notches under the names, turning with the dial: one
-        // under each account and four between. turnDial sizes and colours them
-        // by how far each is from the middle.
+        // A watch bezel's ticks under the names, turning with the dial: a
+        // longer one under each account, four short ones between.
         if (accountCount > 0) {
-            NSMutableArray<CALayer*>* notches = [NSMutableArray array];
-            CGFloat bottom = 6.0 + size + 26.0 + kNotchHeight;
+            CAShapeLayer* ticks = [CAShapeLayer layer];
+            UIBezierPath* path = [UIBezierPath bezierPath];
+            CGFloat top = 6.0 + size + 26.0;
             CGFloat from = inset + size / 2.0 - _pitch;
             CGFloat to = inset + size / 2.0 + accountCount * _pitch;
             for (NSInteger step = 0; from + step * _pitch / kDialNotches <= to + 0.5; step++) {
-                CALayer* notch = [CALayer layer];
-                notch.anchorPoint = CGPointMake(0.5, 1.0);
-                notch.position = CGPointMake(from + step * _pitch / kDialNotches, bottom);
-                notch.bounds = CGRectMake(0, 0, kNotchWidth, kNotchHeight);
-                notch.cornerRadius = 1.5;
-                notch.backgroundColor = UIColor.whiteColor.CGColor;
-                [_strip.layer insertSublayer:notch atIndex:0];
-                [notches addObject:notch];
+                CGFloat x = from + step * _pitch / kDialNotches;
+                BOOL major = step % kDialNotches == 0;
+                [path moveToPoint:CGPointMake(x, top)];
+                [path addLineToPoint:CGPointMake(x, top + (major ? 8.0 : 4.0))];
             }
-            _notches = notches;
-            _notchBase = from;
+            ticks.path = path.CGPath;
+            ticks.strokeColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+            ticks.lineWidth = 1.0;
+            ticks.lineCap = kCALineCapRound;
+            [_strip.layer insertSublayer:ticks atIndex:0];
         }
 
         // The fixed middle mark: a ring around the centre place and a small
         // pointer above it (and above the ticks, a brighter centre tick).
         CGFloat middle = width / 2.0;
         CGFloat stripTop = CGRectGetMinY(_strip.frame);
-        // A thin ring standing a little off the circle, no glow.
-        CGFloat ringGap = 3.0, ringLine = 1.25;
-        CGFloat ringOut = ringGap + ringLine;
-        CGFloat face = kDockFace * size;
-        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - face / 2.0 - ringOut,
-                                                                stripTop + 6.0 + (size - face) / 2.0 - ringOut,
-                                                                face + ringOut * 2.0, face + ringOut * 2.0)];
+        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - size / 2.0 - 4.0, stripTop + 2.0,
+                                                                size + 8.0, size + 8.0)];
         ring.userInteractionEnabled = NO;
-        ring.layer.cornerRadius = CGRectGetWidth(ring.bounds) / 2.0;
-        ring.layer.borderWidth = ringLine;
+        ring.layer.cornerRadius = (size + 8.0) / 2.0;
+        ring.layer.borderWidth = 2.5;
         ring.layer.borderColor = AccentColor().CGColor;
+        ring.layer.shadowColor = AccentColor().CGColor;
+        ring.layer.shadowOpacity = 0.55;
+        ring.layer.shadowRadius = 8;
+        ring.layer.shadowOffset = CGSizeZero;
         ring.hidden = accountCount == 0;
-        // Under the row, so the circles' unread badges sit on top of it.
-        [self insertSubview:ring belowSubview:_strip];
+        [self addSubview:ring];
 
         CAShapeLayer* pointer = [CAShapeLayer layer];
         UIBezierPath* triangle = [UIBezierPath bezierPath];
@@ -2588,6 +2351,16 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         pointer.hidden = accountCount == 0;
         [self.layer addSublayer:pointer];
 
+        CAShapeLayer* centreTick = [CAShapeLayer layer];
+        UIBezierPath* tick = [UIBezierPath bezierPath];
+        [tick moveToPoint:CGPointMake(middle, stripTop + 6.0 + size + 24.0)];
+        [tick addLineToPoint:CGPointMake(middle, stripTop + 6.0 + size + 36.0)];
+        centreTick.path = tick.CGPath;
+        centreTick.strokeColor = AccentColor().CGColor;
+        centreTick.lineWidth = 2.0;
+        centreTick.lineCap = kCALineCapRound;
+        centreTick.hidden = accountCount == 0;
+        [self.layer addSublayer:centreTick];
 
         // Start with the account in use in the middle.
         _centred = currentIndex;
@@ -2839,7 +2612,6 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         name.font = [UIFont systemFontOfSize:11 weight:here ? UIFontWeightBold : UIFontWeightMedium];
     }
     self.centred = [self indexAtOffset:self.strip.contentOffset.x];
-    [self layoutNotches];
 
     // Crown clicks: one for every tick that passes the middle, only between
     // the first and the last account (past the ends the row just stretches).
@@ -2866,82 +2638,6 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     }
 }
 
-// Exposure slider: by distance from the middle (in notches) the opacity goes
-// 1 / 0.6 / 0.3 at 0 / 1 / 3 and the top is cut 0 / 30 / 50 % at 0 / 1 / 2.
-// Both ends fade out over the outer fifth of the row.
-- (void)layoutNotches {
-    if (self.notches.count == 0 || self.pitch <= 0) {
-        return;
-    }
-    CGFloat width = CGRectGetWidth(self.strip.bounds);
-    CGFloat offset = self.strip.contentOffset.x;
-    CGFloat middle = offset + width / 2.0;
-    CGFloat step = self.pitch / kDialNotches;
-    CGColorRef accent = AccentColor().CGColor;
-    CGColorRef plain = [UIColor colorWithWhite:1 alpha:1].CGColor;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (NSUInteger i = 0; i < self.notches.count; i++) {
-        CALayer* notch = self.notches[i];
-        CGFloat x = self.notchBase + i * step;
-        CGFloat d = fabs(x - middle) / step;
-        CGFloat opacity = d <= 1 ? 1.0 - 0.4 * d : MAX(0.3, 0.6 - 0.15 * (d - 1));
-        CGFloat cut = d <= 1 ? 0.3 * d : MIN(0.5, 0.3 + 0.2 * (d - 1));
-        CGFloat edge = MIN(x - offset, offset + width - x) / (width * 0.2);
-        notch.opacity = opacity * MAX(0, MIN(1, edge));
-        notch.bounds = CGRectMake(0, 0, kNotchWidth, kNotchHeight * (1.0 - cut));
-        notch.backgroundColor = d < 0.5 ? accent : plain;
-    }
-    [CATransaction commit];
-}
-
-// Settle on an account with the Exposure slider's spring instead of UIKit's
-// deceleration, starting from the flick's speed.
-- (void)settleTo:(CGFloat)target velocity:(CGFloat)velocity {
-    self.settleTarget = target;
-    self.settleV = velocity;
-    self.settleTime = 0;
-    if (!self.settleLink) {
-        __weak typeof(self) weakSelf = self;
-        NFBDialTicker* ticker = [NFBDialTicker new];
-        ticker.block = ^(CADisplayLink* link) {
-            [weakSelf settleStep:link];
-        };
-        self.settleLink = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(fire:)];
-        [self.settleLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    }
-    self.settleLink.paused = NO;
-}
-
-- (void)stopSettling {
-    [self.settleLink invalidate];
-    self.settleLink = nil;
-}
-
-- (void)settleStep:(CADisplayLink*)link {
-    CFTimeInterval now = link.timestamp;
-    CGFloat dt = self.settleTime > 0 ? MIN(now - self.settleTime, 1.0 / 30) : 1.0 / 60;
-    self.settleTime = now;
-    CGFloat k = kDialSpringK;
-    CGFloat c = UIAccessibilityIsReduceMotionEnabled() ? 2 * sqrt(k) : kDialSpringC;
-    CGFloat x = self.strip.contentOffset.x;
-    CGFloat v = self.settleV;
-    for (int i = 0; i < 4; i++) {
-        CGFloat a = -k * (x - self.settleTarget) - c * v;
-        v += a * dt / 4;
-        x += v * dt / 4;
-    }
-    self.settleV = v;
-    if (fabs(x - self.settleTarget) < 0.3 && fabs(v) < 5) {
-        x = self.settleTarget;
-        [self stopSettling];
-        self.strip.contentOffset = CGPointMake(x, 0);
-        [self dialStopped];
-        return;
-    }
-    self.strip.contentOffset = CGPointMake(x, 0);
-}
-
 - (void)prepareClicks {
     if (!self.fineClick) {
         self.fineClick = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
@@ -2957,7 +2653,6 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
-    [self stopSettling];
     self.settleGeneration++;
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         [self prepareClicks];
@@ -2971,10 +2666,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     if (self.accountCount == 0) {
         return;
     }
-    CGFloat destination = [self indexAtOffset:target->x] * self.pitch;
-    // Stop UIKit's own glide where the finger left off; the spring takes it from here.
-    target->x = scrollView.contentOffset.x;
-    [self settleTo:destination velocity:velocity.x * 1000.0];
+    target->x = [self indexAtOffset:target->x] * self.pitch;
 }
 
 - (void)scrollViewDidEndDragging:(UIScrollView*)scrollView willDecelerate:(BOOL)decelerate {
@@ -2994,13 +2686,13 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 // The dial came to rest: switch to the account in the middle straight away
 // (after a breath, in case the finger turns it again).
 - (void)dialStopped {
-    if (self.settleLink || self.closing || self.accountCount == 0) {
+    if (self.closing || self.accountCount == 0) {
         return;
     }
     NSInteger index = [self indexAtOffset:self.strip.contentOffset.x];
     CGFloat exact = index * self.pitch;
     if (fabs(self.strip.contentOffset.x - exact) > 1.0) {
-        [self settleTo:exact velocity:0];
+        [self.strip setContentOffset:CGPointMake(exact, 0) animated:YES];
         return;
     }
     NFBAccountBubble* bubble = self.bubbles[index];
@@ -3058,7 +2750,6 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         return;
     }
     self.closing = YES;
-    [self stopSettling];
     self.userInteractionEnabled = NO;
     [self.catcher removeFromSuperview];
     [[NSNotificationCenter defaultCenter] removeObserver:self];

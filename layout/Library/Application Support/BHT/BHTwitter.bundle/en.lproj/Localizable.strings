@@ -290,13 +290,6 @@
 "HIDE_CUSTOM_TIMELINES_DETAIL" = "Remove the Add button from the home timeline tabs.";
 
 "RESTORE_REFRESH_SOUNDS_TITLE" = "Pull-to-refresh sounds";
-"KEMO_DROP_REFRESH_TITLE" = "Drop refresh animation";
-"KEMO_DROP_REFRESH_DETAIL" = "When you pull a list down, a drop stretches out, snaps off and spins while new posts load.";
-"KEMO_REPLY_STATUS_TITLE" = "Send status in the reply bar";
-"KEMO_REPLY_STATUS_DETAIL" = "When you reply from the bar without opening the composer, the bar itself shows that it is sending and when it is sent.";
-"KEMO_REPLY_SENDING" = "Sending reply";
-"KEMO_REPLY_SENT" = "Reply sent";
-"KEMO_REPLY_FAILED" = "Couldn't send";
 
 "HIDE_TRENDS_TITLE" = "Hide trending content";
 "HIDE_TRENDS_DETAIL" = "Show only the search bar on the Explore tab, hiding all trends, news and the page tabs.";

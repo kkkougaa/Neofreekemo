@@ -367,16 +367,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_drop_refresh",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_reply_status",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
                         @"key": @"kemo_haptics",
                         @"default": @YES,
                         @"type": @"toggle"

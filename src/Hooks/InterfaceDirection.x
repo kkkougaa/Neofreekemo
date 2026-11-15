@@ -56,6 +56,11 @@ static CTParagraphStyleRef CreateLTRParagraphStyle(CTParagraphStyleRef original)
     return CTParagraphStyleCreate(settings, count);
 }
 
+// Every hook here sits on paths UIKit calls thousands of times a frame
+// (layout direction, semantic content). They are only installed when
+// "disable_rtl" is on at launch, so with it off nothing is in the way.
+%group DisableRTL
+
 %hook TFNAttributedTextModel
 
 - (void)setAttributedString:(NSAttributedString*)attributedString {
@@ -155,6 +160,8 @@ static CTParagraphStyleRef CreateLTRParagraphStyle(CTParagraphStyleRef original)
 }
 %end
 
+%end
+
 %group TwitterMirroring
 %hook UIView
 + (BOOL)tfn_isRightToLeftTransformSystemActive {
@@ -164,7 +171,10 @@ static CTParagraphStyleRef CreateLTRParagraphStyle(CTParagraphStyleRef original)
 %end
 
 %ctor {
-    %init;
+    if (![BHTSettings boolForKey:@"disable_rtl"]) {
+        return;
+    }
+    %init(DisableRTL);
     if (class_getClassMethod(UIView.class, @selector(tfn_isRightToLeftTransformSystemActive))) {
         %init(TwitterMirroring);
     }

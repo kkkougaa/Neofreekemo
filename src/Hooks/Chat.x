@@ -79,7 +79,8 @@ static BOOL IsChatRelatedPath(NSString* path) {
                                    data:(NSData*)data
                      temporarySavedFile:(id)temporarySavedFile {
     NSURL* url = request.URL;
-    if (url && IsChatRelatedPath(url.path)) {
+    // Only kept for the shake dump: nothing to note while it is off.
+    if (url && [BHTSettings boolForKey:@"kemo_shake_dump"] && IsChatRelatedPath(url.path)) {
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
                                ? ((NSHTTPURLResponse*)response).statusCode
                                : -1;
@@ -162,7 +163,10 @@ static void* NFBTaskWatcherKey = &NFBTaskWatcherKey;
 %hook NSURLSessionTask
 
 - (void)resume {
-    if (self.state == NSURLSessionTaskStateSuspended && !objc_getAssociatedObject(self, NFBTaskWatcherKey) &&
+    // Watching every request is only for the shake dump; with it off, requests
+    // (pictures included) go out untouched.
+    if ([BHTSettings boolForKey:@"kemo_shake_dump"] && self.state == NSURLSessionTaskStateSuspended &&
+        !objc_getAssociatedObject(self, NFBTaskWatcherKey) &&
         ![self isKindOfClass:[NSURLSessionWebSocketTask class]]) {
         NSURL* url = (self.currentRequest ?: self.originalRequest).URL;
         if (url) {

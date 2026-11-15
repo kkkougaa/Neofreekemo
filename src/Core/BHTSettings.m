@@ -113,6 +113,8 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{@"key": @"hide_verified_tweets",
                       @"default": @NO},
                     @{@"key": @"restore_refresh_sounds",
+                      @"default": @YES},
+                    @{@"key": @"kemo_drop_refresh",
                       @"default": @YES}
                 ]
             },

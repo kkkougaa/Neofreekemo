@@ -261,6 +261,8 @@
 "HIDE_CUSTOM_TIMELINES_DETAIL" = "홈 타임라인 탭에서 추가 버튼을 제거합니다.";
 
 "RESTORE_REFRESH_SOUNDS_TITLE" = "당겨서 새로고침 효과음";
+"KEMO_DROP_REFRESH_TITLE" = "물방울 새로고침 애니메이션";
+"KEMO_DROP_REFRESH_DETAIL" = "목록을 당기면 물방울이 늘어나다 톡 떨어지고, 새 게시물을 불러오는 동안 돌아갑니다.";
 
 "HIDE_TRENDS_TITLE" = "트렌딩 콘텐츠 숨기기";
 "HIDE_TRENDS_DETAIL" = "탐색하기 탭에서 검색 바만 표시하고, 모든 트렌드, 뉴스 및 페이지 탭을 숨깁니다.";

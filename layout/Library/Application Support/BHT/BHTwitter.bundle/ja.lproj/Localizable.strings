@@ -288,6 +288,8 @@
 "HIDE_CUSTOM_TIMELINES_DETAIL" = "ホームタイムラインのタブから「追加」ボタンを削除します。";
 
 "RESTORE_REFRESH_SOUNDS_TITLE" = "引っ張って更新のサウンド";
+"KEMO_DROP_REFRESH_TITLE" = "しずく更新アニメーション";
+"KEMO_DROP_REFRESH_DETAIL" = "リストを引っ張るとしずくが伸びてぷつんと離れ、新しいポストを読み込む間くるくる回ります。";
 
 "HIDE_TRENDS_TITLE" = "トレンドを非表示";
 "HIDE_TRENDS_DETAIL" = "「話題を検索」タブでは検索バーのみを表示し、トレンド、ニュース、ページタブを非表示にします。";

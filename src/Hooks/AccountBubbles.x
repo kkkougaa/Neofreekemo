@@ -2019,12 +2019,33 @@ static void ResizeBubble(NFBAccountBubble* bubble, CGRect frame) {
 }
 static const CGFloat kDockCardRadius = 34.0;
 // The dial: room for the bezel ticks under the names, and the gear's size.
-static const CGFloat kDialTicks = 14.0;
+static const CGFloat kDialTicks = 34.0;
+// Exposure-slider notches: 3 pt wide, this tall at the middle, shorter and
+// dimmer the further they are from it; the one in the middle takes the accent.
+static const CGFloat kNotchHeight = 26.0;
+static const CGFloat kNotchWidth = 3.0;
+// Settling on an account: the Exposure slider's spring (stiffness 300,
+// damping 30, mass 0.5), per unit mass.
+static const CGFloat kDialSpringK = 600.0;
+static const CGFloat kDialSpringC = 60.0;
 static const CGFloat kDialGear = 40.0;
 // Bezel ticks (and crown clicks) from one account to the next.
 static const NSInteger kDialNotches = 5;
 static const CGFloat kDialFineClick = 0.45;   // strength of a tick click
 static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
+
+// Display link target that holds only a block, so the dock is not retained.
+@interface NFBDialTicker : NSObject
+@property (nonatomic, copy) void (^block)(CADisplayLink* link);
+@end
+
+@implementation NFBDialTicker
+- (void)fire:(CADisplayLink*)link {
+    if (self.block) {
+        self.block(link);
+    }
+}
+@end
 
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
@@ -2052,6 +2073,13 @@ static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
 // firmer one when an account reaches the middle.
 @property (nonatomic, strong) UIImpactFeedbackGenerator* fineClick;
 @property (nonatomic, strong) UIImpactFeedbackGenerator* firmClick;
+// Exposure-slider notches under the names, and the spring that settles the dial.
+@property (nonatomic, strong) NSArray<CALayer*>* notches;
+@property (nonatomic, assign) CGFloat notchBase;
+@property (nonatomic, strong) CADisplayLink* settleLink;
+@property (nonatomic, assign) CGFloat settleV;
+@property (nonatomic, assign) CGFloat settleTarget;
+@property (nonatomic, assign) CFTimeInterval settleTime;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -2302,25 +2330,26 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         _bubbles = bubbles;
         _names = names;
 
-        // A watch bezel's ticks under the names, turning with the dial: a
-        // longer one under each account, four short ones between.
+        // Exposure-slider notches under the names, turning with the dial: one
+        // under each account and four between. turnDial sizes and colours them
+        // by how far each is from the middle.
         if (accountCount > 0) {
-            CAShapeLayer* ticks = [CAShapeLayer layer];
-            UIBezierPath* path = [UIBezierPath bezierPath];
-            CGFloat top = 6.0 + size + 26.0;
+            NSMutableArray<CALayer*>* notches = [NSMutableArray array];
+            CGFloat bottom = 6.0 + size + 26.0 + kNotchHeight;
             CGFloat from = inset + size / 2.0 - _pitch;
             CGFloat to = inset + size / 2.0 + accountCount * _pitch;
             for (NSInteger step = 0; from + step * _pitch / kDialNotches <= to + 0.5; step++) {
-                CGFloat x = from + step * _pitch / kDialNotches;
-                BOOL major = step % kDialNotches == 0;
-                [path moveToPoint:CGPointMake(x, top)];
-                [path addLineToPoint:CGPointMake(x, top + (major ? 8.0 : 4.0))];
+                CALayer* notch = [CALayer layer];
+                notch.anchorPoint = CGPointMake(0.5, 1.0);
+                notch.position = CGPointMake(from + step * _pitch / kDialNotches, bottom);
+                notch.bounds = CGRectMake(0, 0, kNotchWidth, kNotchHeight);
+                notch.cornerRadius = 1.5;
+                notch.backgroundColor = UIColor.whiteColor.CGColor;
+                [_strip.layer insertSublayer:notch atIndex:0];
+                [notches addObject:notch];
             }
-            ticks.path = path.CGPath;
-            ticks.strokeColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
-            ticks.lineWidth = 1.0;
-            ticks.lineCap = kCALineCapRound;
-            [_strip.layer insertSublayer:ticks atIndex:0];
+            _notches = notches;
+            _notchBase = from;
         }
 
         // The fixed middle mark: a ring around the centre place and a small
@@ -2351,16 +2380,6 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         pointer.hidden = accountCount == 0;
         [self.layer addSublayer:pointer];
 
-        CAShapeLayer* centreTick = [CAShapeLayer layer];
-        UIBezierPath* tick = [UIBezierPath bezierPath];
-        [tick moveToPoint:CGPointMake(middle, stripTop + 6.0 + size + 24.0)];
-        [tick addLineToPoint:CGPointMake(middle, stripTop + 6.0 + size + 36.0)];
-        centreTick.path = tick.CGPath;
-        centreTick.strokeColor = AccentColor().CGColor;
-        centreTick.lineWidth = 2.0;
-        centreTick.lineCap = kCALineCapRound;
-        centreTick.hidden = accountCount == 0;
-        [self.layer addSublayer:centreTick];
 
         // Start with the account in use in the middle.
         _centred = currentIndex;
@@ -2612,6 +2631,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         name.font = [UIFont systemFontOfSize:11 weight:here ? UIFontWeightBold : UIFontWeightMedium];
     }
     self.centred = [self indexAtOffset:self.strip.contentOffset.x];
+    [self layoutNotches];
 
     // Crown clicks: one for every tick that passes the middle, only between
     // the first and the last account (past the ends the row just stretches).
@@ -2638,6 +2658,82 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     }
 }
 
+// Exposure slider: by distance from the middle (in notches) the opacity goes
+// 1 / 0.6 / 0.3 at 0 / 1 / 3 and the top is cut 0 / 30 / 50 % at 0 / 1 / 2.
+// Both ends fade out over the outer fifth of the row.
+- (void)layoutNotches {
+    if (self.notches.count == 0 || self.pitch <= 0) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(self.strip.bounds);
+    CGFloat offset = self.strip.contentOffset.x;
+    CGFloat middle = offset + width / 2.0;
+    CGFloat step = self.pitch / kDialNotches;
+    CGColorRef accent = AccentColor().CGColor;
+    CGColorRef plain = [UIColor colorWithWhite:1 alpha:1].CGColor;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (NSUInteger i = 0; i < self.notches.count; i++) {
+        CALayer* notch = self.notches[i];
+        CGFloat x = self.notchBase + i * step;
+        CGFloat d = fabs(x - middle) / step;
+        CGFloat opacity = d <= 1 ? 1.0 - 0.4 * d : MAX(0.3, 0.6 - 0.15 * (d - 1));
+        CGFloat cut = d <= 1 ? 0.3 * d : MIN(0.5, 0.3 + 0.2 * (d - 1));
+        CGFloat edge = MIN(x - offset, offset + width - x) / (width * 0.2);
+        notch.opacity = opacity * MAX(0, MIN(1, edge));
+        notch.bounds = CGRectMake(0, 0, kNotchWidth, kNotchHeight * (1.0 - cut));
+        notch.backgroundColor = d < 0.5 ? accent : plain;
+    }
+    [CATransaction commit];
+}
+
+// Settle on an account with the Exposure slider's spring instead of UIKit's
+// deceleration, starting from the flick's speed.
+- (void)settleTo:(CGFloat)target velocity:(CGFloat)velocity {
+    self.settleTarget = target;
+    self.settleV = velocity;
+    self.settleTime = 0;
+    if (!self.settleLink) {
+        __weak typeof(self) weakSelf = self;
+        NFBDialTicker* ticker = [NFBDialTicker new];
+        ticker.block = ^(CADisplayLink* link) {
+            [weakSelf settleStep:link];
+        };
+        self.settleLink = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(fire:)];
+        [self.settleLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    }
+    self.settleLink.paused = NO;
+}
+
+- (void)stopSettling {
+    [self.settleLink invalidate];
+    self.settleLink = nil;
+}
+
+- (void)settleStep:(CADisplayLink*)link {
+    CFTimeInterval now = link.timestamp;
+    CGFloat dt = self.settleTime > 0 ? MIN(now - self.settleTime, 1.0 / 30) : 1.0 / 60;
+    self.settleTime = now;
+    CGFloat k = kDialSpringK;
+    CGFloat c = UIAccessibilityIsReduceMotionEnabled() ? 2 * sqrt(k) : kDialSpringC;
+    CGFloat x = self.strip.contentOffset.x;
+    CGFloat v = self.settleV;
+    for (int i = 0; i < 4; i++) {
+        CGFloat a = -k * (x - self.settleTarget) - c * v;
+        v += a * dt / 4;
+        x += v * dt / 4;
+    }
+    self.settleV = v;
+    if (fabs(x - self.settleTarget) < 0.3 && fabs(v) < 5) {
+        x = self.settleTarget;
+        [self stopSettling];
+        self.strip.contentOffset = CGPointMake(x, 0);
+        [self dialStopped];
+        return;
+    }
+    self.strip.contentOffset = CGPointMake(x, 0);
+}
+
 - (void)prepareClicks {
     if (!self.fineClick) {
         self.fineClick = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
@@ -2653,6 +2749,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
+    [self stopSettling];
     self.settleGeneration++;
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         [self prepareClicks];
@@ -2666,7 +2763,10 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     if (self.accountCount == 0) {
         return;
     }
-    target->x = [self indexAtOffset:target->x] * self.pitch;
+    CGFloat destination = [self indexAtOffset:target->x] * self.pitch;
+    // Stop UIKit's own glide where the finger left off; the spring takes it from here.
+    target->x = scrollView.contentOffset.x;
+    [self settleTo:destination velocity:velocity.x * 1000.0];
 }
 
 - (void)scrollViewDidEndDragging:(UIScrollView*)scrollView willDecelerate:(BOOL)decelerate {
@@ -2686,13 +2786,13 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
 // The dial came to rest: switch to the account in the middle straight away
 // (after a breath, in case the finger turns it again).
 - (void)dialStopped {
-    if (self.closing || self.accountCount == 0) {
+    if (self.settleLink || self.closing || self.accountCount == 0) {
         return;
     }
     NSInteger index = [self indexAtOffset:self.strip.contentOffset.x];
     CGFloat exact = index * self.pitch;
     if (fabs(self.strip.contentOffset.x - exact) > 1.0) {
-        [self.strip setContentOffset:CGPointMake(exact, 0) animated:YES];
+        [self settleTo:exact velocity:0];
         return;
     }
     NFBAccountBubble* bubble = self.bubbles[index];
@@ -2750,6 +2850,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         return;
     }
     self.closing = YES;
+    [self stopSettling];
     self.userInteractionEnabled = NO;
     [self.catcher removeFromSuperview];
     [[NSNotificationCenter defaultCenter] removeObserver:self];

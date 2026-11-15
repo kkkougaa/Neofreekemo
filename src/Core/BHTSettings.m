@@ -115,6 +115,8 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{@"key": @"restore_refresh_sounds",
                       @"default": @YES},
                     @{@"key": @"kemo_drop_refresh",
+                      @"default": @YES},
+                    @{@"key": @"kemo_reply_status",
                       @"default": @YES}
                 ]
             },

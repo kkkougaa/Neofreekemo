@@ -515,7 +515,6 @@ static NSString* OnScreenAvatarAddress(NSString* key) {
     // Any avatar whose identifier ends in the user id: TUIAvatarImageView.<id>
     // in timelines, and the side drawer's avatars.
     NSString* wanted = [@"." stringByAppendingString:key];
-    NSString* lastLook = nil;
     for (UIWindow* window in UIApplication.sharedApplication.windows) {
         NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
         NSInteger budget = 8000;
@@ -537,16 +536,9 @@ static NSString* OnScreenAvatarAddress(NSString* key) {
                 if (address) {
                     return address;
                 }
-                lastLook = [NSString stringWithFormat:@"%@ helper=%@ request=%@", NSStringFromClass(view.class),
-                                                      helper ? NSStringFromClass([helper class]) : @"-",
-                                                      helper ? NSStringFromClass([ObjectProp(helper, @"fetchRequest") class])
-                                                             : @"-"];
             }
             [queue addObjectsFromArray:view.subviews];
         }
-    }
-    if (lastLook) {
-        ProbeNote([NSString stringWithFormat:@"no address on %@ (%@)", key, lastLook]);
     }
     return nil;
 }
@@ -914,8 +906,6 @@ static void FetchSharpAvatar(NSURL* address, NSURL* next, NSString* key, NSStrin
             UIImage* image = data.length > 0 && !error && status < 400 ? [UIImage imageWithData:data] : nil;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (!image) {
-                    ProbeNote([NSString stringWithFormat:@"download failed %@ -> %ld %@", address.lastPathComponent,
-                                                         (long)status, error.localizedDescription ?: @""]);
                     if (next) {
                         FetchSharpAvatar(next, nil, key, source, done);
                     }
@@ -948,7 +938,6 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
             address = [@"https://" stringByAppendingString:[address substringFromIndex:7]];
         }
         url = address.length > 0 ? [NSURL URLWithString:address] : nil;
-        ProbeNote([NSString stringWithFormat:@"sharp picture for %@: %@", key, url ? @"from screen" : @"no address"]);
     }
     if (!url || key.length == 0) {
         return;

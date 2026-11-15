@@ -960,19 +960,10 @@ static BOOL isTonMediaURL(NSURL* url) {
            [url.path hasPrefix:@"/i/ton/data/xchat_media/"];
 }
 
-// Photo and video uploads (upload.twitter.com / upload.x.com, /i/media/upload.json).
-static BOOL isMediaUploadURL(NSURL* url) {
-    NSString* host = url.host.lowercaseString;
-    if (![host isEqualToString:@"upload.twitter.com"] && ![host isEqualToString:@"upload.x.com"]) {
-        return NO;
-    }
-    return [url.path hasPrefix:@"/i/media/upload"] || [url.path hasPrefix:@"/1.1/media/upload"];
-}
-
 // These paths need to go through the web path, otherwise AppAttest kicks in
 static BOOL isWriteRequest(NSURL* url) {
     return isCreateTweetURL(url) || isAccountURL(url) || isPeriscopeAuthURL(url) ||
-           isMuteURL(url) || isGrokURL(url) || isTonMediaURL(url) || isMediaUploadURL(url);
+           isMuteURL(url) || isGrokURL(url) || isTonMediaURL(url);
 }
 
 static NSURL* webEquivalentURL(NSURL* url) {
@@ -981,14 +972,6 @@ static NSURL* webEquivalentURL(NSURL* url) {
     }
 
     NSURLComponents* c = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
-    if (c && isMediaUploadURL(url)) {
-        // The web uploads to upload.x.com/i/media/upload.json.
-        c.host = @"upload.x.com";
-        if ([c.path hasPrefix:@"/1.1/media/upload"]) {
-            c.path = [@"/i/media/upload" stringByAppendingString:[c.path substringFromIndex:@"/1.1/media/upload".length]];
-        }
-        return c.URL ?: url;
-    }
     if (c && isPeriscopeAuthURL(url)) {
         c.host = @"x.com";
         c.path = @"/i/api/1.1/oauth/authenticate_periscope.json";
@@ -1102,9 +1085,6 @@ static NSMutableURLRequest* webRequestFromNativeSend(NSURLRequest* request) {
 
     BOOL isCreateTweet = isCreateTweetURL(url);
     BOOL createTweetReroute = isCreateTweet && nativeCreateTweetInterceptEnabled();
-    // Photos and videos go the same web way as the posts they belong to.
-    BOOL mediaUploadReroute = isMediaUploadURL(url) && nativeCreateTweetInterceptEnabled() &&
-                              requestUsesNativeOAuth(request);
 
     NSString* postingUserID = postingUserIDFromRequest(request);
     BOOL tonCredentialInjection = isTonMediaURL(url);
@@ -1115,7 +1095,7 @@ static NSMutableURLRequest* webRequestFromNativeSend(NSURLRequest* request) {
     }
     BOOL cookieReplication = requestUsesNativeOAuth(request) && isCookieLoginUserID(postingUserID);
 
-    if (!createTweetReroute && !mediaUploadReroute && !cookieReplication && !tonCredentialInjection) {
+    if (!createTweetReroute && !cookieReplication && !tonCredentialInjection) {
         return nil;
     }
     if (postingUserID.length == 0) {
@@ -1436,8 +1416,7 @@ static BOOL replaceTaskRequest(NSURLSessionTask* task, NSURLRequest* request) {
     NSURLRequest* request = self.currentRequest ?: self.originalRequest;
     BOOL tonMediaRequest = isTonMediaURL(request.URL);
     BOOL grokOAuthRequest = isGrokURL(request.URL) && requestUsesNativeOAuth(request);
-    BOOL uploadRequest = isMediaUploadURL(request.URL) && requestUsesNativeOAuth(request);
-    if (self.state == NSURLSessionTaskStateSuspended && (tonMediaRequest || grokOAuthRequest || uploadRequest)) {
+    if (self.state == NSURLSessionTaskStateSuspended && (tonMediaRequest || grokOAuthRequest)) {
         NSMutableURLRequest* outgoing = webRequestFromNativeSend(request);
         if (outgoing) {
             replaceTaskRequest(self, outgoing);

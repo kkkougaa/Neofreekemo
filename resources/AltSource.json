@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.67",
+      "subtitle": "NeoFreeBird version 7.3.68",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.68",
+          "buildVersion": "68",
+          "date": "2026-11-15T11:16:40Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.68/NeoFreeBird-Twitter-sideloaded_7.3.68_12.43.ipa",
+          "size": 297613326,
+          "minOSVersion": "15.0",
+          "localizedDescription": "인터넷 요청 기록을 흔들기 덤프 설정을 켰을 때만 하도록 변경."
+        },
         {
           "version": "7.3.67",
           "buildVersion": "67",

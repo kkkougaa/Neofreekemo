@@ -2098,7 +2098,24 @@ static UIView* SoftRingMask(CGRect bounds, CGFloat band) {
     return ring;
 }
 
-static void PutGlassOverBubble(NFBAccountBubble* bubble) {
+// Dock circles look like X's own profile picture at the top left: the
+// picture fills the circle, a hairline light grey edge, and the bubble's soft
+// shadow underneath. No glass.
+static void PutProfileLookOnBubble(NFBAccountBubble* bubble) {
+    CGRect bounds = bubble.bounds;
+    for (UIView* view in bubble.subviews) {
+        if ([view isKindOfClass:[UIVisualEffectView class]]) {
+            view.hidden = YES;
+        }
+    }
+    bubble.avatar.frame = bounds;
+    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bounds) / 2.0;
+    bubble.avatar.layer.borderWidth = 1.0;
+    bubble.avatar.layer.borderColor = [UIColor colorWithWhite:0.82 alpha:0.9].CGColor;
+    [bubble bringSubviewToFront:bubble.badge];
+}
+
+__attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble) {
     CGRect bounds = bubble.bounds;
     CGFloat width = CGRectGetWidth(bounds);
     CGFloat radius = width / 2.0;
@@ -2271,7 +2288,7 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
             bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
             if (!gear) {
-                PutGlassOverBubble(bubble);
+                PutProfileLookOnBubble(bubble);
             }
             [_strip addSubview:bubble];
             [bubbles addObject:bubble];

@@ -416,6 +416,90 @@ static UIImage* OnScreenAvatar(NSString* key) {
     return nil;
 }
 
+// The profile_images address behind an on-screen avatar. X's avatar views
+// and the image pipeline object that fills them keep it behind getters with
+// "url", "request", "fetch" or "helper" in their names; looked for two levels
+// deep, in X's and the image pipeline's own classes only.
+static NSString* PictureAddressIn(id object, int depth) {
+    if (!object) {
+        return nil;
+    }
+    NSString* found = ProfileImageString(object);
+    if (found || depth > 2 || [object isKindOfClass:[NSString class]] || [object isKindOfClass:[NSNumber class]] ||
+        [object isKindOfClass:[UIImage class]] || [object isKindOfClass:[NSURL class]]) {
+        return found;
+    }
+    NSArray* skip = @[ @"load", @"start", @"cancel", @"reset", @"reload", @"create", @"make", @"fetchimage",
+                       @"prefetch", @"copy", @"new" ];
+    for (Class cls = object_getClass(object); cls; cls = class_getSuperclass(cls)) {
+        NSString* className = NSStringFromClass(cls);
+        if ([className hasPrefix:@"UI"] || [className hasPrefix:@"NS"] || [className hasPrefix:@"CA"] ||
+            [className hasPrefix:@"_"]) {
+            break;
+        }
+        unsigned int count = 0;
+        Method* methods = class_copyMethodList(cls, &count);
+        for (unsigned int i = 0; i < count && !found; i++) {
+            NSString* name = NSStringFromSelector(method_getName(methods[i]));
+            NSString* lower = name.lowercaseString;
+            if ([name containsString:@":"] || [name hasPrefix:@"set"] || [name hasPrefix:@"_"] ||
+                [name hasPrefix:@"."]) {
+                continue;
+            }
+            BOOL wanted = [lower containsString:@"url"] || [lower containsString:@"request"] ||
+                          [lower containsString:@"fetch"] || [lower containsString:@"helper"];
+            for (NSString* word in skip) {
+                if ([lower hasPrefix:word]) {
+                    wanted = NO;
+                }
+            }
+            if (!wanted) {
+                continue;
+            }
+            id value = ObjectProp(object, name);
+            if (value && value != object) {
+                found = PictureAddressIn(value, depth + 1);
+            }
+        }
+        free(methods);
+        if (found) {
+            break;
+        }
+    }
+    return found;
+}
+
+// The address of the picture an on-screen avatar of this account shows (X's
+// avatar views carry TUIAvatarImageView.<user id> as their identifier).
+static NSString* OnScreenAvatarAddress(NSString* key) {
+    if (key.length == 0) {
+        return nil;
+    }
+    NSString* wanted = [@"TUIAvatarImageView." stringByAppendingString:key];
+    for (UIWindow* window in UIApplication.sharedApplication.windows) {
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
+        NSInteger budget = 6000;
+        while (queue.count > 0 && budget-- > 0) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if ([view.accessibilityIdentifier isEqualToString:wanted]) {
+                NSString* address = PictureAddressIn(view, 0);
+                for (UIView* sub in view.subviews) {
+                    if (address) {
+                        break;
+                    }
+                    address = PictureAddressIn(sub, 0);  // the image pipeline's observer view
+                }
+                if (address) {
+                    return address;
+                }
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
+    }
+    return nil;
+}
+
 static NSInteger NumberFromGetter(id object, NSString* name) {
     SEL selector = NSSelectorFromString(name);
     if (![object respondsToSelector:selector]) {
@@ -780,6 +864,16 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
         done(stored);
     }
     NSURL* url = AccountImageURL(account);
+    if (!url) {
+        // The account objects carry no picture address on this X build; read
+        // it off an avatar X has on screen, and ask for the sharp size.
+        NSString* address = SharpPictureAddress(OnScreenAvatarAddress(key) ?: @"");
+        if ([address hasPrefix:@"http://"]) {
+            address = [@"https://" stringByAppendingString:[address substringFromIndex:7]];
+        }
+        url = address.length > 0 ? [NSURL URLWithString:address] : nil;
+        ProbeNote([NSString stringWithFormat:@"sharp picture for %@: %@", key, url ? @"from screen" : @"no address"]);
+    }
     if (!url || key.length == 0) {
         return;
     }

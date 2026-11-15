@@ -204,7 +204,14 @@ static BOOL DropRefreshEnabled(void) {
                       ofObject:(id)object
                         change:(NSDictionary*)change
                        context:(void*)context {
-    [self wake];
+    // Ordinary scrolling (the list below its top) needs nothing from us; only
+    // a pull past the top, or a refresh, starts the frame loop.
+    if (self.link && !self.link.paused) {
+        return;
+    }
+    if ([self pull] > 0 || [self.control loading]) {
+        [self wake];
+    }
 }
 
 - (void)wake {
@@ -248,8 +255,7 @@ static BOOL DropRefreshEnabled(void) {
     if (!self.verified) {
         self.baseInset = scrollView.adjustedContentInset.top;
         self.overlay.alpha = 0;
-        BOOL settledList = !scrollView.isTracking && !scrollView.isDecelerating && !loading;
-        if (settledList) {
+        if (!loading && [self pull] <= 0) {
             link.paused = YES;
             self.lastTime = 0;
         }
@@ -300,14 +306,16 @@ static BOOL DropRefreshEnabled(void) {
         SpringStep(&_spin, dt / substeps);
     }
 
-    [self renderWithPull:pull loading:loading];
-
     BOOL settled = fabs(_drop.x - _drop.t) < 0.05 && fabs(_drop.v) < 0.5 && fabs(_scale.x - _scale.t) < 0.002 &&
                    fabs(_scale.v) < 0.01 && fabs(_spin.x - _spin.t) < 0.002 && fabs(_spin.v) < 0.01;
-    if (settled && !loading && pull <= 0 && !scrollView.isTracking) {
+    if (settled && !loading && pull <= 0) {
+        // Back at rest: hide and stop until the next pull, even mid-scroll.
+        self.overlay.alpha = 0;
         link.paused = YES;
         self.lastTime = 0;
+        return;
     }
+    [self renderWithPull:pull loading:loading];
 }
 
 - (void)renderWithPull:(CGFloat)pull loading:(BOOL)loading {

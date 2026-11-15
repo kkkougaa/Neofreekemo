@@ -955,15 +955,10 @@ static BOOL isMuteURL(NSURL* url) { return url && [url.path containsString:@"/1.
 
 static BOOL isGrokURL(NSURL* url) { return url && [url.path containsString:@"/2/grok"]; }
 
-static BOOL isTonMediaURL(NSURL* url) {
-    return [url.host.lowercaseString isEqualToString:@"ton.x.com"] &&
-           [url.path hasPrefix:@"/i/ton/data/xchat_media/"];
-}
-
 // These paths need to go through the web path, otherwise AppAttest kicks in
 static BOOL isWriteRequest(NSURL* url) {
     return isCreateTweetURL(url) || isAccountURL(url) || isPeriscopeAuthURL(url) ||
-           isMuteURL(url) || isGrokURL(url) || isTonMediaURL(url);
+           isMuteURL(url) || isGrokURL(url);
 }
 
 static NSURL* webEquivalentURL(NSURL* url) {
@@ -1087,15 +1082,14 @@ static NSMutableURLRequest* webRequestFromNativeSend(NSURLRequest* request) {
     BOOL createTweetReroute = isCreateTweet && nativeCreateTweetInterceptEnabled();
 
     NSString* postingUserID = postingUserIDFromRequest(request);
-    BOOL tonCredentialInjection = isTonMediaURL(url);
-    if (postingUserID.length == 0 && (requestUsesNativeOAuth(request) || tonCredentialInjection)) {
+    if (postingUserID.length == 0 && requestUsesNativeOAuth(request)) {
         @synchronized(accountCacheLock()) {
             postingUserID = userIDFromTwid(WebTwid);
         }
     }
     BOOL cookieReplication = requestUsesNativeOAuth(request) && isCookieLoginUserID(postingUserID);
 
-    if (!createTweetReroute && !cookieReplication && !tonCredentialInjection) {
+    if (!createTweetReroute && !cookieReplication) {
         return nil;
     }
     if (postingUserID.length == 0) {
@@ -1414,9 +1408,8 @@ static BOOL replaceTaskRequest(NSURLSessionTask* task, NSURLRequest* request) {
 %hook NSURLSessionTask
 - (void)resume {
     NSURLRequest* request = self.currentRequest ?: self.originalRequest;
-    BOOL tonMediaRequest = isTonMediaURL(request.URL);
-    BOOL grokOAuthRequest = isGrokURL(request.URL) && requestUsesNativeOAuth(request);
-    if (self.state == NSURLSessionTaskStateSuspended && (tonMediaRequest || grokOAuthRequest)) {
+    if (self.state == NSURLSessionTaskStateSuspended && isGrokURL(request.URL) &&
+        requestUsesNativeOAuth(request)) {
         NSMutableURLRequest* outgoing = webRequestFromNativeSend(request);
         if (outgoing) {
             replaceTaskRequest(self, outgoing);

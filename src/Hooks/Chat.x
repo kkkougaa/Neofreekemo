@@ -66,16 +66,7 @@ static NSString* HexPrefix(NSData* data, NSUInteger limit) {
     return hex;
 }
 
-// The chat notes are only read by the shake dump, so nothing is recorded (and
-// no request is watched) while it is off.
-static BOOL ChatLogOn(void) {
-    return [BHTSettings boolForKey:@"kemo_shake_dump"];
-}
-
 void NFBChatNote(NSString* line) {
-    if (!ChatLogOn()) {
-        return;
-    }
     static NSDateFormatter* formatter;
     @synchronized([NSObject class]) {
         if (!formatter) {
@@ -135,7 +126,7 @@ static BOOL IsChatRelatedPath(NSString* path) {
                                    data:(NSData*)data
                      temporarySavedFile:(id)temporarySavedFile {
     NSURL* url = request.URL;
-    if (url && ChatLogOn() && IsChatRelatedPath(url.path)) {
+    if (url && IsChatRelatedPath(url.path)) {
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
                                ? ((NSHTTPURLResponse*)response).statusCode
                                : -1;
@@ -218,8 +209,7 @@ static void* NFBTaskWatcherKey = &NFBTaskWatcherKey;
 %hook NSURLSessionTask
 
 - (void)resume {
-    if (ChatLogOn() && self.state == NSURLSessionTaskStateSuspended &&
-        !objc_getAssociatedObject(self, NFBTaskWatcherKey) &&
+    if (self.state == NSURLSessionTaskStateSuspended && !objc_getAssociatedObject(self, NFBTaskWatcherKey) &&
         ![self isKindOfClass:[NSURLSessionWebSocketTask class]]) {
         NSURL* url = (self.currentRequest ?: self.originalRequest).URL;
         if (url) {
@@ -264,7 +254,7 @@ static void nfb_sendMessageReplacement(id self, SEL _cmd, NSURLSessionWebSocketM
     BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
     BOOL drop = tagged && message.data && isTypingIndicatorFrame(message.data) &&
                 [BHTSettings boolForKey:@"hide_typing_indicator"];
-    if (tagged && ChatLogOn()) {
+    if (tagged) {
         @synchronized([NSObject class]) {
             gFramesSent++;
             if (drop) {
@@ -295,7 +285,7 @@ static void nfb_receiveMessageReplacement(id self, SEL _cmd,
                                           void (^completionHandler)(NSURLSessionWebSocketMessage* _Nullable,
                                                                     NSError* _Nullable)) {
     BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
-    if (!tagged || !completionHandler || !ChatLogOn()) {
+    if (!tagged || !completionHandler) {
         OriginalReceiveMessageIMP(self, _cmd, completionHandler);
         return;
     }

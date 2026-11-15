@@ -263,13 +263,50 @@ static NSString* ProbedImageString(id account);
 
 // X serves each profile picture in several sizes (_mini 24, _normal 48,
 // _bigger 73, _400x400); the circles want the sharp one.
-static NSString* SharpPictureAddress(NSString* address) {
-    for (NSString* size in @[ @"_normal.", @"_bigger.", @"_mini.", @"_200x200." ]) {
-        if ([address containsString:size]) {
-            return [address stringByReplacingOccurrencesOfString:size withString:@"_400x400."];
+static NSString* SharpPictureAddressWithExtension(NSString* address, NSString* forcedExtension) {
+    NSURLComponents* parts = [NSURLComponents componentsWithString:address ?: @""];
+    NSString* path = parts.path;
+    if (path.length == 0 || ![path containsString:@"profile_images/"]) {
+        return address;
+    }
+    NSString* folder = [path stringByDeletingLastPathComponent];
+    NSString* name = path.lastPathComponent;
+    NSString* extension = name.pathExtension;
+    name = [name stringByDeletingPathExtension];
+    // Drop any size the name already carries.
+    for (NSString* size in @[ @"_normal", @"_bigger", @"_mini", @"_200x200", @"_400x400", @"_x96",
+                              @"_reasonably_small" ]) {
+        if ([name hasSuffix:size]) {
+            name = [name substringToIndex:name.length - size.length];
+            break;
         }
     }
-    return address;
+    // The image pipeline's addresses have no extension; the format, if any,
+    // is in the query (format=jpg).
+    if (extension.length == 0) {
+        for (NSURLQueryItem* item in parts.queryItems) {
+            if ([item.name isEqualToString:@"format"] && item.value.length > 0) {
+                extension = item.value;
+            }
+        }
+    }
+    if (forcedExtension) {
+        extension = forcedExtension;
+    }
+    if (extension.length == 0) {
+        extension = @"jpg";
+    }
+    parts.path = [folder stringByAppendingPathComponent:
+                             [NSString stringWithFormat:@"%@_400x400.%@", name, extension]];
+    parts.query = nil;
+    if ([parts.scheme isEqualToString:@"http"] || parts.scheme.length == 0) {
+        parts.scheme = @"https";
+    }
+    return parts.string ?: address;
+}
+
+static NSString* SharpPictureAddress(NSString* address) {
+    return SharpPictureAddressWithExtension(address, nil);
 }
 
 static NSURL* AccountImageURL(id account) {
@@ -865,6 +902,31 @@ static void StoreAvatar(NSString* key, NSData* data, UIImage* image, NSString* s
 // Hands back the stored picture right away, then a fresh one only if the
 // account's picture address differs from the one the stored file came from.
 // `done` runs on the main thread, once or twice.
+// Downloads the picture; if that address has nothing, tries `next` once.
+static void FetchSharpAvatar(NSURL* address, NSURL* next, NSString* key, NSString* source,
+                             void (^done)(UIImage* image)) {
+    [[[NSURLSession sharedSession]
+          dataTaskWithURL:address
+        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+            NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+                                   ? ((NSHTTPURLResponse*)response).statusCode
+                                   : 0;
+            UIImage* image = data.length > 0 && !error && status < 400 ? [UIImage imageWithData:data] : nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!image) {
+                    ProbeNote([NSString stringWithFormat:@"download failed %@ -> %ld %@", address.lastPathComponent,
+                                                         (long)status, error.localizedDescription ?: @""]);
+                    if (next) {
+                        FetchSharpAvatar(next, nil, key, source, done);
+                    }
+                    return;
+                }
+                StoreAvatar(key, data, image, source);
+                done(image);
+            });
+        }] resume];
+}
+
 static void LoadAvatar(id account, void (^done)(UIImage* image)) {
     NSString* key = AccountKey(account);
     UIImage* stored = StoredAvatar(key);
@@ -895,20 +957,13 @@ static void LoadAvatar(id account, void (^done)(UIImage* image)) {
     if (stored && [AvatarIndex()[key] isEqualToString:source]) {
         return;
     }
-    [[[NSURLSession sharedSession]
-          dataTaskWithURL:url
-        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
-            UIImage* image = data.length > 0 && !error ? [UIImage imageWithData:data] : nil;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (!image) {
-                    ProbeNote([NSString stringWithFormat:@"download failed %@: %@", url.host,
-                                                         error.localizedDescription ?: @"no image data"]);
-                    return;
-                }
-                StoreAvatar(key, data, image, source);
-                done(image);
-            });
-        }] resume];
+    // The picture's real format is not always in its address: try the jpg
+    // first, then the png.
+    NSURL* fallback = nil;
+    if ([url.path hasSuffix:@"_400x400.jpg"]) {
+        fallback = [NSURL URLWithString:SharpPictureAddressWithExtension(url.absoluteString, @"png")];
+    }
+    FetchSharpAvatar(url, fallback, key, source, done);
 }
 
 // MARK: - Unread numbers from the side drawer

@@ -100,12 +100,12 @@ static void showPostSentAlert(NSString* statusID) {
         UIAlertController* alert = [UIAlertController
             alertControllerWithTitle:
                 [[BHTBundle sharedBundle]
-                    localizedStringForKey:
+                    localizedTwitterStringForKey:
                         @"COMPOSITION_COMPLETE_SENDING_TWEET_TOAST_NOTIFICATION_MESSAGE"]
                              message:nil
                       preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:[[BHTBundle sharedBundle]
-                                                            localizedStringForKey:
+                                                            localizedTwitterStringForKey:
                                                                 @"DM_MESSAGE_ACTION_OPEN_GENERIC_TITLE"]
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction* action) {
@@ -113,7 +113,7 @@ static void showPostSentAlert(NSString* statusID) {
                                                 }]];
         [alert
             addAction:[UIAlertAction actionWithTitle:[[BHTBundle sharedBundle]
-                                                         localizedStringForKey:@"DISMISS_LABEL"]
+                                                         localizedTwitterStringForKey:@"DISMISS_LABEL"]
                                                style:UIAlertActionStyleCancel
                                              handler:nil]];
         [top presentViewController:alert animated:YES completion:nil];

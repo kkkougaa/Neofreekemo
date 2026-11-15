@@ -92,6 +92,9 @@ static BOOL DropRefreshEnabled(void) {
 @property (nonatomic, assign) CGFloat baseInset;
 @property (nonatomic, assign) BOOL armed;
 @property (nonatomic, assign) BOOL observing;
+// Set once a pull has been seen on this list; until then the X spinner stays,
+// so a list we read wrong never ends up with no spinner at all.
+@property (nonatomic, assign) BOOL verified;
 @end
 
 @implementation NFBDropRefresh {
@@ -165,8 +168,16 @@ static BOOL DropRefreshEnabled(void) {
         return;
     }
     if (self.overlay.superview != scrollView) {
-        // Behind the cells: at rest the handle hides under the first row, like the study.
-        [scrollView insertSubview:self.overlay atIndex:0];
+        // Behind the cells (but above a table's background view): at rest the
+        // handle hides under the first row, like the study.
+        UIView* background = [scrollView isKindOfClass:[UITableView class]]
+                                 ? ((UITableView*)scrollView).backgroundView
+                                 : nil;
+        if (background.superview == scrollView) {
+            [scrollView insertSubview:self.overlay aboveSubview:background];
+        } else {
+            [scrollView insertSubview:self.overlay atIndex:0];
+        }
     }
     if (!self.observing) {
         [scrollView addObserver:self forKeyPath:@"contentOffset" options:0 context:NULL];
@@ -230,11 +241,23 @@ static BOOL DropRefreshEnabled(void) {
         return;
     }
 
-    if (control.alpha > 0) {
-        control.alpha = control.alpha;  // the setting was turned back on: hide the X spinner again
-    }
-
     BOOL loading = [control loading];
+    if (!self.verified && (scrollView.isTracking || loading) && [self pull] > 6) {
+        self.verified = YES;
+    }
+    if (!self.verified) {
+        self.baseInset = scrollView.adjustedContentInset.top;
+        self.overlay.alpha = 0;
+        BOOL settledList = !scrollView.isTracking && !scrollView.isDecelerating && !loading;
+        if (settledList) {
+            link.paused = YES;
+            self.lastTime = 0;
+        }
+        return;
+    }
+    if (control.alpha > 0) {
+        control.alpha = control.alpha;  // hide the X spinner (also after the setting is turned back on)
+    }
     // X adds its own inset while it holds the list open, so only learn the resting
     // inset while it is not loading.
     if (!loading) {
@@ -358,12 +381,51 @@ static BOOL DropRefreshEnabled(void) {
 
 static char kDropRefreshKey;
 
-static UIScrollView* EnclosingScrollView(UIView* view) {
-    UIView* current = view.superview;
-    while (current && ![current isKindOfClass:[UIScrollView class]]) {
-        current = current.superview;
+static BOOL IsVerticalList(UIView* view) {
+    if (![view isKindOfClass:[UIScrollView class]]) {
+        return NO;
     }
-    return (UIScrollView*)current;
+    UIScrollView* scrollView = (UIScrollView*)view;
+    if (scrollView.pagingEnabled) {
+        return NO;  // X's sideways page scroller, not a list
+    }
+    if ([view isKindOfClass:[UITableView class]]) {
+        return YES;
+    }
+    if ([view isKindOfClass:[UICollectionView class]]) {
+        id layout = ((UICollectionView*)view).collectionViewLayout;
+        if ([layout isKindOfClass:[UICollectionViewFlowLayout class]]) {
+            return ((UICollectionViewFlowLayout*)layout).scrollDirection == UICollectionViewScrollDirectionVertical;
+        }
+        return scrollView.alwaysBounceVertical;
+    }
+    return NO;
+}
+
+// The list the control refreshes. It is not always the control's ancestor:
+// on the home timeline X puts the control next to the table, not inside it.
+static UIScrollView* EnclosingScrollView(UIView* view) {
+    UIView* ancestor = view.superview;
+    for (int level = 0; ancestor && level < 5; level++, ancestor = ancestor.superview) {
+        if (IsVerticalList(ancestor)) {
+            return (UIScrollView*)ancestor;
+        }
+        // A list among this ancestor's own children (two levels down).
+        for (UIView* child in ancestor.subviews) {
+            if (child != view && IsVerticalList(child)) {
+                return (UIScrollView*)child;
+            }
+            for (UIView* grandchild in child.subviews) {
+                if (grandchild != view && IsVerticalList(grandchild)) {
+                    return (UIScrollView*)grandchild;
+                }
+            }
+        }
+        if ([ancestor isKindOfClass:[UIScrollView class]]) {
+            break;  // reached a scroller that is not a list: stop looking further out
+        }
+    }
+    return nil;
 }
 
 %hook TFNPullToRefreshControl
@@ -396,7 +458,8 @@ static UIScrollView* EnclosingScrollView(UIView* view) {
 - (void)setAlpha:(CGFloat)alpha {
     // Remember what X asked for, so turning the setting off puts it back.
     objc_setAssociatedObject(self, @selector(setAlpha:), @(alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    BOOL ours = objc_getAssociatedObject(self, &kDropRefreshKey) != nil && DropRefreshEnabled();
+    NFBDropRefresh* drop = objc_getAssociatedObject(self, &kDropRefreshKey);
+    BOOL ours = drop.verified && DropRefreshEnabled();
     %orig(ours ? 0 : alpha);
 }
 

@@ -2367,7 +2367,8 @@ static void PutGlassOverBubble(NFBAccountBubble* bubble) {
         ring.layer.shadowRadius = 8;
         ring.layer.shadowOffset = CGSizeZero;
         ring.hidden = accountCount == 0;
-        [self addSubview:ring];
+        // Under the row, so the circles' unread badges sit on top of it.
+        [self insertSubview:ring belowSubview:_strip];
 
         CAShapeLayer* pointer = [CAShapeLayer layer];
         UIBezierPath* triangle = [UIBezierPath bezierPath];

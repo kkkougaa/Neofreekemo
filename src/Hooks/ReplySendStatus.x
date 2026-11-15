@@ -238,7 +238,7 @@ static NSDate* gHideToastUntil;
             _button.t = 1;
             // No answer from X (an undo-send that was undone, say): close quietly.
             NSInteger generation = ++self.generation;
-            CGFloat wait = 45 + MAX(0, [BHTSettings integerForKey:@"undo_tweet_timeout"]);
+            CGFloat wait = 12 + MAX(0, [BHTSettings integerForKey:@"undo_tweet_timeout"]);
             __weak NFBReplyStatus* weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 NFBReplyStatus* status = weakSelf;
@@ -290,6 +290,11 @@ static NSDate* gHideToastUntil;
 }
 
 - (void)tick:(CADisplayLink*)link {
+    // The bar went away (or was rebuilt): put everything back at once.
+    if (!self.textView.window || !self.bar.viewIfLoaded.window) {
+        [self finish];
+        return;
+    }
     CFTimeInterval now = link.timestamp;
     CGFloat dt = self.lastTime > 0 ? MIN(now - self.lastTime, 1.0 / 30) : 1.0 / 60;
     self.lastTime = now;
@@ -336,6 +341,10 @@ static NSDate* gHideToastUntil;
 
 - (void)dealloc {
     [_link invalidate];
+    _textView.alpha = 1;
+    _sendButton.imageView.transform = CGAffineTransformIdentity;
+    [_dots removeFromSuperview];
+    [_line removeFromSuperview];
 }
 
 @end

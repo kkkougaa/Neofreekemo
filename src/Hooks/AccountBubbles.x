@@ -96,6 +96,9 @@
 //  7.3.59: back to real Liquid Glass, as a ring around the picture (the face
 //  sits on the glass, not under it); the middle mark is a thin ring set a
 //  little off the circle, under the badges.
+//
+//  7.3.61: no glass; the circles look like X's own profile picture at the top
+//  left (picture edge to edge, hairline grey edge, soft shadow).
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2143,24 +2146,21 @@ static UIView* SoftRingMask(CGRect bounds, CGFloat band) {
 // the picture sits on top of the glass, not under it, so the glass bends
 // only its own rim and never the face. No drawn border; the glass has its own
 // edge light.
-static const CGFloat kDockGlassRing = 0.075;  // ring width, as a share of the circle
 
 static void PutGlassRingAroundBubble(NFBAccountBubble* bubble) {
+    // 7.3.61: styled like X's own profile picture at the top left instead of
+    // glass: the picture fills the circle, a hairline light grey edge, and the
+    // bubble's soft shadow underneath.
     CGRect bounds = bubble.bounds;
-    CGFloat width = CGRectGetWidth(bounds);
     for (UIView* view in bubble.subviews) {
         if ([view isKindOfClass:[UIVisualEffectView class]]) {
-            view.layer.borderWidth = 0;
-            // The tab bar pill's clear glass, not the frosted one.
-            ((UIVisualEffectView*)view).effect = GlassEffectWithStyle(1);
+            view.hidden = YES;
         }
     }
-    CGFloat ring = MAX(4.0, round(width * kDockGlassRing));
-    bubble.avatar.frame = CGRectInset(bounds, ring, ring);
-    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bubble.avatar.bounds) / 2.0;
-    // A hairline where picture meets glass, so the two read as separate pieces.
-    bubble.avatar.layer.borderWidth = 0.5;
-    bubble.avatar.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.35].CGColor;
+    bubble.avatar.frame = bounds;
+    bubble.avatar.layer.cornerRadius = CGRectGetWidth(bounds) / 2.0;
+    bubble.avatar.layer.borderWidth = 1.0;
+    bubble.avatar.layer.borderColor = [UIColor colorWithWhite:0.82 alpha:0.9].CGColor;
     [bubble bringSubviewToFront:bubble.badge];
 }
 

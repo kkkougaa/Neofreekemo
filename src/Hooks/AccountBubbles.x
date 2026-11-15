@@ -475,27 +475,41 @@ static NSString* OnScreenAvatarAddress(NSString* key) {
     if (key.length == 0) {
         return nil;
     }
-    NSString* wanted = [@"TUIAvatarImageView." stringByAppendingString:key];
+    // Any avatar whose identifier ends in the user id: TUIAvatarImageView.<id>
+    // in timelines, and the side drawer's avatars.
+    NSString* wanted = [@"." stringByAppendingString:key];
+    NSString* lastLook = nil;
     for (UIWindow* window in UIApplication.sharedApplication.windows) {
         NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
-        NSInteger budget = 6000;
+        NSInteger budget = 8000;
         while (queue.count > 0 && budget-- > 0) {
             UIView* view = queue.firstObject;
             [queue removeObjectAtIndex:0];
-            if ([view.accessibilityIdentifier isEqualToString:wanted]) {
-                NSString* address = PictureAddressIn(view, 0);
+            if ([view.accessibilityIdentifier hasSuffix:wanted]) {
+                // X's image pipeline (TIP) puts its fetch helper on UIImageView
+                // itself (tip_fetchHelper); the helper's fetch request has the
+                // imageURL. That getter sits on UIKit's class, so ask for it by name.
+                id helper = ObjectProp(view, @"tip_fetchHelper");
+                NSString* address = PictureAddressIn(helper, 0) ?: PictureAddressIn(view, 0);
                 for (UIView* sub in view.subviews) {
                     if (address) {
                         break;
                     }
-                    address = PictureAddressIn(sub, 0);  // the image pipeline's observer view
+                    address = PictureAddressIn(ObjectProp(sub, @"tip_fetchHelper"), 0) ?: PictureAddressIn(sub, 0);
                 }
                 if (address) {
                     return address;
                 }
+                lastLook = [NSString stringWithFormat:@"%@ helper=%@ request=%@", NSStringFromClass(view.class),
+                                                      helper ? NSStringFromClass([helper class]) : @"-",
+                                                      helper ? NSStringFromClass([ObjectProp(helper, @"fetchRequest") class])
+                                                             : @"-"];
             }
             [queue addObjectsFromArray:view.subviews];
         }
+    }
+    if (lastLook) {
+        ProbeNote([NSString stringWithFormat:@"no address on %@ (%@)", key, lastLook]);
     }
     return nil;
 }

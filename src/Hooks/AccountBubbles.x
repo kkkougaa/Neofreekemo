@@ -1040,13 +1040,15 @@ static void HarvestDrawerCounts(UIWindow* window) {
                                          [notes componentsJoinedByString:@", "]]);
 }
 
-static UIVisualEffect* BubbleEffect(void) {
+// Style 0 is Apple's regular (frosted) glass, 1 the clear glass of the tab bar
+// pill: see-through in the middle, bending light only toward the edge.
+static UIVisualEffect* GlassEffectWithStyle(NSInteger style) {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     if (glassClass) {
         id effect = nil;
         SEL styled = NSSelectorFromString(@"effectWithStyle:");
         if ([glassClass respondsToSelector:styled]) {
-            effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, 0);
+            effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, styled, style);
         }
         if (!effect) {
             effect = [[glassClass alloc] init];
@@ -1056,6 +1058,10 @@ static UIVisualEffect* BubbleEffect(void) {
         }
     }
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
+}
+
+static UIVisualEffect* BubbleEffect(void) {
+    return GlassEffectWithStyle(0);
 }
 
 static UIColor* AccentColor(void) {
@@ -2145,6 +2151,8 @@ static void PutGlassRingAroundBubble(NFBAccountBubble* bubble) {
     for (UIView* view in bubble.subviews) {
         if ([view isKindOfClass:[UIVisualEffectView class]]) {
             view.layer.borderWidth = 0;
+            // The tab bar pill's clear glass, not the frosted one.
+            ((UIVisualEffectView*)view).effect = GlassEffectWithStyle(1);
         }
     }
     CGFloat ring = MAX(4.0, round(width * kDockGlassRing));

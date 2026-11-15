@@ -89,7 +89,7 @@ static UIButton* FindSendButton(UIView* root) {
 // MARK: Status line
 
 @interface NFBReplyStatus : NSObject
-@property (nonatomic, weak) UIViewController* bar;
+@property (nonatomic, weak) UIView* host;  // the reply bar or the quick composer
 @property (nonatomic, weak) UITextView* textView;
 @property (nonatomic, weak) UIButton* sendButton;
 @property (nonatomic, strong) UIView* line;
@@ -124,9 +124,9 @@ static NSDate* gHideToastUntil;
     NFBReplySpring _button;  // 0 arrow, 1 dots
 }
 
-- (instancetype)initWithBar:(UIViewController*)bar {
+- (instancetype)initWithHost:(UIView*)host {
     if ((self = [super init])) {
-        _bar = bar;
+        _host = host;
         _open = ReplySpring(380, 30);
         _button = ReplySpring(520, 30);
         _state = NFBSendWaiting;
@@ -291,7 +291,7 @@ static NSDate* gHideToastUntil;
 
 - (void)tick:(CADisplayLink*)link {
     // The bar went away (or was rebuilt): put everything back at once.
-    if (!self.textView.window || !self.bar.viewIfLoaded.window) {
+    if (!self.textView.window || !self.host.window) {
         [self finish];
         return;
     }
@@ -454,7 +454,7 @@ static void WatchForSending(NFBReplyStatus* status) {
         return %orig;
     }
     [gReplyStatus finish];
-    NFBReplyStatus* status = [[NFBReplyStatus alloc] initWithBar:bar];
+    NFBReplyStatus* status = [[NFBReplyStatus alloc] initWithHost:bar.view];
     status.textView = textView;
     status.sendButton = FindSendButton(bar.view);
     gReplyStatus = status;
@@ -521,3 +521,84 @@ static BOOL ResponseSucceeded(NSURLResponse* response, NSData* data) {
 }
 
 %end
+
+// MARK: Quick composer (the post box next to the + button)
+
+// X clears the box itself when it sends, which posts no text-change
+// notification, so a send is recognised as: a post request starts while the
+// box that was just typed in is now empty.
+
+@interface _TtC13QuickComposer21QuickComposerSlotView : UIView
+@end
+
+static __weak UIView* gQuickSlot;
+static __weak UITextView* gQuickTextView;
+static NSDate* gQuickTypedAt;
+
+static void BeginQuickSend(void) {
+    UIView* slot = gQuickSlot;
+    UITextView* textView = gQuickTextView;
+    if (!StatusOn() || !slot.window || !textView.window || textView.text.length > 0) {
+        return;
+    }
+    if (!gQuickTypedAt || [gQuickTypedAt timeIntervalSinceNow] < -120) {
+        return;
+    }
+    if (gReplyStatus && gReplyStatus.state != NFBSendSent && gReplyStatus.state != NFBSendFailed) {
+        return;  // the reply bar already owns this send
+    }
+    gQuickTypedAt = nil;
+    [gReplyStatus finish];
+    NFBReplyStatus* status = [[NFBReplyStatus alloc] initWithHost:slot];
+    status.textView = textView;
+    status.sendButton = FindSendButton(slot);
+    gReplyStatus = status;
+    [status say:NFBSendSending];
+}
+
+%hook _TtC13QuickComposer21QuickComposerSlotView
+
+- (void)didMoveToWindow {
+    %orig;
+    if (self.window) {
+        gQuickSlot = self;
+    }
+}
+
+%end
+
+%hook NSURLSessionTask
+
+- (void)resume {
+    NSURLRequest* request = self.currentRequest ?: self.originalRequest;
+    if (self.state == NSURLSessionTaskStateSuspended && request && IsCreateTweet(request) && gQuickTypedAt) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BeginQuickSend();
+            // X may empty the box a moment after the request starts.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                               BeginQuickSend();
+                           });
+        });
+    }
+    %orig;
+}
+
+%end
+
+%ctor {
+    %init;
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:UITextViewTextDidChangeNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* note) {
+                    UITextView* textView = note.object;
+                    UIView* slot = gQuickSlot;
+                    if (!slot || ![textView isKindOfClass:[UITextView class]] || ![textView isDescendantOfView:slot]) {
+                        return;
+                    }
+                    gQuickTextView = textView;
+                    gQuickTypedAt = textView.text.length > 0 ? [NSDate date] : nil;
+                }];
+}

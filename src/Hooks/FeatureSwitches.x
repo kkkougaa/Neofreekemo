@@ -245,7 +245,10 @@ static NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
         }
     }
 
-    if ([key isEqualToString:@"ios_liquid_glass_redesign_quick_composer_enabled"]) {
+    // Upstream turned the quick composer off to bring back the iPad message bar;
+    // on iPhone that also took away the post box next to the + button.
+    if ([key isEqualToString:@"ios_liquid_glass_redesign_quick_composer_enabled"] &&
+        UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         return @NO;
     }
 

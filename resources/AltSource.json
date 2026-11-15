@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.57",
+      "subtitle": "NeoFreeBird version 7.3.58",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.58",
+          "buildVersion": "58",
+          "date": "2026-11-15T07:42:41Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.58/NeoFreeBird-Twitter-sideloaded_7.3.58_12.43.ipa",
+          "size": 297643578,
+          "minOSVersion": "15.0",
+          "localizedDescription": "당겨서 새로고침에 물방울 애니메이션 추가, 답글 바에서 바로 보내면 바 안에 보내는 중·보냈어요 안내 표시, 계정 다이얼 눈금을 새 스타일로 변경."
+        },
         {
           "version": "7.3.57",
           "buildVersion": "57",

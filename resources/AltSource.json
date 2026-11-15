@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.58",
+      "subtitle": "NeoFreeBird version 7.3.59",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.59",
+          "buildVersion": "59",
+          "date": "2026-11-15T08:08:38Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.59/NeoFreeBird-Twitter-sideloaded_7.3.59_12.43.ipa",
+          "size": 297642734,
+          "minOSVersion": "15.0",
+          "localizedDescription": "+ 버튼 옆 입력창 다시 보이게 수정, 입력창·답글 바에서 보낼 때 안내 표시, 홈 타임라인 물방울 새로고침 수정, 계정 독을 진짜 리퀴드 글래스 테두리와 얇은 링으로 변경, 새 설정을 kemo 설정으로 이동."
+        },
         {
           "version": "7.3.58",
           "buildVersion": "58",

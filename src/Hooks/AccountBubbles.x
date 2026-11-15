@@ -2178,6 +2178,8 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
 // moves together so overlays stay lined up with the screen they belong to.
 
 static const CGFloat kDockGap = 10.0;
+// The pictures are drawn at this share of their place in the row.
+static const CGFloat kDockFace = 0.8;
 static const CGFloat kDockSide = 12.0;
 static const NSInteger kDockVisible = 5;
 
@@ -2495,7 +2497,9 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                                                                                 current:SameAccount(account, current)];
             CGFloat x = inset + i * _pitch;
             ResizeBubble(bubble, gear ? CGRectMake(gearX, 6.0 + (size - kDialGear) / 2.0, kDialGear, kDialGear)
-                                      : CGRectMake(x, 6.0, size, size));
+                                      : CGRectMake(x + (size - kDockFace * size) / 2.0,
+                                                   6.0 + (size - kDockFace * size) / 2.0, kDockFace * size,
+                                                   kDockFace * size));
             bubble.slot = bubble.center;
             bubble.initial.textColor = [UIColor whiteColor];
             bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
@@ -2561,9 +2565,10 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         // A thin ring standing a little off the circle, no glow.
         CGFloat ringGap = 3.0, ringLine = 1.25;
         CGFloat ringOut = ringGap + ringLine;
-        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - size / 2.0 - ringOut,
-                                                                stripTop + 6.0 - ringOut, size + ringOut * 2.0,
-                                                                size + ringOut * 2.0)];
+        CGFloat face = kDockFace * size;
+        UIView* ring = [[UIView alloc] initWithFrame:CGRectMake(middle - face / 2.0 - ringOut,
+                                                                stripTop + 6.0 + (size - face) / 2.0 - ringOut,
+                                                                face + ringOut * 2.0, face + ringOut * 2.0)];
         ring.userInteractionEnabled = NO;
         ring.layer.cornerRadius = CGRectGetWidth(ring.bounds) / 2.0;
         ring.layer.borderWidth = ringLine;

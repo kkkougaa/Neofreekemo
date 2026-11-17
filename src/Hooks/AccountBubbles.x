@@ -93,6 +93,12 @@
 //  7.3.74: the dock opens by dragging the tab bar up instead of holding the
 //  Home tab. Only a mostly straight-up drag of 36pt (or a quick flick of 16pt)
 //  counts, so taps on the tabs are left alone.
+//
+//  7.3.75: the dock is the page colour with the lifted screen's shadow on it,
+//  like the side drawer, instead of black. Accounts left out of the dock wait
+//  past the left end: pulling the row on past the first account resists, shows
+//  the next one faintly, then pops them all in with a click (this visit only).
+//  Opening knocks firmly, then lands softly.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2030,6 +2036,20 @@ static const NSInteger kDialNotches = 5;
 static const CGFloat kDialFineClick = 0.45;   // strength of a tick click
 static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
 
+// Readied when a swipe on the tab bar starts, so the knock lands the moment
+// the dock opens instead of a beat later.
+static UIImpactFeedbackGenerator* DockOpenHaptic(void) {
+    static UIImpactFeedbackGenerator* knock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        knock = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    });
+    return knock;
+}
+
+// Points the row must stretch past its first account to pull the hidden ones out.
+static const CGFloat kDockRevealStretch = 52.0;
+
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
 @property (nonatomic, strong) UIScrollView* strip;
@@ -2056,6 +2076,13 @@ static const CGFloat kDialFirmClick = 1.0;    // strength of an account click
 // firmer one when an account reaches the middle.
 @property (nonatomic, strong) UIImpactFeedbackGenerator* fineClick;
 @property (nonatomic, strong) UIImpactFeedbackGenerator* firmClick;
+// Accounts left out of the dock sit on the left, out of reach, until the row
+// is pulled hard past its first account; then they pop in for this visit only.
+@property (nonatomic, assign) NSInteger hiddenCount;
+@property (nonatomic, assign) BOOL revealed;
+// The lifted screen's shadow, drawn on the drawer underneath (the screen
+// itself clips to its rounded corners, so it cannot carry one).
+@property (nonatomic, strong) UIView* cardShadow;
 + (BOOL)openInWindow:(UIWindow*)window;
 - (void)closeWith:(NFBAccountBubble*)chosen;
 @end
@@ -2233,8 +2260,28 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 - (instancetype)initWithWindow:(UIWindow*)window accounts:(NSArray*)accounts {
     if ((self = [super initWithFrame:window.bounds])) {
         _hostWindow = window;
-        self.backgroundColor = [UIColor blackColor];
+        // Like the side drawer: the page colour, with the lifted screen
+        // casting a soft shadow onto it.
+        UITraitCollection* traits = window.traitCollection;
+        UIColor* paper = [[UIColor systemBackgroundColor] resolvedColorWithTraitCollection:traits];
+        UIColor* ink = [[UIColor labelColor] resolvedColorWithTraitCollection:traits];
+        BOOL dark = traits.userInterfaceStyle == UIUserInterfaceStyleDark;
+        self.backgroundColor = paper;
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        _cardShadow = [[UIView alloc] initWithFrame:self.bounds];
+        _cardShadow.userInteractionEnabled = NO;
+        _cardShadow.alpha = 0;
+        _cardShadow.layer.shadowColor = [UIColor blackColor].CGColor;
+        _cardShadow.layer.shadowOpacity = dark ? 0.6 : 0.16;
+        _cardShadow.layer.shadowRadius = 18.0;
+        _cardShadow.layer.shadowOffset = CGSizeMake(0, 6);
+        _cardShadow.layer.shadowPath =
+            [UIBezierPath bezierPathWithRoundedRect:self.bounds
+                                  byRoundingCorners:UIRectCornerBottomLeft | UIRectCornerBottomRight
+                                        cornerRadii:CGSizeMake(kDockCardRadius, kDockCardRadius)]
+                .CGPath;
+        [self addSubview:_cardShadow];
 
         CGFloat width = CGRectGetWidth(self.bounds);
         CGFloat height = CGRectGetHeight(self.bounds);
@@ -2257,6 +2304,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         // Only the accounts chosen for the dock (all of them unless some were
         // switched off in the order editor).
         NSMutableArray* ordered = [NSMutableArray array];
+        NSMutableArray* hidden = [NSMutableArray array];
         for (id account in OrderedAccounts(accounts)) {
             if (!HiddenFromDock(account)) {
                 [ordered addObject:account];
@@ -2264,8 +2312,13 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                 // The account in use was left out of the dock: it still gets
                 // a place, first on the left, for as long as it is in use.
                 [ordered insertObject:account atIndex:0];
+            } else {
+                [hidden addObject:account];
             }
         }
+        // The hidden ones go before the first account, beyond the row's left end.
+        _hiddenCount = (NSInteger)hidden.count;
+        [ordered insertObjects:hidden atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, hidden.count)]];
         NSInteger accountCount = (NSInteger)ordered.count;
         // Room on both ends so the first and the last account can reach the middle.
         CGFloat inset = (width - size) / 2.0;
@@ -2274,10 +2327,12 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
             gearX = (width - kDialGear) / 2.0;
         }
         _strip.contentSize = CGSizeMake(MAX(width, gearX + kDialGear + inset), stripHeight);
+        // Keeps the hidden accounts out of reach until they are pulled out.
+        _strip.contentInset = UIEdgeInsetsMake(0, -_hiddenCount * _pitch, 0, 0);
 
         NSMutableArray* bubbles = [NSMutableArray array];
         NSMutableArray* names = [NSMutableArray array];
-        NSInteger currentIndex = 0;
+        NSInteger currentIndex = _hiddenCount;
         for (NSInteger i = 0; i <= accountCount; i++) {
             BOOL gear = i == accountCount;
             id account = gear ? nil : ordered[i];
@@ -2288,9 +2343,9 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
             ResizeBubble(bubble, gear ? CGRectMake(gearX, 6.0 + (size - kDialGear) / 2.0, kDialGear, kDialGear)
                                       : CGRectMake(x, 6.0, size, size));
             bubble.slot = bubble.center;
-            bubble.initial.textColor = [UIColor whiteColor];
-            bubble.avatar.tintColor = gear ? [UIColor whiteColor] : bubble.avatar.tintColor;
-            bubble.badge.layer.borderColor = [UIColor blackColor].CGColor;
+            bubble.initial.textColor = ink;
+            bubble.avatar.tintColor = gear ? ink : bubble.avatar.tintColor;
+            bubble.badge.layer.borderColor = paper.CGColor;
             if (!gear) {
                 PutProfileLookOnBubble(bubble);
             }
@@ -2305,7 +2360,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                     initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + size + 6.0, size + kDockGap, 15.0)];
                 name.text = AccountTitle(account);
                 name.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-                name.textColor = [UIColor whiteColor];
+                name.textColor = ink;
                 name.textAlignment = NSTextAlignmentCenter;
                 name.lineBreakMode = NSLineBreakByTruncatingTail;
                 name.isAccessibilityElement = NO;
@@ -2338,7 +2393,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                 [path addLineToPoint:CGPointMake(x, top + (major ? 8.0 : 4.0))];
             }
             ticks.path = path.CGPath;
-            ticks.strokeColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+            ticks.strokeColor = [ink colorWithAlphaComponent:0.22].CGColor;
             ticks.lineWidth = 1.0;
             ticks.lineCap = kCALineCapRound;
             [_strip.layer insertSublayer:ticks atIndex:0];
@@ -2438,10 +2493,14 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     [window addSubview:self.catcher];
 
     gLiveDock = self;
+    // A firm knock as the screen lets go, and a soft one as it lands up top.
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
-        UIImpactFeedbackGenerator* thump =
-            [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-        [thump impactOccurred];
+        [DockOpenHaptic() impactOccurredWithIntensity:1.0];
+        UIImpactFeedbackGenerator* land = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft];
+        [land prepare];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [land impactOccurredWithIntensity:0.7];
+        });
     }
 
     [UIView animateWithDuration:0.42
@@ -2458,6 +2517,9 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     NSInteger index = 0;
     for (NFBAccountBubble* bubble in self.bubbles) {
         bubble.alpha = 0;
+        if ([self isTucked:bubble]) {
+            continue;
+        }
         bubble.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.6, 0.6),
                                                    CGAffineTransformMakeTranslation(0, 24));
         [UIView animateWithDuration:0.46
@@ -2491,6 +2553,73 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         CGAffineTransform base = self.liftedTransforms[i].CGAffineTransformValue;
         self.lifted[i].transform = CGAffineTransformConcat(base, CGAffineTransformMakeTranslation(0, -lift));
     }
+    self.cardShadow.transform = CGAffineTransformMakeTranslation(0, -lift);
+    self.cardShadow.alpha = self.lift > 0 ? MIN(1.0, lift / self.lift) : 0;
+}
+
+// A hidden account not pulled out yet.
+- (BOOL)isTucked:(NFBAccountBubble*)bubble {
+    if (self.revealed || self.hiddenCount == 0) {
+        return NO;
+    }
+    NSUInteger index = [self.bubbles indexOfObject:bubble];
+    return index != NSNotFound && (NSInteger)index < self.hiddenCount;
+}
+
+// The first place the dial may rest on.
+- (NSInteger)firstIndex {
+    return self.revealed ? 0 : self.hiddenCount;
+}
+
+// While the row is pulled past its first account it resists (the scroll
+// view's own stretch), and the nearest hidden account shows faintly, growing
+// with the pull, so it is clear something is about to come out.
+- (void)showPull:(CGFloat)progress {
+    NFBAccountBubble* next = self.hiddenCount > 0 ? self.bubbles[self.hiddenCount - 1] : nil;
+    if (!next || self.revealed) {
+        return;
+    }
+    progress = MAX(0.0, MIN(1.0, progress));
+    next.alpha = 0.45 * progress;
+    CGFloat scale = 0.3 + 0.35 * progress;
+    next.transform = CGAffineTransformMakeScale(scale, scale);
+}
+
+// Pulled far enough: the hidden ones pop in from the left.
+- (void)revealHidden {
+    if (self.revealed || self.hiddenCount == 0 || self.closing) {
+        return;
+    }
+    self.revealed = YES;
+    self.strip.contentInset = UIEdgeInsetsZero;
+    if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        UIImpactFeedbackGenerator* pop = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
+        [pop impactOccurredWithIntensity:1.0];
+        UIImpactFeedbackGenerator* after = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft];
+        [after prepare];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.09 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [after impactOccurredWithIntensity:0.8];
+        });
+    }
+    for (NSInteger i = self.hiddenCount - 1, step = 0; i >= 0; i--, step++) {
+        NFBAccountBubble* bubble = self.bubbles[i];
+        if (step > 0) {
+            bubble.transform = CGAffineTransformMakeScale(0.3, 0.3);
+        }
+        [UIView animateWithDuration:0.5
+            delay:step * 0.05
+            usingSpringWithDamping:0.5
+            initialSpringVelocity:1.0
+            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+            animations:^{
+                bubble.alpha = 1;
+                bubble.transform = CGAffineTransformIdentity;
+            }
+            completion:^(BOOL finished) {
+                bubble.settled = YES;
+            }];
+    }
+    [self turnDial];
 }
 
 - (void)layoutSubviews {
@@ -2510,6 +2639,9 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     NFBAccountBubble* best = nil;
     CGFloat bestDistance = kHitRadius;
     for (NFBAccountBubble* bubble in self.bubbles) {
+        if ([self isTucked:bubble]) {
+            continue;
+        }
         CGPoint center = [self.strip convertPoint:bubble.slot toView:self];
         CGFloat distance = hypot(point.x - center.x, point.y - center.y);
         if (distance < bestDistance) {
@@ -2614,7 +2746,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         return 0;
     }
     NSInteger index = (NSInteger)lround(offset / self.pitch);
-    return MAX(0, MIN(self.accountCount - 1, index));
+    return MAX([self firstIndex], MIN(self.accountCount - 1, index));
 }
 
 // Circles shrink away from the middle (their names fade); crossing into a new account
@@ -2630,7 +2762,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         bubble.layer.shadowOpacity = 0.22 * (1.0 - t);
         UILabel* name = self.names[i];
         BOOL here = distance < self.pitch / 2.0;
-        name.alpha = here ? 1.0 : 0.55 - 0.3 * t;
+        name.alpha = [self isTucked:bubble] ? 0.0 : (here ? 1.0 : 0.55 - 0.3 * t);
         name.font = [UIFont systemFontOfSize:11 weight:here ? UIFontWeightBold : UIFontWeightMedium];
     }
     self.centred = [self indexAtOffset:self.strip.contentOffset.x];
@@ -2642,7 +2774,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     }
     CGFloat step = self.pitch / kDialNotches;
     NSInteger notch = (NSInteger)lround(self.strip.contentOffset.x / step);
-    notch = MAX(0, MIN((self.accountCount - 1) * kDialNotches, notch));
+    notch = MAX([self firstIndex] * kDialNotches, MIN((self.accountCount - 1) * kDialNotches, notch));
     if (notch == self.notch) {
         return;
     }
@@ -2671,6 +2803,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 
 - (void)scrollViewDidScroll:(UIScrollView*)scrollView {
     self.settleGeneration++;
+    if (!self.revealed && self.hiddenCount > 0) {
+        // How far the row has stretched past its first account. The stretch
+        // gives way less and less, so 52 points of it is about 120 points of
+        // thumb travel: one ordinary swipe, but more than a slip.
+        CGFloat stretch = self.hiddenCount * self.pitch - scrollView.contentOffset.x;
+        if (scrollView.isTracking && stretch >= kDockRevealStretch) {
+            [self revealHidden];
+        } else {
+            [self showPull:scrollView.isTracking ? stretch / kDockRevealStretch : 0];
+        }
+    }
     [self turnDial];
 }
 
@@ -2905,6 +3048,7 @@ static void CancelOtherGestures(UIGestureRecognizer* mine) {
     switch (swipe.state) {
         case UIGestureRecognizerStateBegan:
             swipe.opened = NO;
+            [DockOpenHaptic() prepare];
             break;
         case UIGestureRecognizerStateChanged:
             if (!swipe.opened && -move.y >= kDockSwipeDistance && MostlyUp(move)) {

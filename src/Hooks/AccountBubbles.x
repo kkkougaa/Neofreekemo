@@ -103,6 +103,10 @@
 //  7.3.79: pulling the hidden accounts out takes a longer pull (72pt of
 //  stretch) and shows nothing until they pop, with clicks growing firmer
 //  during the pull; they then spring in from a dot with a bouncy overshoot.
+//
+//  7.3.81: the pull that brought them out no longer counts as turning the
+//  dial. The row goes back to the account it was on, and the drag is counted
+//  from that moment.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2085,6 +2089,8 @@ static const CGFloat kDockRevealStretch = 72.0;
 @property (nonatomic, assign) NSInteger hiddenCount;
 @property (nonatomic, assign) BOOL revealed;
 @property (nonatomic, assign) NSInteger pullStep;
+// Where the row was when the finger started dragging it.
+@property (nonatomic, assign) CGFloat dragStartX;
 // The lifted screen's shadow, drawn on the drawer underneath (the screen
 // itself clips to its rounded corners, so it cannot carry one).
 @property (nonatomic, strong) UIView* cardShadow;
@@ -2603,6 +2609,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     }
     self.revealed = YES;
     self.strip.contentInset = UIEdgeInsetsZero;
+    // Until now the row only stretched a little for a long pull. With the left
+    // end opened up, the scroll view would apply the whole pull at once and land
+    // on the leftmost account. Count the drag from here instead: the row rests
+    // on the account it was on, and only what the finger does next turns it.
+    if (self.strip.isTracking) {
+        CGFloat rest = self.hiddenCount * self.pitch;
+        UIPanGestureRecognizer* pan = self.strip.panGestureRecognizer;
+        CGPoint moved = [pan translationInView:self.strip];
+        [pan setTranslation:CGPointMake(self.dragStartX - rest, moved.y) inView:self.strip];
+        self.strip.contentOffset = CGPointMake(rest, 0);
+    }
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         UIImpactFeedbackGenerator* pop = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
         [pop impactOccurredWithIntensity:1.0];
@@ -2836,6 +2853,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
     self.settleGeneration++;
+    self.dragStartX = scrollView.contentOffset.x;
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         [self prepareClicks];
     }

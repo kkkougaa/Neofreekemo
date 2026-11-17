@@ -20,6 +20,8 @@ extern NSString* NFBAccountBubblesDebugText(void);
 extern NSString* NFBTimelineFilterDebugText(void);
 extern NSString* NFBChatDebugText(void);
 extern NSString* NFBStringProbeText(void);
+extern NSString* NFBTimelineProbeText(void);
+extern NSString* NFBWebAccountsDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -408,6 +410,8 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== TIMELINE FILTER ==%c%@%c", 10, NFBTimelineFilterDebugText(), 10];
     [out appendFormat:@"== CHAT ==%c%@%c", 10, NFBChatDebugText(), 10];
     [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
+    [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
+    [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
 
     // The drawer's controller: which methods it has (to see who rebuilds the menu list).
     for (NSString* name in @[ @"T1DashContentController", @"T1TabbedAppNavigationViewController" ]) {

@@ -1503,3 +1503,21 @@ static BOOL replaceTaskRequest(NSURLSessionTask* task, NSURLRequest* request) {
 }
 
 %end
+
+// MARK: - Debug dump
+
+// Which signed-in accounts have web credentials cached (never the values), for
+// the unified timeline probe in the shake dump.
+NSString* NFBWebAccountsDebugText(void) {
+    NSMutableString* out = [NSMutableString string];
+    @synchronized(accountCacheLock()) {
+        [out appendFormat:@"primary=%@ authMulti=%lu B cached=%lu", userIDFromTwid(WebTwid) ?: @"-",
+                          (unsigned long)WebAuthMulti.length, (unsigned long)WebAccountCookies.count];
+        for (NSString* userID in WebAccountCookies) {
+            NSDictionary* pair = WebAccountCookies[userID];
+            [out appendFormat:@"\n  %@ auth=%d ct0=%d multiAuth=%d", userID, [pair[@"auth_token"] length] > 0,
+                              [pair[@"ct0"] length] > 0, authTokenForUserID(userID).length > 0];
+        }
+    }
+    return out;
+}

@@ -11,9 +11,13 @@
 #import "Headers/Helpers.h"
 #import "Headers/TWHeaders.h"
 #import "Settings/ModernSettingsCells.h"
+#import "ThemeColor/BHTDimPalette.h"
 
-@interface AppearanceSettingsViewController () <UIFontPickerViewControllerDelegate>
+@interface AppearanceSettingsViewController () <UIFontPickerViewControllerDelegate,
+                                                UIColorPickerViewControllerDelegate>
 @end
+
+static NSString* const kThemeColorKeyAssociation = @"nfbThemeColorKey";
 
 @implementation AppearanceSettingsViewController
 
@@ -185,7 +189,13 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             [self refreshAllTabViews];
         });
-    } else if ([key isEqualToString:@"enable_dim_theme"]) {
+    } else if ([key isEqualToString:@"enable_dim_theme"] || [key isEqualToString:@"kemo_custom_theme"]) {
+        [self showRestartAlert];
+    }
+}
+
+- (void)showRestartAlert {
+    {
         UIAlertController* alertController =
             [UIAlertController alertControllerWithTitle:[[BHTBundle sharedBundle]
                                                             localizedStringForKey:@"DIM_THEME_RESTART_ALERT_TITLE"]
@@ -201,8 +211,82 @@
                                                                   exit(0);
                                                               }];
         [alertController addAction:restartAction];
+        [alertController addAction:[UIAlertAction actionWithTitle:[[BHTBundle sharedBundle]
+                                                                      localizedStringForKey:@"KEMO_THEME_RESTART_LATER"]
+                                                            style:UIAlertActionStyleCancel
+                                                          handler:nil]];
         [self presentViewController:alertController animated:YES completion:nil];
     }
+}
+
+#pragma mark - Custom theme colors
+
+- (void)presentThemeColorPickerForKey:(NSString*)key titleKey:(NSString*)titleKey {
+    UIColorPickerViewController* picker = [UIColorPickerViewController new];
+    picker.title = [[BHTBundle sharedBundle] localizedStringForKey:titleKey];
+    picker.supportsAlpha = NO;
+    picker.delegate = self;
+    UIColor* current =
+        BHTColorFromHexString([[NSUserDefaults standardUserDefaults] stringForKey:key]);
+    if (current) {
+        picker.selectedColor = current;
+    } else if ([key isEqualToString:@"kemo_theme_bg"]) {
+        picker.selectedColor = [UIColor colorWithRed:21 / 255.0 green:32 / 255.0 blue:43 / 255.0 alpha:1];
+    } else {
+        picker.selectedColor = [UIColor whiteColor];
+    }
+    objc_setAssociatedObject(picker, (__bridge const void*)kThemeColorKeyAssociation, key,
+                             OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)showThemeBackgroundPicker:(NSDictionary*)sender {
+    [self presentThemeColorPickerForKey:@"kemo_theme_bg" titleKey:@"KEMO_THEME_BG_TITLE"];
+}
+
+- (void)showThemeTextPicker:(NSDictionary*)sender {
+    [self presentThemeColorPickerForKey:@"kemo_theme_text" titleKey:@"KEMO_THEME_TEXT_TITLE"];
+}
+
+- (void)resetThemeColors:(NSDictionary*)sender {
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    [defaults removeObjectForKey:@"kemo_theme_bg"];
+    [defaults removeObjectForKey:@"kemo_theme_text"];
+    [self updateVisibleToggles];
+    [self.tableView reloadData];
+    [self showRestartAlert];
+}
+
+- (void)saveThemeColorFromPicker:(UIColorPickerViewController*)picker {
+    NSString* key = objc_getAssociatedObject(picker, (__bridge const void*)kThemeColorKeyAssociation);
+    NSString* hex = BHTHexStringFromColor(picker.selectedColor);
+    if (key.length == 0 || hex.length == 0) {
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:hex forKey:key];
+    [self updateVisibleToggles];
+    [self.tableView reloadData];
+}
+
+- (void)colorPickerViewController:(UIColorPickerViewController*)picker
+                   didSelectColor:(UIColor*)color
+                     continuously:(BOOL)continuously {
+    if (!continuously) {
+        [self saveThemeColorFromPicker:picker];
+    }
+}
+
+- (void)colorPickerViewControllerDidFinish:(UIColorPickerViewController*)picker {
+    [self saveThemeColorFromPicker:picker];
+    // The picker dismisses itself; wait for that before putting up the alert.
+    __weak __typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       __typeof(self) strongSelf = weakSelf;
+                       if (strongSelf.view.window && !strongSelf.presentedViewController) {
+                           [strongSelf showRestartAlert];
+                       }
+                   });
 }
 
 #pragma mark - Font Pickers

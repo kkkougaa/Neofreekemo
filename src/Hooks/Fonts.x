@@ -4,6 +4,7 @@
 //
 
 #import <CoreText/CoreText.h>
+#import <os/lock.h>
 #import "Headers/XHeaders.h"
 #import "HookHelpers.h"
 
@@ -107,14 +108,67 @@
 }
 %end
 
-// The picked font name for a weight, or nil when the user runs Twitter's own.
-static NSString* CustomFontName(BOOL isBold) {
-    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    if (![defaults boolForKey:@"custom_fonts"]) {
+// The picked font names, read once per settings change. These getters run for nearly
+// every font X makes (often off the main thread while it lays rows out), so they must
+// not hit NSUserDefaults or allocate each time.
+//
+// A picked name that no longer makes a font (a profile font that was removed, or a
+// family name UIFont can't open) is dropped here, so the hooks below fall straight
+// back to X's own fonts instead of trying again on every call.
+static os_unfair_lock gFontNameLock = OS_UNFAIR_LOCK_INIT;
+static BOOL gFontNamesLoaded = NO;
+static NSString* gRegularFontName = nil;
+static NSString* gBoldFontName = nil;
+
+static NSString* UsableFontName(id name) {
+    if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
         return nil;
     }
-    id name = [defaults objectForKey:isBold ? @"bhtwitter_font_2" : @"bhtwitter_font_1"];
-    return [name isKindOfClass:[NSString class]] && [name length] > 0 ? name : nil;
+    if ([UIFont fontWithName:name size:12]) {
+        return name;
+    }
+    // The regular picker stores a family name; open its regular face instead.
+    NSArray<NSString*>* faces = [UIFont fontNamesForFamilyName:name];
+    NSString* best = nil;
+    for (NSString* face in faces) {
+        if ([face hasSuffix:@"-Regular"] || [face isEqualToString:name]) {
+            best = face;
+            break;
+        }
+    }
+    best = best ?: faces.firstObject;
+    return best && [UIFont fontWithName:best size:12] ? best : nil;
+}
+
+static void LoadFontNamesLocked(void) {
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = [defaults boolForKey:@"custom_fonts"];
+    gRegularFontName = enabled ? UsableFontName([defaults objectForKey:@"bhtwitter_font_1"]) : nil;
+    gBoldFontName = enabled ? UsableFontName([defaults objectForKey:@"bhtwitter_font_2"]) : nil;
+    gFontNamesLoaded = YES;
+}
+
+// The picked font name for a weight, or nil when the user runs Twitter's own.
+static NSString* CustomFontName(BOOL isBold) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSUserDefaultsDidChangeNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification* note) {
+                        os_unfair_lock_lock(&gFontNameLock);
+                        gFontNamesLoaded = NO;
+                        os_unfair_lock_unlock(&gFontNameLock);
+                    }];
+    });
+    os_unfair_lock_lock(&gFontNameLock);
+    if (!gFontNamesLoaded) {
+        LoadFontNamesLocked();
+    }
+    NSString* name = isBold ? gBoldFontName : gRegularFontName;
+    os_unfair_lock_unlock(&gFontNameLock);
+    return name;
 }
 
 static BOOL CustomFontsEnabled(void) {
@@ -136,6 +190,19 @@ static NSMutableDictionary<NSString*, UIFont*>* BHTFontCache(void) {
     return cache;
 }
 
+// Every font in the cache above, by identity, for a constant-time "is this ours" check.
+// Guarded by the cache's lock.
+static NSHashTable* BHTRememberedFonts(void) {
+    static NSHashTable* table;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        table = [[NSHashTable alloc]
+            initWithOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPointerPersonality
+                   capacity:64];
+    });
+    return table;
+}
+
 static UIFont* BHTRememberFont(NSString* key, UIFont* font) {
     if (key.length == 0 || ![font isKindOfClass:[UIFont class]]) {
         return [font isKindOfClass:[UIFont class]] ? font : nil;
@@ -147,6 +214,7 @@ static UIFont* BHTRememberFont(NSString* key, UIFont* font) {
             return existing;
         }
         cache[key] = font;
+        [BHTRememberedFonts() addObject:font];
         return font;
     }
 }
@@ -157,13 +225,8 @@ static BOOL BHTFontIsRemembered(UIFont* font) {
     }
     NSMutableDictionary* cache = BHTFontCache();
     @synchronized(cache) {
-        for (UIFont* cached in cache.objectEnumerator) {
-            if (cached == font) {
-                return YES;
-            }
-        }
+        return [BHTRememberedFonts() containsObject:font];
     }
-    return NO;
 }
 
 // kNumberSpacingType / kMonospacedNumbersSelector. Built here so the result is a

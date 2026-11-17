@@ -346,7 +346,7 @@ static void BHTApplyDimScrollEdgeChildren(UIView* treatment) {
         objc_setAssociatedObject(self, &BHTNativePrimaryColorKey, native,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (self.isDark && BHTDimThemeEnabled()) {
+    if (self.isDark && (BHTDimThemeEnabled() || BHTCustomThemeTextColor())) {
         return (id<TAEColorPalette>)[BHTDimPaletteProxy proxyWithPalette:realPalette];
     }
     return realPalette;
@@ -360,6 +360,33 @@ static void BHTApplyDimScrollEdgeChildren(UIView* treatment) {
 // near enough) in Dark. Re-point those at the same three Dim shades so
 // nothing native-styled is left behind.
 %hook UIColor
+
+// Custom text color (dark appearance only, like the background family).
++ (UIColor*)labelColor {
+    UIColor* original = %orig;
+    UIColor* custom = BHTCustomThemeTextColor();
+    if (!custom) {
+        return original;
+    }
+    return [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
+        return traits.userInterfaceStyle == UIUserInterfaceStyleDark
+                   ? custom
+                   : [original resolvedColorWithTraitCollection:traits];
+    }];
+}
+
++ (UIColor*)secondaryLabelColor {
+    UIColor* original = %orig;
+    UIColor* custom = BHTCustomThemeSecondaryTextColor();
+    if (!custom) {
+        return original;
+    }
+    return [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
+        return traits.userInterfaceStyle == UIUserInterfaceStyleDark
+                   ? custom
+                   : [original resolvedColorWithTraitCollection:traits];
+    }];
+}
 
 + (UIColor*)systemBackgroundColor {
     UIColor* original = %orig;
@@ -508,17 +535,9 @@ static UIColor* BHTDimNormalizedViewBackground(UIView* view, UIColor* color) {
     // Dim shade. Pin that resolved value on the view so later reuse cannot
     // fall back to the catalog's original pure-black dark variant.
     CGFloat red = 0, green = 0, blue = 0, alpha = 0;
-    if ([resolved getRed:&red green:&green blue:&blue alpha:&alpha] && alpha >= 0.99) {
-        BOOL isDimShade =
-            (fabs(red - 21.0 / 255.0) < 0.002 && fabs(green - 32.0 / 255.0) < 0.002 &&
-             fabs(blue - 43.0 / 255.0) < 0.002) ||
-            (fabs(red - 25.0 / 255.0) < 0.002 && fabs(green - 39.0 / 255.0) < 0.002 &&
-             fabs(blue - 52.0 / 255.0) < 0.002) ||
-            (fabs(red - 28.0 / 255.0) < 0.002 && fabs(green - 40.0 / 255.0) < 0.002 &&
-             fabs(blue - 54.0 / 255.0) < 0.002);
-        if (isDimShade) {
-            return resolved;
-        }
+    if ([resolved getRed:&red green:&green blue:&blue alpha:&alpha] && alpha >= 0.99 &&
+        BHTColorIsDimShade(resolved)) {
+        return resolved;
     }
 
     return color;

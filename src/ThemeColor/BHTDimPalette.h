@@ -13,6 +13,19 @@
 BOOL BHTDimThemeEnabled(void);
 
 /**
+ * The colors picked under "kemo_custom_theme" (nil when unset or the theme is off).
+ * A custom background turns the Dim machinery on with that color in place of navy.
+ */
+UIColor* _Nullable BHTCustomThemeBackgroundColor(void);
+UIColor* _Nullable BHTCustomThemeTextColor(void);
+UIColor* _Nullable BHTCustomThemeSecondaryTextColor(void);
+UIColor* _Nullable BHTColorFromHexString(NSString* _Nullable hex);
+NSString* _Nullable BHTHexStringFromColor(UIColor* color);
+
+/** YES when the color is one of the three current background shades (Dim or custom). */
+BOOL BHTColorIsDimShade(UIColor* _Nullable color);
+
+/**
  * The three Dim shades, for direct use where a caller isn't going through the
  * palette proxy below (e.g. overriding UIKit's own dynamic system colors,
  * which are a separate source of "pure black" chrome the TAEColorPalette

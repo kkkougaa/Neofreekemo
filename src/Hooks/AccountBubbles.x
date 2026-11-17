@@ -100,7 +100,7 @@
 //  the next one faintly, then pops them all in with a click (this visit only).
 //  Opening knocks firmly, then lands softly.
 //
-//  7.3.76: pulling the hidden accounts out takes a longer pull (72pt of
+//  7.3.79: pulling the hidden accounts out takes a longer pull (72pt of
 //  stretch) and shows nothing until they pop, with clicks growing firmer
 //  during the pull; they then spring in from a dot with a bouncy overshoot.
 

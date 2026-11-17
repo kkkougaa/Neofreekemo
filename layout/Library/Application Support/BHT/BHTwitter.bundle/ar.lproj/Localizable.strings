@@ -495,14 +495,19 @@
 /* Undo Duration Labels (Added for TweetsSettingsViewController) */
 "GENERIC_OFF_LABEL" = "إيقاف";
 "SUBSCRIPTION_UNDO_SEND_DURATION_LABEL" = "%ld ث";
-"NSFW_AI_BLUR_OVERLAY_TITLE" = "Hidden because it was judged NSFW!";
-"NSFW_AI_BLUR_SHOW" = "View";
-"NSFW_AI_BLUR_TITLE" = "Blur NSFW images (on-device AI)";
 "NSFW_MODE_TITLE" = "NSFW mode";
 "KEMO_PAGE_TITLE" = "kemo";
 "KEMO_PAGE_SUBTITLE" = "";
-"NSFW_AI_THRESHOLD_TITLE" = "NSFW threshold";
 "KEMO_MEDIA_ONLY_TITLE" = "Media tweets only";
+"KEMO_COMPACT_MEDIA_TITLE" = "Small media thumbnails";
+"KEMO_COMPACT_MEDIA_DETAIL" = "While NSFW mode is off, shows a tweet's photos, videos and link previews small. Several pictures scroll sideways. Tap to open them full size.";
+"KEMO_CUSTOM_THEME_TITLE" = "Custom theme colors";
+"KEMO_CUSTOM_THEME_DETAIL" = "Pick your own background and text colors. Applies in dark mode and needs a restart.";
+"KEMO_THEME_BG_TITLE" = "Background color";
+"KEMO_THEME_TEXT_TITLE" = "Text color";
+"KEMO_THEME_RESET_TITLE" = "Reset colors";
+"KEMO_THEME_COLOR_DEFAULT_SUBTITLE" = "Default";
+"KEMO_THEME_RESTART_LATER" = "Later";
 "SPOTIFY_CLIENT_ID_TITLE" = "Spotify Client ID";
 "SPOTIFY_LOGIN_TITLE" = "Spotify login";
 "SPOTIFY_CONNECTED_LABEL" = "Connected";
@@ -545,7 +550,6 @@
 "KEMO_RECENT_TWEETS_TITLE" = "Remember recently viewed tweets (last 30)";
 "KEMO_MENU_RECENT" = "Recently viewed";
 "KEMO_RECENT_EMPTY" = "Nothing here yet";
-"NSFW_ANIME_THRESHOLD_TITLE" = "Anime illustration threshold";
 "KEMO_RECENT_LIST_TITLE" = "Recently viewed tweets";
 "KEMO_HISTORY_TABS_TITLE" = "Tidy the history tabs (recent, likes, bookmarks)";
 

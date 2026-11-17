@@ -137,17 +137,6 @@ static UIImage* ToggleImage(NSString* name) {
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     [defaults setBool:on forKey:kSensitiveKey];
 
-    // NSFW mode shows everything: the AI cover goes off with it, and goes back to what
-    // it was before when the mode is turned off again.
-    static NSString* const kBlurKey = @"nsfw_ai_blur";
-    static NSString* const kBlurBeforeKey = @"nfb_nsfw_blur_before";
-    if (on) {
-        [defaults setBool:[BHTSettings boolForKey:kBlurKey] forKey:kBlurBeforeKey];
-        [defaults setBool:NO forKey:kBlurKey];
-    } else {
-        [defaults setBool:[defaults boolForKey:kBlurBeforeKey] forKey:kBlurKey];
-    }
-
     [[[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
 

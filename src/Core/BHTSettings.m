@@ -61,6 +61,33 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                       @"default": @NO},
                     @{@"key": @"enable_dim_theme",
                       @"default": @NO},
+                    @{@"key": @"kemo_custom_theme",
+                      @"default": @NO},
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_custom_theme",
+                        @"key": @"kemo_theme_bg_button",
+                        @"titleKey": @"KEMO_THEME_BG_TITLE",
+                        @"action": @"showThemeBackgroundPicker:",
+                        @"prefKeyForSubtitle": @"kemo_theme_bg",
+                        @"subtitleDefaultKey": @"KEMO_THEME_COLOR_DEFAULT_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_custom_theme",
+                        @"key": @"kemo_theme_text_button",
+                        @"titleKey": @"KEMO_THEME_TEXT_TITLE",
+                        @"action": @"showThemeTextPicker:",
+                        @"prefKeyForSubtitle": @"kemo_theme_text",
+                        @"subtitleDefaultKey": @"KEMO_THEME_COLOR_DEFAULT_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_custom_theme",
+                        @"key": @"kemo_theme_reset_button",
+                        @"titleKey": @"KEMO_THEME_RESET_TITLE",
+                        @"action": @"resetThemeColors:"
+                    },
                     @{@"key": @"custom_fonts",
                       @"default": @NO},
                     @{
@@ -438,25 +465,9 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                 @"subtitleKey": @"KEMO_MEDIA_PAGE_SUBTITLE",
                 @"settings": @[
                     @{
-                        @"key": @"nsfw_ai_blur",
+                        @"key": @"kemo_compact_media",
                         @"default": @NO,
                         @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"nsfw_ai_threshold",
-                        @"default": @70,
-                        @"type": @"slider",
-                        @"min": @40,
-                        @"max": @95,
-                        @"parentKey": @"nsfw_ai_blur"
-                    },
-                    @{
-                        @"key": @"nsfw_anime_threshold",
-                        @"default": @50,
-                        @"type": @"slider",
-                        @"min": @30,
-                        @"max": @90,
-                        @"parentKey": @"nsfw_ai_blur"
                     },
                     @{
                         @"key": @"kemo_media_only",
@@ -512,25 +523,9 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"nsfw_ai_blur",
+                        @"key": @"kemo_compact_media",
                         @"default": @NO,
                         @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"nsfw_ai_threshold",
-                        @"default": @70,
-                        @"type": @"slider",
-                        @"min": @40,
-                        @"max": @95,
-                        @"parentKey": @"nsfw_ai_blur"
-                    },
-                    @{
-                        @"key": @"nsfw_anime_threshold",
-                        @"default": @50,
-                        @"type": @"slider",
-                        @"min": @30,
-                        @"max": @90,
-                        @"parentKey": @"nsfw_ai_blur"
                     }
                 ]
             },

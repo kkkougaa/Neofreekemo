@@ -146,3 +146,30 @@ static void NFBAlignThumbnail(UIView* statusView) {
 }
 
 %end
+
+// MARK: - Leftovers of the AI blur
+// Builds before 7.3.76 compiled the two NSFW models into Caches on first use
+// (nfb_nsfw5.mlmodelc, nfb_anime1.mlmodelc, roughly the size of the models) and kept
+// a few settings. An app update doesn't clear Caches, so remove them once, off the
+// main thread, a little after launch.
+%ctor {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                       NSFileManager* fm = [NSFileManager defaultManager];
+                       NSURL* caches = [[fm URLsForDirectory:NSCachesDirectory
+                                                   inDomains:NSUserDomainMask] firstObject];
+                       for (NSString* name in @[ @"nfb_nsfw5.mlmodelc", @"nfb_anime1.mlmodelc" ]) {
+                           NSURL* url = [caches URLByAppendingPathComponent:name];
+                           if ([fm fileExistsAtPath:url.path]) {
+                               [fm removeItemAtURL:url error:nil];
+                           }
+                       }
+                       NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+                       for (NSString* key in @[ @"nsfw_ai_blur", @"nsfw_ai_threshold",
+                                                 @"nsfw_anime_threshold", @"nfb_nsfw_blur_before" ]) {
+                           if ([defaults objectForKey:key]) {
+                               [defaults removeObjectForKey:key];
+                           }
+                       }
+                   });
+}

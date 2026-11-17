@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.75",
+      "subtitle": "NeoFreeBird version 7.3.76",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.76",
+          "buildVersion": "76",
+          "date": "2026-11-17T08:20:40Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.76/NeoFreeBird-Twitter-sideloaded_7.3.76_12.44.ipa",
+          "size": 253462883,
+          "minOSVersion": "15.0",
+          "localizedDescription": "NSFW AI 블러 제거, 대신 사진·동영상을 트윗 오른쪽 작은 썸네일로 보는 옵션 추가. 사진·동영상 두 번 탭으로 하트 터지며 마음에 들어요. 배경색·글자색을 직접 고르는 테마. 사용자 폰트 안정성 개선, 마지막 크래시 기록을 디버그 덤프에 표시."
+        },
         {
           "version": "7.3.75",
           "buildVersion": "75",

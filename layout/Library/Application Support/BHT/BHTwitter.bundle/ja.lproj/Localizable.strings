@@ -501,9 +501,7 @@
 "KEMO_PAGE_SUBTITLE" = "";
 "KEMO_MEDIA_ONLY_TITLE" = "Media tweets only";
 "KEMO_COMPACT_MEDIA_TITLE" = "Small media thumbnails";
-"KEMO_COMPACT_MEDIA_DETAIL" = "Shows a tweet's photos and videos as a small square at the right end of the tweet. Tap it to open them full size.";
-"KEMO_DOUBLE_TAP_LIKE_TITLE" = "Double tap media to like";
-"KEMO_DOUBLE_TAP_LIKE_DETAIL" = "Tap a tweet's photo or video twice to like it with a heart burst. It never unlikes. A single tap opens the viewer a moment later.";
+"KEMO_COMPACT_MEDIA_DETAIL" = "While NSFW mode is off, shows a tweet's photos, videos and link previews small. Several pictures scroll sideways. Tap to open them full size.";
 "KEMO_CUSTOM_THEME_TITLE" = "Custom theme colors";
 "KEMO_CUSTOM_THEME_DETAIL" = "Pick your own background and text colors. Applies in dark mode and needs a restart.";
 "KEMO_THEME_BG_TITLE" = "Background color";

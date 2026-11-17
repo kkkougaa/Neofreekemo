@@ -475,11 +475,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_double_tap_like",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
                         @"key": @"kemo_media_count_badge",
                         @"default": @YES,
                         @"type": @"toggle"

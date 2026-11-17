@@ -457,9 +457,7 @@
 "KEMO_PAGE_SUBTITLE" = "";
 "KEMO_MEDIA_ONLY_TITLE" = "미디어 트윗만 보기";
 "KEMO_COMPACT_MEDIA_TITLE" = "사진·동영상 작게 보기";
-"KEMO_COMPACT_MEDIA_DETAIL" = "트윗의 사진과 동영상을 트윗 오른쪽 끝에 작은 썸네일로 보여줘요. 누르면 크게 열려요.";
-"KEMO_DOUBLE_TAP_LIKE_TITLE" = "사진 두 번 탭해서 마음에 들어요";
-"KEMO_DOUBLE_TAP_LIKE_DETAIL" = "트윗의 사진이나 동영상을 두 번 탭하면 하트가 터지면서 마음에 들어요가 눌려요. 취소는 되지 않아요. 한 번 탭하면 살짝 늦게 열려요.";
+"KEMO_COMPACT_MEDIA_DETAIL" = "NSFW 모드가 꺼져 있을 때 트윗의 사진·동영상과 링크 미리보기를 작게 보여줘요. 여러 장이면 가로로 넘겨볼 수 있어요. 누르면 크게 열려요.";
 "KEMO_CUSTOM_THEME_TITLE" = "테마 색 직접 고르기";
 "KEMO_CUSTOM_THEME_DETAIL" = "배경색과 글자색을 직접 골라요. 다크 모드에서 적용되고 앱을 다시 시작해야 해요.";
 "KEMO_THEME_BG_TITLE" = "배경색";

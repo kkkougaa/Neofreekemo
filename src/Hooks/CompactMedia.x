@@ -5,31 +5,78 @@
 
 #import "HookHelpers.h"
 
-// MARK: - Small media thumbnails in timeline tweets
-// With "kemo_compact_media" on, a tweet's photos and videos are laid out as one small
-// square at the right end of the tweet instead of the full-width media block. Tapping
-// it still opens X's own viewer. This replaces the on-device AI blur (removed in 7.3.76).
+// MARK: - Small media in timeline tweets
+// With "kemo_compact_media" on and NSFW mode off, timeline tweets show their media small
+// (this replaced the on-device AI blur in 7.3.76):
 //
-// X sizes the media block in -[T1StandardStatusAttachmentViewAdapter
-// _t1_photoVideoForwardViewSizeForViewModel:layoutMetrics:width:attachmentType:], and
-// the row height is computed from that layout state, so returning a small size there
-// shrinks the row as well; nothing is covered and no blank space is left. The carousel
-// path sizes itself separately, so it is turned off while this is on (several pictures
-// then show as X's own small grid inside the square).
+//  - one photo or video: a small square under the text;
+//  - several: X's own horizontal carousel, only short, so it still scrolls sideways;
+//  - link previews (cards): laid out at a narrow width, so the picture is small too.
 //
-// The block is laid out from the left edge of the text column; once the status view
-// has laid out, the block is moved to the right end of that column.
-
-@interface T1StatusPhotoVideoForwardView : UIView
-@end
+// Everything is done where X computes the layout, so the row height shrinks along with
+// the media and nothing is covered:
+//  - -[T1StandardStatusAttachmentViewAdapter _t1_photoVideoForwardViewSizeForViewModel:...]
+//    sizes the media block;
+//  - +[MultiMediaCarouselView carouselHeightFor:...] gives the carousel its height, and
+//    the items take their width from that height;
+//  - the two card layout getters take the width the card is laid out in.
+//
+// Layout states and row heights are cached, so a change of mode (the switch, or NSFW
+// mode from the drawer) marks old layout states stale and reloads visible timelines.
 
 static NSString* const kCompactKey = @"kemo_compact_media";
+static NSString* const kSensitiveKey = @"disable_sensitive_tweet_warnings"; // NSFW mode
 static const CGFloat kThumbSide = 92.0;
+static const CGFloat kCardWidth = 190.0;
 
 static const void* kLayoutModeKey = &kLayoutModeKey;
 
+// Probe for the debug dump: how often each path ran, and the last view model class.
+static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0;
+static NSString* gLastViewModelClass = nil;
+
 static BOOL NFBCompactMedia(void) {
-    return [BHTSettings boolForKey:kCompactKey];
+    return [BHTSettings boolForKey:kCompactKey] && ![BHTSettings boolForKey:kSensitiveKey];
+}
+
+static id NFBObjectForSelector(id object, NSString* name) {
+    SEL selector = NSSelectorFromString(name);
+    return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+}
+
+// The status a layout view model stands for (the original for a retweet).
+static id NFBStatusOf(id viewModel) {
+    id status = viewModel;
+    for (NSString* name in @[ @"representedStatus", @"status" ]) {
+        id inner = NFBObjectForSelector(status, name);
+        if (inner) {
+            status = inner;
+        }
+    }
+    return status;
+}
+
+static NSUInteger NFBMediaCount(id viewModel) {
+    for (id object in @[ viewModel ?: [NSNull null], NFBStatusOf(viewModel) ?: [NSNull null] ]) {
+        for (NSString* name in @[ @"inlineMediaInfos", @"representedMediaEntities" ]) {
+            id list = NFBObjectForSelector(object, name);
+            if ([list isKindOfClass:[NSArray class]] && [list count] > 0) {
+                return [list count];
+            }
+        }
+    }
+    return 0;
+}
+
+// Polls and other interactive cards keep their size; only link-style cards shrink.
+static BOOL NFBIsPreviewCard(id viewModel) {
+    id card = NFBObjectForSelector(NFBStatusOf(viewModel), @"cardData");
+    NSString* name = NFBObjectForSelector(card, @"name");
+    if (![name isKindOfClass:[NSString class]]) {
+        return NO;
+    }
+    return [name containsString:@"summary"] || [name containsString:@"player"] ||
+           [name containsString:@"website"] || [name containsString:@"link"];
 }
 
 %hook T1StandardStatusAttachmentViewAdapter
@@ -39,19 +86,38 @@ static BOOL NFBCompactMedia(void) {
                                               width:(CGFloat)width
                                      attachmentType:(NSUInteger)attachmentType {
     CGSize size = %orig;
+    gSizeCalls++;
+    gLastViewModelClass = NSStringFromClass([viewModel class]);
     if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
         return size;
     }
+    if (NFBMediaCount(viewModel) > 1) {
+        gStrips++;
+        return CGSizeMake(size.width, MIN(size.height, kThumbSide));
+    }
+    gSquares++;
     CGFloat side = MIN(kThumbSide, MIN(size.width, width));
     return CGSizeMake(side, side);
 }
 
-- (BOOL)_t1_shouldUseCarouselForViewModel:(id)viewModel anatomyFeatures:(id)features {
-    return NFBCompactMedia() ? NO : %orig;
+- (id)_t1_cardViewLayoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics width:(CGFloat)width {
+    if (NFBCompactMedia() && width > kCardWidth && NFBIsPreviewCard(viewModel)) {
+        gCardCalls++;
+        return %orig(viewModel, layoutMetrics, kCardWidth);
+    }
+    return %orig;
 }
 
-- (BOOL)_t1_usesCarouselForAttachmentType:(NSUInteger)type viewModel:(id)viewModel {
-    return NFBCompactMedia() ? NO : %orig;
+- (id)_t1_unifiedCardViewLayoutStateForViewModel:(id)viewModel
+                                     unifiedCard:(id)unifiedCard
+                                shouldHideFooter:(BOOL)shouldHideFooter
+                                   layoutMetrics:(id)layoutMetrics
+                                           width:(CGFloat)width {
+    if (NFBCompactMedia() && width > kCardWidth) {
+        gCardCalls++;
+        return %orig(viewModel, unifiedCard, shouldHideFooter, layoutMetrics, kCardWidth);
+    }
+    return %orig;
 }
 
 // Layout states are cached per row; one made in the other mode is stale.
@@ -66,7 +132,7 @@ static BOOL NFBCompactMedia(void) {
 
 - (BOOL)isLayoutState:(id)state validForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
     NSNumber* mode = state ? objc_getAssociatedObject(state, kLayoutModeKey) : nil;
-    if (mode && mode.boolValue != NFBCompactMedia()) {
+    if ((mode ? mode.boolValue : NO) != NFBCompactMedia()) {
         return NO;
     }
     return %orig;
@@ -74,85 +140,80 @@ static BOOL NFBCompactMedia(void) {
 
 %end
 
-// The right end of the text column, in the status view's coordinates.
-static CGFloat NFBTextColumnMaxX(UIView* statusView) {
-    static Class bodyClass;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        bodyClass = NSClassFromString(@"T1StatusBodyTextView");
-    });
-    __block CGFloat maxX = 0;
-    if (bodyClass) {
-        EnumerateSubviewsRecursively(statusView, ^(UIView* view) {
-            if (maxX == 0 && [view isKindOfClass:bodyClass] && !view.hidden &&
-                CGRectGetWidth(view.bounds) > 0) {
-                maxX = CGRectGetMaxX([view convertRect:view.bounds toView:statusView]);
-            }
-        });
-    }
-    return maxX > 0 ? maxX : CGRectGetWidth(statusView.bounds) - 16;
+%hook _TtC21TweetMediaAttachments22MultiMediaCarouselView
+
++ (CGFloat)carouselHeightFor:(CGFloat)width
+                 heightRatio:(CGFloat)heightRatio
+           maxItemWidthRatio:(CGFloat)maxItemWidthRatio
+              maxHeightRatio:(CGFloat)maxHeightRatio
+                  mediaInfos:(id)mediaInfos {
+    CGFloat height = %orig;
+    gCarouselCalls++;
+    return NFBCompactMedia() ? MIN(height, kThumbSide) : height;
 }
 
-static void NFBAlignThumbnail(UIView* statusView) {
-    static Class mediaClass;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        mediaClass = NSClassFromString(@"T1StatusPhotoVideoForwardView");
-    });
-    if (!mediaClass) {
-        return;
-    }
-
-    __block UIView* media = nil;
-    EnumerateSubviewsRecursively(statusView, ^(UIView* view) {
-        if (!media && [view isKindOfClass:mediaClass]) {
-            media = view;
-        }
-    });
-    if (!media || media.hidden || CGRectGetWidth(media.bounds) > kThumbSide + 1) {
-        return;
-    }
-
-    // Climb past wrappers that are exactly the thumbnail's size, so the whole block moves.
-    UIView* block = media;
-    while (block.superview && block.superview != statusView &&
-           CGRectGetWidth(block.superview.bounds) <= CGRectGetWidth(block.frame) + 1) {
-        block = block.superview;
-    }
-    UIView* container = block.superview;
-    if (!container) {
-        return;
-    }
-
-    CGFloat rightEdge = CGRectGetWidth(container.bounds);
-    if (container == statusView) {
-        rightEdge = NFBTextColumnMaxX(statusView);
-    }
-    CGRect frame = block.frame;
-    CGFloat x = MAX(0, rightEdge - CGRectGetWidth(frame));
-    if (fabs(frame.origin.x - x) > 0.5) {
-        frame.origin.x = x;
-        block.frame = frame;
-    }
-}
-
-%hook T1StandardStatusView
-
-- (void)layoutSubviews {
-    %orig;
-    if (NFBCompactMedia()) {
-        NFBAlignThumbnail((UIView*)self);
-    }
++ (CGFloat)carouselHeightFor:(CGFloat)width
+                 heightRatio:(CGFloat)heightRatio
+           maxItemWidthRatio:(CGFloat)maxItemWidthRatio
+              maxHeightRatio:(CGFloat)maxHeightRatio
+            itemAspectRatios:(id)ratios {
+    CGFloat height = %orig;
+    gCarouselCalls++;
+    return NFBCompactMedia() ? MIN(height, kThumbSide) : height;
 }
 
 %end
+
+// MARK: Mode changes
+
+static void NFBReloadTimelines(UIView* view) {
+    if ([view isKindOfClass:[UITableView class]] && view.window) {
+        [(UITableView*)view reloadData];
+        return;
+    }
+    for (UIView* sub in view.subviews) {
+        NFBReloadTimelines(sub);
+    }
+}
+
+static void NFBWatchMode(void) {
+    static BOOL lastMode;
+    lastMode = NFBCompactMedia();
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSUserDefaultsDidChangeNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* note) {
+                    BOOL mode = NFBCompactMedia();
+                    if (mode == lastMode) {
+                        return;
+                    }
+                    lastMode = mode;
+                    for (UIWindow* window in UIApplication.sharedApplication.windows) {
+                        NFBReloadTimelines(window);
+                    }
+                }];
+}
+
+// Read by Hooks/DebugDump.x.
+NSString* NFBCompactMediaDebugText(void) {
+    return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
+                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld lastViewModel=%@",
+                                      NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
+                                      [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
+                                      (long)gSquares, (long)gStrips, (long)gCarouselCalls,
+                                      (long)gCardCalls, gLastViewModelClass ?: @"-"];
+}
 
 // MARK: - Leftovers of the AI blur
 // Builds before 7.3.76 compiled the two NSFW models into Caches on first use
 // (nfb_nsfw5.mlmodelc, nfb_anime1.mlmodelc, roughly the size of the models) and kept
 // a few settings. An app update doesn't clear Caches, so remove them once, off the
-// main thread, a little after launch.
+// main thread, a little after launch. 7.3.78 also drops the double-tap-to-like setting.
 %ctor {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NFBWatchMode();
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
                    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                        NSFileManager* fm = [NSFileManager defaultManager];
@@ -166,7 +227,8 @@ static void NFBAlignThumbnail(UIView* statusView) {
                        }
                        NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
                        for (NSString* key in @[ @"nsfw_ai_blur", @"nsfw_ai_threshold",
-                                                 @"nsfw_anime_threshold", @"nfb_nsfw_blur_before" ]) {
+                                                 @"nsfw_anime_threshold", @"nfb_nsfw_blur_before",
+                                                 @"kemo_double_tap_like" ]) {
                            if ([defaults objectForKey:key]) {
                                [defaults removeObjectForKey:key];
                            }

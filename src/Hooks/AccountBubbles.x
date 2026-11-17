@@ -99,6 +99,10 @@
 //  past the left end: pulling the row on past the first account resists, shows
 //  the next one faintly, then pops them all in with a click (this visit only).
 //  Opening knocks firmly, then lands softly.
+//
+//  7.3.76: pulling the hidden accounts out takes a longer pull (72pt of
+//  stretch) and shows nothing until they pop, with clicks growing firmer
+//  during the pull; they then spring in from a dot with a bouncy overshoot.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -2048,7 +2052,7 @@ static UIImpactFeedbackGenerator* DockOpenHaptic(void) {
 }
 
 // Points the row must stretch past its first account to pull the hidden ones out.
-static const CGFloat kDockRevealStretch = 52.0;
+static const CGFloat kDockRevealStretch = 72.0;
 
 @interface NFBAccountDock : UIView
 @property (nonatomic, weak) UIWindow* hostWindow;
@@ -2080,6 +2084,7 @@ static const CGFloat kDockRevealStretch = 52.0;
 // is pulled hard past its first account; then they pop in for this visit only.
 @property (nonatomic, assign) NSInteger hiddenCount;
 @property (nonatomic, assign) BOOL revealed;
+@property (nonatomic, assign) NSInteger pullStep;
 // The lifted screen's shadow, drawn on the drawer underneath (the screen
 // itself clips to its rounded corners, so it cannot carry one).
 @property (nonatomic, strong) UIView* cardShadow;
@@ -2572,17 +2577,23 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 }
 
 // While the row is pulled past its first account it resists (the scroll
-// view's own stretch), and the nearest hidden account shows faintly, growing
-// with the pull, so it is clear something is about to come out.
+// view's own stretch) and nothing shows yet; only light clicks that grow
+// firmer as the pull builds, so the pop at the end lands as a surprise.
 - (void)showPull:(CGFloat)progress {
-    NFBAccountBubble* next = self.hiddenCount > 0 ? self.bubbles[self.hiddenCount - 1] : nil;
-    if (!next || self.revealed) {
+    if (self.revealed) {
         return;
     }
-    progress = MAX(0.0, MIN(1.0, progress));
-    next.alpha = 0.45 * progress;
-    CGFloat scale = 0.3 + 0.35 * progress;
-    next.transform = CGAffineTransformMakeScale(scale, scale);
+    NSInteger step = (NSInteger)floor(MAX(0.0, MIN(0.99, progress)) * 4.0);
+    if (step == self.pullStep) {
+        return;
+    }
+    BOOL rising = step > self.pullStep;
+    self.pullStep = step;
+    if (rising && step > 0 && !NSProcessInfo.processInfo.isLowPowerModeEnabled) {
+        [self prepareClicks];
+        [self.fineClick impactOccurredWithIntensity:0.25 + 0.15 * step];
+        [self.fineClick prepare];
+    }
 }
 
 // Pulled far enough: the hidden ones pop in from the left.
@@ -2601,18 +2612,24 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
             [after impactOccurredWithIntensity:0.8];
         });
     }
+    // Pop: each one appears at once from a dot, overshoots and wobbles into size.
     for (NSInteger i = self.hiddenCount - 1, step = 0; i >= 0; i--, step++) {
         NFBAccountBubble* bubble = self.bubbles[i];
-        if (step > 0) {
-            bubble.transform = CGAffineTransformMakeScale(0.3, 0.3);
-        }
-        [UIView animateWithDuration:0.5
-            delay:step * 0.05
-            usingSpringWithDamping:0.5
-            initialSpringVelocity:1.0
-            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+        bubble.alpha = 0;
+        bubble.transform = CGAffineTransformMakeScale(0.15, 0.15);
+        [UIView animateWithDuration:0.06
+            delay:step * 0.04
+            options:UIViewAnimationOptionAllowUserInteraction
             animations:^{
                 bubble.alpha = 1;
+            }
+            completion:nil];
+        [UIView animateWithDuration:0.55
+            delay:step * 0.04
+            usingSpringWithDamping:0.42
+            initialSpringVelocity:1.6
+            options:UIViewAnimationOptionAllowUserInteraction
+            animations:^{
                 bubble.transform = CGAffineTransformIdentity;
             }
             completion:^(BOOL finished) {
@@ -2805,8 +2822,8 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     self.settleGeneration++;
     if (!self.revealed && self.hiddenCount > 0) {
         // How far the row has stretched past its first account. The stretch
-        // gives way less and less, so 52 points of it is about 120 points of
-        // thumb travel: one ordinary swipe, but more than a slip.
+        // gives way less and less, so 72 points of it is about 160 points of
+        // thumb travel: a long swipe, but still one.
         CGFloat stretch = self.hiddenCount * self.pitch - scrollView.contentOffset.x;
         if (scrollView.isTracking && stretch >= kDockRevealStretch) {
             [self revealHidden];

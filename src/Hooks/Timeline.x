@@ -1349,9 +1349,27 @@ static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* 
     KeepRestoreSoon(0.35);
 }
 
+// Search inside the loaded home timeline (LocalSearch.x).
+extern NSArray* NFBLocalSearchHold(TFNItemsDataViewController* controller, NSArray* sections);
+extern void NFBLocalSearchAttach(TFNItemsDataViewController* controller);
+
+NSArray* NFBFilteredTimelineSections(TFNItemsDataViewController* controller, NSArray* sections) {
+    return FilteredTimelineSections(controller, sections);
+}
+
 %hook TFNItemsDataViewController
 
 - (void)setSections:(NSArray*)sections restoreScrollPosition:(BOOL)restoreScrollPosition {
+    // Search results are showing in this list, or the search is putting a list in
+    // place: nothing else is applied to it.
+    NSArray* held = NFBLocalSearchHold(self, sections);
+    if (held) {
+        %orig(held, held == sections ? NO : YES);
+        return;
+    }
+    if ([BHTSettings boolForKey:@"kemo_local_search"] && IsHomeTimeline(self)) {
+        NFBLocalSearchAttach(self);
+    }
     // Home timeline only: ask for the scroll position to be restored, so a refresh
     // leaves you where you were instead of jumping to the newest tweets.
     NSArray* filtered = FilteredTimelineSections(self, sections);
@@ -1372,6 +1390,12 @@ static void KeepPositionAround(TFNItemsDataViewController* controller, NSArray* 
     reconfigureItemIdentifiers:(NSArray*)identifiers
               withRowAnimation:(long long)animation
                     completion:(id)completion {
+    NSArray* held = NFBLocalSearchHold(self, sections);
+    if (held) {
+        // Rows that are not in the results cannot be reconfigured.
+        %orig(held, held == sections ? identifiers : @[], animation, completion);
+        return;
+    }
     %orig(FilteredTimelineSections(self, sections), identifiers, animation, completion);
 }
 

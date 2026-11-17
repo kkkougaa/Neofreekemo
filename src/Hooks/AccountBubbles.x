@@ -89,6 +89,10 @@
 //
 //  7.3.55: when the account in use is one left out of the dock, it is put
 //  first on the left for as long as it is in use.
+//
+//  7.3.74: the dock opens by dragging the tab bar up instead of holding the
+//  Home tab. Only a mostly straight-up drag of 36pt (or a quick flick of 16pt)
+//  counts, so taps on the tabs are left alone.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -106,7 +110,7 @@ static BOOL BubblesOn(void) {
     return [BHTSettings boolForKey:@"kemo_account_bubbles"];
 }
 
-// The dock from a long press on the Home tab.
+// The dock from a swipe up on the tab bar.
 static BOOL DockOn(void) {
     return [BHTSettings boolForKey:@"kemo_account_dock"];
 }
@@ -1991,7 +1995,7 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
     }
 }
 
-// MARK: - Account dock (long press on the Home tab)
+// MARK: - Account dock (swipe up on the tab bar)
 
 // The whole screen slides up like a card, its bottom corners rounded, and a
 // black dock underneath shows every account in a row. Every window subview
@@ -2814,42 +2818,56 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 
 @end
 
-// MARK: - Long press on the Home tab
+// MARK: - Swipe up on the tab bar
 
-// Sits on the tab bar (not the Home button itself, whose touches X may route
-// elsewhere) and only starts when the finger is on the Home button.
-@interface NFBDockPress : UILongPressGestureRecognizer
-@property (nonatomic, weak) UIView* home;
+// Sits on the tab bar and starts anywhere on it, but only for a drag that goes
+// mostly straight up. It opens once the finger has travelled far enough, or on
+// a quick flick, so a tap or a slightly crooked tap on a tab never opens it.
+static const CGFloat kDockSwipeDistance = 36.0;   // points up to open while dragging
+static const CGFloat kDockFlickDistance = 16.0;   // a flick needs at least this much...
+static const CGFloat kDockFlickSpeed = 700.0;     // ...at this speed (points per second)
+
+@interface NFBDockSwipe : UIPanGestureRecognizer
+@property (nonatomic, weak) UIView* bar;
+@property (nonatomic) BOOL opened;
 @end
 
-@implementation NFBDockPress
+@implementation NFBDockSwipe
 @end
 
-@interface NFBDockPressHandler : NSObject <UIGestureRecognizerDelegate>
+@interface NFBDockSwipeHandler : NSObject <UIGestureRecognizerDelegate>
 + (instancetype)shared;
 @end
 
-@implementation NFBDockPressHandler
+@implementation NFBDockSwipeHandler
 
 + (instancetype)shared {
-    static NFBDockPressHandler* handler;
+    static NFBDockSwipeHandler* handler;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        handler = [NFBDockPressHandler new];
+        handler = [NFBDockSwipeHandler new];
     });
     return handler;
 }
 
+static BOOL MostlyUp(CGPoint move) {
+    return move.y < 0 && fabs(move.y) > fabs(move.x) * 1.5;
+}
+
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer*)gesture {
-    if (![gesture isKindOfClass:[NFBDockPress class]] || !DockOn() || gLiveDock || FanIsUp()) {
+    if (![gesture isKindOfClass:[NFBDockSwipe class]] || !DockOn() || gLiveDock || FanIsUp()) {
         return NO;
     }
-    UIView* home = ((NFBDockPress*)gesture).home;
-    if (!home.window || home.hidden || home.alpha < 0.01) {
+    NFBDockSwipe* swipe = (NFBDockSwipe*)gesture;
+    UIView* bar = swipe.bar ?: swipe.view;
+    if (!bar.window || bar.hidden || bar.alpha < 0.01) {
         return NO;
     }
-    CGPoint point = [gesture locationInView:home];
-    if (!CGRectContainsPoint(CGRectInset(home.bounds, -6, -6), point)) {
+    CGPoint move = [swipe translationInView:swipe.view];
+    if (CGPointEqualToPoint(move, CGPointZero)) {
+        move = [swipe velocityInView:swipe.view];
+    }
+    if (!MostlyUp(move)) {
         return NO;
     }
     return TwitterAccounts().count >= 2;
@@ -2860,7 +2878,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     return YES;
 }
 
-// Once the dock is up, X's own tap on Home must not also fire when the finger
+// Once the dock is up, X's own tap on a tab must not also fire when the finger
 // lifts: switching the others off and on again cancels them.
 static void CancelOtherGestures(UIGestureRecognizer* mine) {
     UIView* view = mine.view;
@@ -2873,81 +2891,57 @@ static void CancelOtherGestures(UIGestureRecognizer* mine) {
         }
         view = view.superview;
     }
-    UIView* home = [mine isKindOfClass:[NFBDockPress class]] ? ((NFBDockPress*)mine).home : nil;
-    for (UIGestureRecognizer* other in home.gestureRecognizers) {
-        if (other.enabled) {
-            other.enabled = NO;
-            other.enabled = YES;
-        }
+}
+
+- (void)openFor:(NFBDockSwipe*)swipe {
+    swipe.opened = YES;
+    if ([NFBAccountDock openInWindow:swipe.view.window]) {
+        CancelOtherGestures(swipe);
     }
 }
 
-- (void)pressed:(NFBDockPress*)press {
-    // The press only lifts the screen; an account is always picked with a tap.
-    if (press.state == UIGestureRecognizerStateBegan && [NFBAccountDock openInWindow:press.view.window]) {
-        CancelOtherGestures(press);
+- (void)swiped:(NFBDockSwipe*)swipe {
+    CGPoint move = [swipe translationInView:swipe.view];
+    switch (swipe.state) {
+        case UIGestureRecognizerStateBegan:
+            swipe.opened = NO;
+            break;
+        case UIGestureRecognizerStateChanged:
+            if (!swipe.opened && -move.y >= kDockSwipeDistance && MostlyUp(move)) {
+                [self openFor:swipe];
+            }
+            break;
+        case UIGestureRecognizerStateEnded: {
+            CGPoint speed = [swipe velocityInView:swipe.view];
+            if (!swipe.opened && -move.y >= kDockFlickDistance && -speed.y >= kDockFlickSpeed &&
+                MostlyUp(move)) {
+                [self openFor:swipe];
+            }
+            break;
+        }
+        default:
+            break;
     }
 }
 
 @end
 
-static const void* kDockPressKey = &kDockPressKey;
+static const void* kDockSwipeKey = &kDockSwipeKey;
 
-static void AttachDockPress(UIView* host, UIView* home) {
-    if (!host || !home) {
+static void AttachDockSwipe(UIView* bar) {
+    if (!bar) {
         return;
     }
-    NFBDockPress* press = objc_getAssociatedObject(host, kDockPressKey);
-    if (!press) {
-        press = [[NFBDockPress alloc] initWithTarget:[NFBDockPressHandler shared] action:@selector(pressed:)];
-        press.minimumPressDuration = 0.35;
-        press.allowableMovement = 16;
-        press.cancelsTouchesInView = YES;
-        press.delegate = [NFBDockPressHandler shared];
-        [host addGestureRecognizer:press];
-        objc_setAssociatedObject(host, kDockPressKey, press, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NFBDockSwipe* swipe = objc_getAssociatedObject(bar, kDockSwipeKey);
+    if (!swipe) {
+        swipe = [[NFBDockSwipe alloc] initWithTarget:[NFBDockSwipeHandler shared] action:@selector(swiped:)];
+        swipe.maximumNumberOfTouches = 1;
+        swipe.cancelsTouchesInView = YES;
+        swipe.delegate = [NFBDockSwipeHandler shared];
+        [bar addGestureRecognizer:swipe];
+        objc_setAssociatedObject(bar, kDockSwipeKey, swipe, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    press.home = home;
-}
-
-static void CollectViews(UIView* view, Class itemClass, NSMutableArray<UIView*>* items, NSInteger depth) {
-    if (depth > 12) {
-        return;
-    }
-    for (UIView* subview in view.subviews) {
-        if ([subview isKindOfClass:itemClass]) {
-            [items addObject:subview];
-        } else {
-            CollectViews(subview, itemClass, items, depth + 1);
-        }
-    }
-}
-
-// The newer tab bar: Home is pinned first, so it is the leading button.
-static void AttachDockPressToGlassBar(UIView* bar) {
-    Class itemClass = NSClassFromString(@"_TtC11XNavigation14TabBarItemView");
-    if (!itemClass || !bar.window) {
-        return;
-    }
-    NSMutableArray<UIView*>* items = [NSMutableArray array];
-    CollectViews(bar, itemClass, items, 0);
-    if (items.count == 0) {
-        return;
-    }
-    BOOL rtl = bar.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-    UIView* home = nil;
-    CGFloat edge = 0;
-    for (UIView* item in items) {
-        if (item.hidden || CGRectGetWidth(item.bounds) < 1) {
-            continue;
-        }
-        CGFloat x = CGRectGetMidX([item convertRect:item.bounds toView:bar]);
-        if (!home || (rtl ? x > edge : x < edge)) {
-            home = item;
-            edge = x;
-        }
-    }
-    AttachDockPress(bar, home);
+    swipe.bar = bar;
 }
 
 %hook T1TabView
@@ -2955,7 +2949,7 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 - (void)layoutSubviews {
     %orig;
     if (DockOn() && [self.scribePage isEqualToString:CustomTabBarHomePageID]) {
-        AttachDockPress(self.superview, (UIView*)self);
+        AttachDockSwipe(self.superview);
     }
 }
 
@@ -2965,8 +2959,8 @@ static void AttachDockPressToGlassBar(UIView* bar) {
 
 - (void)layoutSubviews {
     %orig;
-    if (DockOn()) {
-        AttachDockPressToGlassBar((UIView*)self);
+    if (DockOn() && ((UIView*)self).window) {
+        AttachDockSwipe((UIView*)self);
     }
 }
 

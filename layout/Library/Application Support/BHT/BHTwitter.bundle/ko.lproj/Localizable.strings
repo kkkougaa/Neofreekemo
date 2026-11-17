@@ -521,7 +521,7 @@
 "KEMO_ACCOUNT_BUBBLES_TITLE" = "계정 방울";
 "KEMO_ACCOUNT_BUBBLES_DETAIL" = "왼쪽 위 프로필 사진을 길게 누른 뒤 계정 위로 끌어 놓거나 눌러서 전환합니다.";
 "KEMO_ACCOUNT_DOCK_TITLE" = "계정 도크";
-"KEMO_ACCOUNT_DOCK_DETAIL" = "홈 탭을 길게 누르면 화면이 올라가고, 아래 줄에서 계정을 눌러 전환합니다.";
+"KEMO_ACCOUNT_DOCK_DETAIL" = "하단 탭 바를 위로 끌어올리면 화면이 올라가고, 아래 줄에서 계정을 눌러 전환합니다.";
 "SETTINGS_CODE_EXPORT_TITLE" = "설정 코드 복사";
 "SETTINGS_CODE_IMPORT_TITLE" = "설정 코드 붙여넣기";
 "SETTINGS_CODE_COPIED" = "클립보드에 복사했어요. 다른 기기에서는 코드를 스캔하거나 붙여넣으세요.";

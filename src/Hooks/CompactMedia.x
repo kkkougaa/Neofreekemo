@@ -179,19 +179,28 @@ static void NFBReloadTimelines(UIView* view) {
 static void NFBWatchMode(void) {
     static BOOL lastMode;
     lastMode = NFBCompactMedia();
+    // No queue here: with the main queue, a background thread that changes a default
+    // waits for the main thread to run this block, and X writes defaults from
+    // background threads during launch while the main thread waits on them (7.3.79
+    // hung on the splash screen). Check on the posting thread, hop over only on a change.
     [[NSNotificationCenter defaultCenter]
         addObserverForName:NSUserDefaultsDidChangeNotification
                     object:nil
-                     queue:[NSOperationQueue mainQueue]
+                     queue:nil
                 usingBlock:^(NSNotification* note) {
-                    BOOL mode = NFBCompactMedia();
-                    if (mode == lastMode) {
+                    if (NFBCompactMedia() == lastMode) {
                         return;
                     }
-                    lastMode = mode;
-                    for (UIWindow* window in UIApplication.sharedApplication.windows) {
-                        NFBReloadTimelines(window);
-                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        BOOL mode = NFBCompactMedia();
+                        if (mode == lastMode) {
+                            return;
+                        }
+                        lastMode = mode;
+                        for (UIWindow* window in UIApplication.sharedApplication.windows) {
+                            NFBReloadTimelines(window);
+                        }
+                    });
                 }];
 }
 

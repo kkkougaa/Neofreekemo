@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.74",
+      "subtitle": "NeoFreeBird version 7.3.75",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.75",
+          "buildVersion": "75",
+          "date": "2026-11-17T07:59:40Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.75/NeoFreeBird-Twitter-sideloaded_7.3.75_12.44.ipa",
+          "size": 272527357,
+          "minOSVersion": "15.0",
+          "localizedDescription": "계정 도크가 사이드 서랍처럼 배경색에 그림자 진 모습으로 바뀜. 도크에서 숨긴 계정은 줄을 왼쪽 끝 너머로 당기면 튀어나옴. 열릴 때 햅틱 개선."
+        },
         {
           "version": "7.3.74",
           "buildVersion": "74",

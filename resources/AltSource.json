@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.81",
+      "subtitle": "NeoFreeBird version 7.3.82",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.82",
+          "buildVersion": "82",
+          "date": "2026-11-17T09:47:08Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.82/NeoFreeBird-Twitter-sideloaded_7.3.82_12.44.ipa",
+          "size": 253470220,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 타임라인을 새로고침보다 더 당기면 검색창이 열리고, 엔터를 누르면 불러온 트윗 중 그 단어가 들어간 것만 보여줌. 닫으면 원래 타임라인으로 복귀."
+        },
         {
           "version": "7.3.81",
           "buildVersion": "81",

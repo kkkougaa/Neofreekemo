@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.82",
+      "subtitle": "NeoFreeBird version 7.3.83",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.83",
+          "buildVersion": "83",
+          "date": "2026-11-18T05:41:11Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.83/NeoFreeBird-Twitter-sideloaded_7.3.83_12.44.ipa",
+          "size": 253471243,
+          "minOSVersion": "15.0",
+          "localizedDescription": "하단바 홈을 꾹 누르면 계정 목록 대신 하단 독이 열림. 숨긴 계정을 당겨서 꺼낼 때 줄이 튕겨 돌아가지 않고 손가락을 그대로 따라감."
+        },
         {
           "version": "7.3.82",
           "buildVersion": "82",

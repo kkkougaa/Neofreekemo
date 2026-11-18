@@ -32,7 +32,7 @@ static const CGFloat kCardWidth = 190.0;
 static const void* kLayoutModeKey = &kLayoutModeKey;
 
 // Probe for the debug dump: how often each path ran, and the last view model class.
-static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0, gAdaptiveOff = 0;
+static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0, gAdaptiveOff = 0, gVertical = 0, gRightAligned = 0;
 static NSString* gLastViewModelClass = nil;
 // Where X lays a row out, for working out how to put the media beside the text.
 // Class pointers, not strings: these are set while rows are laid out, which can be
@@ -123,6 +123,18 @@ static BOOL NFBIsPreviewCard(id viewModel) {
     return CGSizeMake(side, side);
 }
 
+// Tall single photos (7.3.94: still 328 x 438 with the adaptive layout off) take
+// their size from this, after the size method above has run.
+- (CGSize)_t1_verticalPhotoSizeForAspectRatio:(CGFloat)ratio width:(CGFloat)width {
+    CGSize size = %orig;
+    if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
+        return size;
+    }
+    gVertical++;
+    CGFloat side = MIN(kThumbSide, MIN(size.width, width));
+    return CGSizeMake(side, side);
+}
+
 - (id)_t1_cardViewLayoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics width:(CGFloat)width {
     if (NFBCompactMedia() && width > kCardWidth && NFBIsPreviewCard(viewModel)) {
         gCardCalls++;
@@ -160,6 +172,43 @@ static BOOL NFBIsPreviewCard(id viewModel) {
         return NO;
     }
     return %orig;
+}
+
+%end
+
+// A single small photo sits at the right end of the tweet's text column
+// instead of the left. Only its x changes, inside its own container, every
+// time X lays the container out.
+@interface T1StatusViewAttachmentContainerView : UIView
+@property (readonly, nonatomic) UIView* photoVideoView;
+@property (readonly, nonatomic) UIView* attachmentView;
+@end
+
+%hook T1StatusViewAttachmentContainerView
+
+- (void)layoutSubviews {
+    %orig;
+    if (!NFBCompactMedia()) {
+        return;
+    }
+    T1StatusViewAttachmentContainerView* container = (T1StatusViewAttachmentContainerView*)self;
+    UIView* photo = [container respondsToSelector:@selector(photoVideoView)] ? container.photoVideoView : nil;
+    if (!photo || photo.superview != container || photo.hidden) {
+        return;
+    }
+    CGRect frame = photo.frame;
+    CGFloat width = CGRectGetWidth(container.bounds);
+    // Only the small square (the strip of several photos keeps its place).
+    if (CGRectGetWidth(frame) > kThumbSide + 0.5 || fabs(CGRectGetWidth(frame) - CGRectGetHeight(frame)) > 1 ||
+        width < CGRectGetWidth(frame) + 8) {
+        return;
+    }
+    CGFloat x = width - CGRectGetWidth(frame);
+    if (fabs(CGRectGetMinX(frame) - x) > 0.5) {
+        frame.origin.x = x;
+        photo.frame = frame;
+        gRightAligned++;
+    }
 }
 
 %end
@@ -231,11 +280,11 @@ static void NFBWatchMode(void) {
 // Read by Hooks/DebugDump.x.
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
-                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld lastViewModel=%@",
+                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld right=%ld lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
-                                      (long)gCardCalls, (long)gAdaptiveOff, gLastViewModelClass ?: @"-"];
+                                      (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gRightAligned, gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

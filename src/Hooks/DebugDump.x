@@ -552,6 +552,23 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
         if (author) {
             DumpAuthorFonts(author, 0, out, &lines);
         }
+        // What sits at the top right of the tweet (the "..." button), and where.
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:status];
+        NSUInteger budget = 300, shown = 0;
+        CGFloat width = CGRectGetWidth(status.bounds);
+        while (queue.count > 0 && budget-- > 0 && shown < 6) {
+            UIView* view = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            CGRect frame = [view convertRect:view.bounds toView:status];
+            if (view != status && CGRectGetMinX(frame) > width * 0.75 && CGRectGetMinY(frame) < 50 &&
+                CGRectGetWidth(frame) > 4 && CGRectGetWidth(frame) < 60) {
+                [out appendFormat:@"   top right: %@ %@ hidden=%d alpha=%.2f in %@%c", NSStringFromClass(view.class),
+                                  NSStringFromCGRect(frame), view.hidden, view.alpha,
+                                  NSStringFromClass(view.superview.class), 10];
+                shown++;
+            }
+            [queue addObjectsFromArray:view.subviews];
+        }
     }
     // Where X sets the width of a row's text column (for media beside the text).
     // 7.3.87's paste stopped inside the adapter, so the layout classes go first.

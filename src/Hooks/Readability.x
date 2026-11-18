@@ -93,17 +93,16 @@ static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gF
                  gPills = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
 static NSString* gPillLog = @"(no pull yet)";
-static NSString* gPeopleLog = @"(no people tap yet)";
 
 NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
-                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@ people: %@",
+                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
                                       (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog,
-                                      gPillLog, gPeopleLog];
+                                      gPillLog];
 }
 
 // MARK: Which list a cell is in
@@ -312,6 +311,8 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, assign) NSInteger thread; // last thread flags, to notice changes
 @property (nonatomic, strong) NSHashTable<UIView*>* hiddenLines;
 @property (nonatomic, strong) NSMapTable<UIView*, UIColor*>* clearedBacking;
+@property (nonatomic, strong) NFBCardBackground* highlight; // the card-shaped tap highlight
+@property (nonatomic, strong) UIView* oldSelectedBackgroundView;
 @end
 
 @implementation NFBCardMemory
@@ -545,6 +546,9 @@ static void RemoveCard(UITableViewCell* cell, NFBCardMemory* memory) {
     SetThreadLinesHidden(cell, memory, NO);
     SetBackingCleared(cell, memory, NO);
     memory.background.threadLayer.path = nil;
+    if (cell.selectedBackgroundView == memory.highlight) {
+        cell.selectedBackgroundView = memory.oldSelectedBackgroundView;
+    }
 }
 
 // MARK: Threads
@@ -802,6 +806,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         memory.oldBackgroundView = cell.backgroundView;
         memory.oldCellColor = cell.backgroundColor;
         memory.oldContentColor = cell.contentView.backgroundColor;
+        memory.oldSelectedBackgroundView = cell.selectedBackgroundView;
         if (!memory.background) {
             memory.background = [[NFBCardBackground alloc] initWithFrame:cell.bounds];
         }
@@ -813,6 +818,10 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         UIColor* paper = NFBCardPaperColor(gStyle, memory.xPaper, CurrentAccentColor());
         UIColor* page = NFBCardPageColor(paper);
         [memory.background setPaper:paper page:page];
+        if (!memory.highlight) {
+            memory.highlight = [[NFBCardBackground alloc] initWithFrame:cell.bounds];
+        }
+        [memory.highlight setPaper:NFBCardBlend(paper, [UIColor labelColor], 0.07) page:page];
         NSNumber* tableStamp = objc_getAssociatedObject(table, kTablePageStampKey);
         if (tableStamp.integerValue != gStamp || !tableStamp) {
             SetTablePage(table, page);
@@ -852,6 +861,14 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         background.nested = nested;
         background.nestOpenTop = (flags & NFBThreadNestUp) != 0;
         [background setNeedsLayout];
+    }
+    // Tapping a row shows a highlight the shape of its card, not a square.
+    NFBCardBackground* highlight = memory.highlight;
+    highlight.openTop = background.openTop;
+    highlight.openBottom = background.openBottom;
+    [highlight setNeedsLayout];
+    if (highlight && cell.selectedBackgroundView != highlight) {
+        cell.selectedBackgroundView = highlight;
     }
     SetThreadLinesHidden(cell, memory, flags != 0);
     if (memory.thread != flags) {
@@ -1229,249 +1246,33 @@ static void AttachReplySwipe(UITableViewCell* cell) {
 }
 
 
-// MARK: Who is behind a notification
-// A notification that gathers several people ("A and 6 others liked") shows a
-// row of their avatars (TFNAvatarHeaderView, 7.3.90 dump). Tapping that row
-// opens a sheet listing them: avatar and name, and their profile on a tap
-// when X tells the handle. A small chevron after the avatars says it opens.
-
-@interface NFBPerson : NSObject
-@property (nonatomic, strong) UIImage* image;
-@property (nonatomic, copy) NSString* name;
-@property (nonatomic, copy) NSString* handle;
-@end
-
-@implementation NFBPerson
-@end
-
-
-static NSString* StringFrom(id object, NSArray<NSString*>* names) {
-    for (NSString* name in names) {
-        SEL selector = NSSelectorFromString(name);
-        if ([object respondsToSelector:selector]) {
-            id value = ((id (*)(id, SEL))objc_msgSend)(object, selector);
-            if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
-                return value;
-            }
-        }
-    }
-    return nil;
-}
-
-// What the avatar knows about its person, looked for in a few likely places.
-static void FillPerson(NFBPerson* person, UIView* avatar) {
-    NSArray* nameKeys = @[ @"name", @"fullName", @"displayName" ];
-    NSArray* handleKeys = @[ @"screenName", @"username", @"userName" ];
-    NSMutableArray* owners = [NSMutableArray arrayWithObject:avatar];
-    for (UIView* sub in avatar.subviews) {
-        [owners addObject:sub];
-    }
-    for (id owner in [owners copy]) {
-        for (NSString* key in @[ @"user", @"twitterUser", @"viewModel", @"avatarViewModel", @"userViewModel" ]) {
-            SEL selector = NSSelectorFromString(key);
-            if ([owner respondsToSelector:selector]) {
-                id value = ((id (*)(id, SEL))objc_msgSend)(owner, selector);
-                if (value) {
-                    [owners addObject:value];
-                }
-            }
-        }
-    }
-    for (id owner in owners) {
-        person.name = person.name ?: StringFrom(owner, nameKeys);
-        person.handle = person.handle ?: StringFrom(owner, handleKeys);
-    }
-    if (!person.name) {
-        for (UIView* view in @[ avatar ]) {
-            NSString* label = view.accessibilityLabel;
-            if (label.length == 0) {
-                for (UIView* sub in view.subviews) {
-                    label = sub.accessibilityLabel.length ? sub.accessibilityLabel : label;
-                }
-            }
-            person.name = label.length ? label : nil;
-        }
-    }
-    // The face itself, as drawn.
-    UIView* face = FindView(avatar, @"AvatarImageView", 0) ?: avatar;
-    if (CGRectGetWidth(face.bounds) > 4) {
-        UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:face.bounds.size];
-        person.image = [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
-            [face.layer renderInContext:context.CGContext];
-        }];
-    }
-}
-
-static NSArray<UIView*>* PeopleAvatars(UITableViewCell* cell) {
-    NSMutableArray<UIView*>* found = [NSMutableArray array];
-    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:cell.contentView];
-    NSUInteger budget = 600;
-    while (queue.count > 0 && budget-- > 0) {
-        UIView* view = queue.firstObject;
-        [queue removeObjectAtIndex:0];
-        if ([NSStringFromClass(view.class) isEqualToString:@"TFNAvatarHeaderView"]) {
-            if (!view.hidden && CGRectGetWidth(view.bounds) > 12) {
-                [found addObject:view];
-            }
-            continue;
-        }
-        [queue addObjectsFromArray:view.subviews];
-    }
-    return found;
-}
-
-@interface NFBPeopleSheet : UITableViewController
-@property (nonatomic, copy) NSArray<NFBPerson*>* people;
-@property (nonatomic, copy) NSString* headline;
-@end
-
-@implementation NFBPeopleSheet
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = self.headline;
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"Person"];
-    self.tableView.rowHeight = 60;
-}
-
-- (NSInteger)tableView:(UITableView*)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.people.count;
-}
-
-- (UITableViewCell*)tableView:(UITableView*)tableView cellForRowAtIndexPath:(NSIndexPath*)indexPath {
-    UITableViewCell* cell = [tableView dequeueReusableCellWithIdentifier:@"Person" forIndexPath:indexPath];
-    NFBPerson* person = self.people[indexPath.row];
-    UIListContentConfiguration* content = [UIListContentConfiguration subtitleCellConfiguration];
-    content.text = person.name ?: [NSString stringWithFormat:@"%ld", (long)indexPath.row + 1];
-    content.secondaryText = person.handle ? [@"@" stringByAppendingString:person.handle] : nil;
-    content.secondaryTextProperties.color = [UIColor secondaryLabelColor];
-    content.image = person.image;
-    content.imageProperties.maximumSize = CGSizeMake(40, 40);
-    content.imageProperties.cornerRadius = 20;
-    cell.contentConfiguration = content;
-    cell.accessoryType = person.handle ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
-    cell.selectionStyle = person.handle ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-    return cell;
-}
-
-- (void)tableView:(UITableView*)tableView didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSString* handle = self.people[indexPath.row].handle;
-    if (!handle) {
-        return;
-    }
-    NSURL* url = [NSURL URLWithString:[NSString stringWithFormat:@"twitter://user?screen_name=%@",
-                                                                  [handle stringByAddingPercentEncodingWithAllowedCharacters:
-                                                                              NSCharacterSet.URLQueryAllowedCharacterSet]]];
-    [self dismissViewControllerAnimated:YES
-                             completion:^{
-                                 [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
-                             }];
-}
-
-@end
-
-@interface NFBPeopleButton : UIButton
-@property (nonatomic, weak) UITableViewCell* cell;
-@end
-
-@implementation NFBPeopleButton
-@end
-
-static const void* kPeopleButtonKey = &kPeopleButtonKey;
-
-static UIViewController* ControllerOf(UIView* view) {
-    for (UIResponder* responder = view; responder; responder = responder.nextResponder) {
-        if ([responder isKindOfClass:[UIViewController class]]) {
-            return (UIViewController*)responder;
-        }
-    }
-    return nil;
-}
-
-@interface NFBPeopleHandler : NSObject
-+ (void)open:(NFBPeopleButton*)button;
-@end
-
-@implementation NFBPeopleHandler
-
-+ (void)open:(NFBPeopleButton*)button {
-    UITableViewCell* cell = button.cell;
-    NSArray<UIView*>* avatars = cell ? PeopleAvatars(cell) : @[];
-    NSMutableArray<NFBPerson*>* people = [NSMutableArray array];
-    NSInteger named = 0, handles = 0;
-    for (UIView* avatar in avatars) {
-        NFBPerson* person = [NFBPerson new];
-        FillPerson(person, avatar);
-        named += person.name != nil;
-        handles += person.handle != nil;
-        [people addObject:person];
-    }
-    gPeopleLog = [NSString stringWithFormat:@"%lu avatars, %ld named, %ld handles, first avatar %@ label=%@",
-                                            (unsigned long)avatars.count, (long)named, (long)handles,
-                                            avatars.count ? NSStringFromClass(avatars.firstObject.class) : @"-",
-                                            avatars.firstObject.accessibilityLabel ?: @"nil"];
-    UIViewController* host = ControllerOf(cell);
-    if (people.count == 0 || !host) {
-        return;
-    }
-    NFBPeopleSheet* sheet = [[NFBPeopleSheet alloc] initWithStyle:UITableViewStyleInsetGrouped];
-    sheet.people = people;
-    // The notification's own first line ("A and 6 others liked your post").
-    UIView* text = FindView(cell.contentView, @"AttributedTextView", 0) ?: FindView(cell.contentView, @"Label", 0);
-    NSString* headline = text.accessibilityLabel;
-    if (headline.length == 0 && [text isKindOfClass:[UILabel class]]) {
-        headline = ((UILabel*)text).text;
-    }
-    sheet.headline = headline.length > 60 ? [[headline substringToIndex:60] stringByAppendingString:@"…"] : headline;
-    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:sheet];
-    nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    UISheetPresentationController* presentation = nav.sheetPresentationController;
-    presentation.detents = @[ UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent ];
-    presentation.prefersGrabberVisible = YES;
-    [host presentViewController:nav animated:YES completion:nil];
-}
-
-@end
-
-// Puts (or takes away) the tappable area over a notification's row of avatars.
-static void UpdatePeopleButton(UITableViewCell* cell, BOOL wanted) {
-    NFBPeopleButton* button = objc_getAssociatedObject(cell, kPeopleButtonKey);
-    NSArray<UIView*>* avatars = wanted ? PeopleAvatars(cell) : @[];
-    if (avatars.count < 2) {
-        button.hidden = YES;
-        return;
-    }
-    if (!button) {
-        button = [NFBPeopleButton buttonWithType:UIButtonTypeCustom];
-        button.cell = cell;
-        UIImageSymbolConfiguration* config = [UIImageSymbolConfiguration configurationWithPointSize:11
-                                                                                             weight:UIImageSymbolWeightSemibold];
-        [button setImage:[UIImage systemImageNamed:@"chevron.down" withConfiguration:config] forState:UIControlStateNormal];
-        button.tintColor = [UIColor secondaryLabelColor];
-        button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
-        button.accessibilityLabel = @"People";
-        [button addTarget:[NFBPeopleHandler class] action:@selector(open:) forControlEvents:UIControlEventTouchUpInside];
-        objc_setAssociatedObject(cell, kPeopleButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    CGRect area = CGRectNull;
-    for (UIView* avatar in avatars) {
-        area = CGRectUnion(area, [avatar convertRect:avatar.bounds toView:cell]);
-    }
-    area = CGRectInset(area, -4, -4);
-    area.size.width += 22; // room for the chevron
-    button.frame = area;
-    button.contentEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 4);
-    button.hidden = NO;
-    if (button.superview != cell) {
-        [cell addSubview:button];
-    }
-    [cell bringSubviewToFront:button];
-}
+// (7.3.94 opened a sheet listing who is behind a grouped notification from its
+// avatars; taken out again in 7.3.95 at the user's wish.)
 
 // MARK: Hooks
 
 %hook UITableViewCell
+
+// Coming back from a tweet, X unhighlights the row with an animation and
+// UIKit shows its separator and X its white backing meanwhile, without a
+// layout pass: square corners and a thin line flashed (7.3.94). Keep them off.
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
+    %orig;
+    NFBCardMemory* memory = objc_getAssociatedObject(self, kCardMemoryKey);
+    if (memory.active) {
+        SetDividersHidden((UITableViewCell*)self, YES);
+        SetBackingCleared((UITableViewCell*)self, memory, YES);
+    }
+}
+
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated {
+    %orig;
+    NFBCardMemory* memory = objc_getAssociatedObject(self, kCardMemoryKey);
+    if (memory.active) {
+        SetDividersHidden((UITableViewCell*)self, YES);
+        SetBackingCleared((UITableViewCell*)self, memory, YES);
+    }
+}
 
 - (void)layoutSubviews {
     %orig;
@@ -1483,9 +1284,6 @@ static void UpdatePeopleButton(UITableViewCell* cell, BOOL wanted) {
     ApplyCard(cell, kind);
     if (kind == NFBListNotifications && gNoteCardsOn) {
         AttachReplySwipe(cell);
-    }
-    if (kind == NFBListNotifications || objc_getAssociatedObject(cell, kPeopleButtonKey)) {
-        UpdatePeopleButton(cell, kind == NFBListNotifications && gNoteCardsOn);
     }
 }
 
@@ -1524,8 +1322,7 @@ static void Unscale(UIView* view) {
 // and holds the "..." button at its right end (7.3.90 dump). The whole line is
 // scaled from its left middle, and moved up by the chosen gap to leave more
 // room above the tweet text. The pieces at the right end are scaled back so
-// they stay exactly where X put them, and the text fades out just before them
-// instead of running under them or off the card.
+// they stay exactly where X put them.
 static const void* kScaledPiecesKey = &kScaledPiecesKey;
 
 static void UnscaleNameLine(UIView* line) {
@@ -1574,27 +1371,9 @@ static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
             CGAffineTransformMakeTranslation(wanted.x - center.x, wanted.y - center.y), 1 / scale, 1 / scale);
         [pieces addObject:piece];
     }
-    if (scale <= 1.001) {
-        line.layer.mask = nil;
-        return;
-    }
-    // Fade the text out before the trailing pieces (or the line's end) as seen
-    // on screen; the mask lives in the line's own coordinates, so divide by scale.
-    CGFloat end = (limit - 4) / scale;
-    CGFloat fade = 18 / scale;
-    CGFloat pieceStart = limit / scale;
-    CAGradientLayer* mask = [line.layer.mask isKindOfClass:[CAGradientLayer class]] ? (CAGradientLayer*)line.layer.mask
-                                                                                    : [CAGradientLayer layer];
-    mask.frame = CGRectMake(0, -size.height, size.width / scale + size.width, size.height * 3);
-    mask.startPoint = CGPointMake(0, 0.5);
-    mask.endPoint = CGPointMake(1, 0.5);
-    CGFloat total = CGRectGetWidth(mask.frame);
-    id solid = (__bridge id)[UIColor blackColor].CGColor;
-    id clear = (__bridge id)[UIColor clearColor].CGColor;
-    mask.colors = @[ solid, solid, clear, clear, solid, solid ];
-    mask.locations = @[ @0, @(MAX(0, end - fade) / total), @(end / total), @(MAX(end, pieceStart - 0.5) / total),
-                        @(pieceStart / total), @1 ];
-    line.layer.mask = mask;
+    // 7.3.93-7.3.94 faded the text out before those pieces with a mask, which
+    // also hid the "..." button: no mask any more.
+    line.layer.mask = nil;
 }
 
 // MARK: The faded action row
@@ -1844,12 +1623,31 @@ static void LayoutPill(UIView* control) {
     UIView* pill = [control viewWithTag:kPillTag];
     UITableView* table = TableOf(control);
     NFBListKind kind = ListKind(table);
+    if (kind == NFBListOther) {
+        // The control may sit outside the list (7.3.94 dump: no list found);
+        // its controllers tell which screen it is on.
+        for (UIResponder* responder = control.nextResponder; responder; responder = responder.nextResponder) {
+            NSString* name = NSStringFromClass(responder.class);
+            if ([name containsString:@"HomeTimeline"]) {
+                kind = NFBListHome;
+                break;
+            }
+            if ([name containsString:@"NotificationsViewController"]) {
+                kind = NFBListNotifications;
+                break;
+            }
+        }
+    }
     UIView* spinner = FindSpinner(control, 0);
     if (!CardsOnFor(kind) || !spinner) {
         pill.hidden = YES;
-        gPillLog = [NSString stringWithFormat:@"no pill: kind=%ld spinner=%@ control=%@", (long)kind,
-                                              spinner ? NSStringFromClass(spinner.class) : @"none",
-                                              NSStringFromCGRect(control.frame)];
+        if (kind != NFBListOther) {
+            gPillLog = [NSString stringWithFormat:@"no pill: kind=%ld table=%@ spinner=%@ control=%@ in %@", (long)kind,
+                                                  table ? @"yes" : @"no",
+                                                  spinner ? NSStringFromClass(spinner.class) : @"none",
+                                                  NSStringFromCGRect(control.frame),
+                                                  NSStringFromClass(control.superview.class)];
+        }
         return;
     }
     if (![pill isKindOfClass:[NFBCardView class]]) {
@@ -1873,7 +1671,7 @@ static void LayoutPill(UIView* control) {
     }
     CGSize size = paws ? CGSizeMake(104, 46) : CGSizeMake(56, 36);
     card.radiusOverride = size.height / 2;
-    UIColor* xPaper = objc_getAssociatedObject(table, kOldTableColorKey) ?: [UIColor systemBackgroundColor];
+    UIColor* xPaper = (table ? objc_getAssociatedObject(table, kOldTableColorKey) : nil) ?: [UIColor systemBackgroundColor];
     card.backgroundColor = NFBCardPaperColor(style, xPaper, CurrentAccentColor());
     CGPoint center = [spinner.superview convertPoint:spinner.center toView:control];
     card.bounds = CGRectMake(0, 0, size.width, size.height);

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.85",
+      "subtitle": "NeoFreeBird version 7.3.86",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.86",
+          "buildVersion": "86",
+          "date": "2026-11-18T06:23:12Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.86/NeoFreeBird-Twitter-sideloaded_7.3.86_12.44.ipa",
+          "size": 253489560,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 타임라인·알림 카드형, 여러 명이 모인 알림은 카드 더미로, 알림의 답글을 밀어서 답장, 숫자 줄 흐리게, 트윗 글자 조금 크게 (설정 > kemo > 미디어). 덤프 맨 앞에 배치 탐색 추가."
+        },
         {
           "version": "7.3.85",
           "buildVersion": "85",

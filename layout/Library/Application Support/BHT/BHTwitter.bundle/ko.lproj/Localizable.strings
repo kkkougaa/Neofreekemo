@@ -562,6 +562,7 @@
 "KEMO_CARD_BODY" = "본문 글자 크기";
 "KEMO_CARD_NAME" = "이름·아이디 크기";
 "KEMO_CARD_AVATAR" = "프로필 사진 크기";
+"KEMO_CARD_NAME_GAP" = "이름과 본문 사이 간격";
 "KEMO_CARD_BODY_NOTE" = "본문 글자 크기는 앱을 다시 열면 모든 트윗에 적용돼요. 나머지는 바로 바뀌어요.";
 "KEMO_CARD_RESET" = "처음 값으로 되돌리기";
 "KEMO_CARD_PREVIEW_BODY1" = "카드 모양을 바꾸면 여기 미리보기가 바로 바뀌어요.";

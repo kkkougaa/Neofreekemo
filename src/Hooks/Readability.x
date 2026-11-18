@@ -30,6 +30,11 @@
 // on top, and the replies under it (with "show more replies") nested in an
 // inner box. The spinner of pull to refresh sits on a small card-coloured pill.
 //
+// 7.3.93: X's white backing view behind each tweet is cleared while a row has
+// a card (it showed as square corners over the round card); threads follow
+// X's connector (1 up, 2 down); the reply line bends into each reply's avatar;
+// floating cards meet without a seam; the refresh pill is placed from the pull.
+//
 // The cards never change X's layout (moving views after X has laid them out
 // made 7.3.76's small media jump back and forth). The row's content is only
 // drawn smaller inside its card (the content view's sublayer transform), and
@@ -60,7 +65,7 @@ static void RefreshOnScreen(void);
 static BOOL SameStyle(NFBCardStyle a, NFBCardStyle b) {
     return a.look == b.look && a.radius == b.radius && a.gap == b.gap && a.inner == b.inner &&
            a.bodyStep == b.bodyStep && a.nameScale == b.nameScale && a.avatarScale == b.avatarScale &&
-           a.paper == b.paper;
+           a.paper == b.paper && a.nameGap == b.nameGap;
 }
 
 static void ReadSwitches(void) {
@@ -89,15 +94,17 @@ static void ReadSwitches(void) {
 static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0,
                  gPills = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
+static NSString* gPillLog = @"(no pull yet)";
 
 NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
-                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@",
+                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
-                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog];
+                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog,
+                                      gPillLog];
 }
 
 // MARK: Which list a cell is in
@@ -205,6 +212,7 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, assign) BOOL nestOpenTop; // the inner box goes on from the row above
 @property (nonatomic, strong) UIColor* paper;
 @property (nonatomic, strong) UIColor* page;
+@property (nonatomic, strong) CAShapeLayer* threadLayer; // the reply line of a thread
 @end
 
 @implementation NFBCardBackground
@@ -222,6 +230,13 @@ static BOOL IsDivider(UIView* view) {
         for (UIView* view in @[ _edge2, _edge1, _card, _nest ]) {
             [self addSubview:view];
         }
+        _threadLayer = [CAShapeLayer layer];
+        _threadLayer.fillColor = nil;
+        _threadLayer.lineWidth = 2;
+        _threadLayer.lineCap = kCALineCapRound;
+        _threadLayer.lineJoin = kCALineJoinRound;
+        _threadLayer.actions = @{@"path" : [NSNull null], @"strokeColor" : [NSNull null]};
+        [self.layer addSublayer:_threadLayer];
     }
     return self;
 }
@@ -247,6 +262,12 @@ static BOOL IsDivider(UIView* view) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
+    self.threadLayer.frame = bounds;
+    [self.threadLayer removeFromSuperlayer];
+    [self.layer addSublayer:self.threadLayer];
+    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    self.threadLayer.strokeColor = (dark ? [UIColor colorWithRed:0.20 green:0.21 blue:0.22 alpha:1]
+                                         : [UIColor colorWithRed:0.81 green:0.85 blue:0.87 alpha:1]).CGColor;
     CGFloat half = gStyle.gap / 2;
     CGFloat top = self.openTop ? 0 : half;
     CGFloat bottom = self.openBottom ? CGRectGetHeight(bounds) : CGRectGetHeight(bounds) - half;
@@ -290,6 +311,7 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, assign) BOOL active;
 @property (nonatomic, assign) NSInteger thread; // last thread flags, to notice changes
 @property (nonatomic, strong) NSHashTable<UIView*>* hiddenLines;
+@property (nonatomic, strong) NSMapTable<UIView*, UIColor*>* clearedBacking;
 @end
 
 @implementation NFBCardMemory
@@ -413,8 +435,11 @@ static void FindThreadLines(UIView* view, UIView* row, int depth, NSMutableArray
         CGRect frame = [sub convertRect:sub.bounds toView:row];
         CGFloat r = 0, g = 0, b = 0, a = 0;
         [[sub.backgroundColor resolvedColorWithTraitCollection:sub.traitCollection] getRed:&r green:&g blue:&b alpha:&a];
-        if (a > 0.3 && CGRectGetWidth(frame) <= 3 && CGRectGetHeight(frame) >= 6 && CGRectGetMinX(frame) < 80 &&
-            sub.subviews.count == 0 && !IsDivider(sub)) {
+        // X's line is a TFNRoundedCornerView about 2pt wide (7.3.90 dump).
+        BOOL rounded = [NSStringFromClass(sub.class) isEqualToString:@"TFNRoundedCornerView"] &&
+                       CGRectGetWidth(frame) <= 3;
+        if (rounded || (a > 0.3 && CGRectGetWidth(frame) <= 3 && CGRectGetHeight(frame) >= 6 &&
+                        CGRectGetMinX(frame) < 80 && sub.subviews.count == 0 && !IsDivider(sub))) {
             [found addObject:sub];
             continue;
         }
@@ -443,6 +468,51 @@ static void SetThreadLinesHidden(UITableViewCell* cell, NFBCardMemory* memory, B
     }
 }
 
+// X puts a plain white view behind each tweet, as big as the row. Drawn
+// smaller inside the card it is a white rectangle with square corners over
+// the rounded card (the "square and round corners together" of 7.3.86-90).
+// While the row has a card, such views are clear.
+static void FindBacking(UIView* view, UITableViewCell* cell, int depth, NSMutableArray<UIView*>* found) {
+    if (depth > 3) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(cell.bounds), height = CGRectGetHeight(cell.bounds);
+    for (UIView* sub in view.subviews) {
+        NSString* name = NSStringFromClass(sub.class);
+        if ([name containsString:@"Quoted"] || [name containsString:@"Media"] || [name containsString:@"Image"] ||
+            [name containsString:@"Card"] || [name containsString:@"Avatar"]) {
+            continue;
+        }
+        CGFloat r = 0, g = 0, b = 0, a = 0;
+        [[sub.backgroundColor resolvedColorWithTraitCollection:sub.traitCollection] getRed:&r green:&g blue:&b alpha:&a];
+        if (a > 0.9 && CGRectGetWidth(sub.bounds) >= width * 0.6 && CGRectGetHeight(sub.bounds) >= height * 0.4) {
+            [found addObject:sub];
+        }
+        FindBacking(sub, cell, depth + 1, found);
+    }
+}
+
+static void SetBackingCleared(UITableViewCell* cell, NFBCardMemory* memory, BOOL cleared) {
+    if (cleared) {
+        if (!memory.clearedBacking) {
+            memory.clearedBacking = [NSMapTable weakToStrongObjectsMapTable];
+        }
+        NSMutableArray<UIView*>* found = [NSMutableArray array];
+        FindBacking(cell.contentView, cell, 0, found);
+        for (UIView* view in found) {
+            if (![memory.clearedBacking objectForKey:view]) {
+                [memory.clearedBacking setObject:view.backgroundColor forKey:view];
+            }
+            view.backgroundColor = [UIColor clearColor];
+        }
+    } else {
+        for (UIView* view in memory.clearedBacking.keyEnumerator.allObjects) {
+            view.backgroundColor = [memory.clearedBacking objectForKey:view];
+        }
+        [memory.clearedBacking removeAllObjects];
+    }
+}
+
 static void RemoveCard(UITableViewCell* cell, NFBCardMemory* memory) {
     if (!memory.active) {
         return;
@@ -454,6 +524,8 @@ static void RemoveCard(UITableViewCell* cell, NFBCardMemory* memory) {
     cell.contentView.layer.sublayerTransform = CATransform3DIdentity;
     SetDividersHidden(cell, NO);
     SetThreadLinesHidden(cell, memory, NO);
+    SetBackingCleared(cell, memory, NO);
+    memory.background.threadLayer.path = nil;
 }
 
 // MARK: Threads
@@ -495,39 +567,104 @@ static UITableViewCell* Neighbour(UITableView* table, UITableViewCell* cell, NSI
     return [table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:path.section]];
 }
 
-// In a thread: a tweet with X's line, or "show more" right under one.
-static BOOL InThread(UITableView* table, UITableViewCell* cell, int depth) {
+// X's connector (from the 7.3.90 dump): 1 = the line goes up to the row
+// above, 2 = down to the row below, 3 = both. "Show this thread" between two
+// tweets of a thread is a T1ConversationModuleGapCell with no tweet.
+static const NSUInteger kConnectorUp = 1, kConnectorDown = 2;
+
+static BOOL IsGapRow(UITableViewCell* cell) {
+    return [NSStringFromClass(cell.class) containsString:@"ConversationModuleGap"] || IsShowMoreRow(cell);
+}
+
+static BOOL RowJoinsUp(UITableView* table, UITableViewCell* cell) {
     if (!cell) {
         return NO;
     }
-    if (ConnectorOf(cell) != 0) {
-        return YES;
-    }
-    if (depth < 2 && IsShowMoreRow(cell)) {
+    if (IsGapRow(cell)) {
         UITableViewCell* above = Neighbour(table, cell, -1);
-        return above && !IsShowMoreRow(above) && ConnectorOf(above) != 0;
+        // Off screen: a gap row only ever sits inside a thread.
+        return above ? (ConnectorOf(above) & kConnectorDown) != 0
+                     : [NSStringFromClass(cell.class) containsString:@"ConversationModuleGap"];
     }
-    return NO;
+    return (ConnectorOf(cell) & kConnectorUp) != 0;
+}
+
+static BOOL RowJoinsDown(UITableView* table, UITableViewCell* cell) {
+    if (IsGapRow(cell)) {
+        UITableViewCell* below = Neighbour(table, cell, 1);
+        return below ? (ConnectorOf(below) & kConnectorUp) != 0
+                     : [NSStringFromClass(cell.class) containsString:@"ConversationModuleGap"];
+    }
+    return (ConnectorOf(cell) & kConnectorDown) != 0;
 }
 
 static NFBThreadFlags ThreadFlags(UITableView* table, UITableViewCell* cell) {
-    if (!table || !InThread(table, cell, 0)) {
+    if (!table) {
         return 0;
     }
     NFBThreadFlags flags = 0;
-    UITableViewCell* above = Neighbour(table, cell, -1);
-    UITableViewCell* below = Neighbour(table, cell, 1);
-    if (InThread(table, above, 1)) {
+    if (RowJoinsUp(table, cell)) {
         flags |= NFBThreadUp;
-        UITableViewCell* twoUp = Neighbour(table, above, -1);
-        if (InThread(table, twoUp, 1)) {
+        if (RowJoinsUp(table, Neighbour(table, cell, -1))) {
             flags |= NFBThreadNestUp;
         }
     }
-    if (InThread(table, below, 1)) {
+    if (RowJoinsDown(table, cell)) {
         flags |= NFBThreadDown;
     }
     return flags;
+}
+
+// MARK: The reply line
+// Inside a thread card the line runs down from the first tweet's avatar along
+// the left of the inner box and bends right into each reply's avatar, like a
+// reply arrow. X's own straight line is hidden there.
+
+static CGFloat gThreadX = -1; // centre of a first tweet's avatar, in row coordinates
+
+static UIView* AvatarOf(UITableViewCell* cell) {
+    return FindView(cell.contentView, @"StatusFleetLineItemView", 0) ?: FindView(cell.contentView, @"AvatarHeaderView", 0);
+}
+
+static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background, NFBThreadFlags flags) {
+    if (!flags) {
+        background.threadLayer.path = nil;
+        return;
+    }
+    CGFloat height = CGRectGetHeight(cell.bounds);
+    UIView* avatar = AvatarOf(cell);
+    CGRect face = avatar ? [avatar convertRect:avatar.bounds toView:cell] : CGRectNull;
+    UIBezierPath* path = [UIBezierPath bezierPath];
+    BOOL up = (flags & NFBThreadUp) != 0, down = (flags & NFBThreadDown) != 0;
+    if (!up) {
+        // The first tweet: down from under its avatar.
+        if (CGRectIsNull(face)) {
+            background.threadLayer.path = nil;
+            return;
+        }
+        gThreadX = CGRectGetMidX(face);
+        [path moveToPoint:CGPointMake(gThreadX, CGRectGetMaxY(face) + 4)];
+        [path addLineToPoint:CGPointMake(gThreadX, height)];
+    } else {
+        CGFloat x = gThreadX > 0 ? gThreadX : kCardSide + gStyle.inner + 26;
+        if (!CGRectIsNull(face) && CGRectGetMinX(face) > x + 12) {
+            // A reply: bend into its avatar.
+            CGFloat y = CGRectGetMidY(face), bend = 12;
+            [path moveToPoint:CGPointMake(x, 0)];
+            [path addLineToPoint:CGPointMake(x, y - bend)];
+            [path addQuadCurveToPoint:CGPointMake(x + bend, y) controlPoint:CGPointMake(x, y)];
+            [path addLineToPoint:CGPointMake(CGRectGetMinX(face) - 4, y)];
+            if (down) {
+                [path moveToPoint:CGPointMake(x, y - bend)];
+                [path addLineToPoint:CGPointMake(x, height)];
+            }
+        } else {
+            // "Show this thread" and the like: straight through.
+            [path moveToPoint:CGPointMake(x, 0)];
+            [path addLineToPoint:CGPointMake(x, down ? height : height / 2)];
+        }
+    }
+    background.threadLayer.path = path.CGPath;
 }
 
 // MARK: Putting a card on a row
@@ -577,6 +714,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     cell.backgroundColor = [UIColor clearColor];
     cell.contentView.backgroundColor = [UIColor clearColor];
     SetDividersHidden(cell, YES);
+    SetBackingCleared(cell, memory, YES);
 
     // A notification that gathers several people is drawn as a little pile.
     BOOL pile = NO;
@@ -638,6 +776,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         transform = CATransform3DMakeScale(scale, scale, 1);
     }
     cell.contentView.layer.sublayerTransform = transform;
+    DrawThreadLine(cell, background, flags);
 }
 
 // After a change on the settings page: every row on screen takes the new look.
@@ -725,6 +864,10 @@ static BOOL PressReply(UIView* button) {
         for (UIView* piece in memory.background.subviews) {
             piece.transform = move;
         }
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        memory.background.threadLayer.affineTransform = move;
+        [CATransaction commit];
     }
     UIView* mark = self.mark;
     CGFloat progress = MIN(1.0, -offset / kReplyPull);
@@ -1002,41 +1145,81 @@ static void Unscale(UIView* view) {
     }
 }
 
-// The name line also holds the "..." button at its right end; scaling the whole
-// line (7.3.89) pushed that button off the card. Only the pieces on the left
-// (name, badges, @handle, time) grow, each moved as if the line were scaled
-// from its left middle, and anything at the right end stays as X put it.
+// The name line (TTAStatusAuthorView) draws the name, handle and time itself
+// and holds the "..." button at its right end (7.3.90 dump). The whole line is
+// scaled from its left middle, and moved up by the chosen gap to leave more
+// room above the tweet text. The pieces at the right end are scaled back so
+// they stay exactly where X put them, and the text fades out just before them
+// instead of running under them or off the card.
 static const void* kScaledPiecesKey = &kScaledPiecesKey;
 
 static void UnscaleNameLine(UIView* line) {
-    NSHashTable<UIView*>* pieces = line ? objc_getAssociatedObject(line, kScaledPiecesKey) : nil;
+    if (!line) {
+        return;
+    }
+    NSHashTable<UIView*>* pieces = objc_getAssociatedObject(line, kScaledPiecesKey);
     for (UIView* piece in pieces.allObjects) {
         piece.transform = CGAffineTransformIdentity;
     }
     [pieces removeAllObjects];
+    if (objc_getAssociatedObject(line, kScaledKey)) {
+        line.layer.mask = nil;
+    }
     Unscale(line);
 }
 
-static void ScaleNameLine(UIView* line, CGFloat scale) {
+static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
+    CGSize size = line.bounds.size;
+    if (size.width <= 0 || size.height <= 0) {
+        return;
+    }
+    // Scale about the left middle, then lift.
+    CGFloat tx = -0.5 * size.width * (1 - scale);
+    line.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(tx, -lift), scale, scale);
+    objc_setAssociatedObject(line, kScaledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
     NSHashTable<UIView*>* pieces = objc_getAssociatedObject(line, kScaledPiecesKey);
     if (!pieces) {
         pieces = [NSHashTable weakObjectsHashTable];
         objc_setAssociatedObject(line, kScaledPiecesKey, pieces, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    CGFloat width = CGRectGetWidth(line.bounds);
-    CGPoint anchor = CGPointMake(0, CGRectGetMidY(line.bounds));
+    // Where the trailing pieces start, in the line's own (unscaled) coordinates.
+    CGFloat limit = size.width;
+    CGFloat midY = size.height / 2;
     for (UIView* piece in line.subviews) {
         CGRect frame = piece.frame;
-        BOOL trailing = [piece isKindOfClass:[UIControl class]] || CGRectGetMinX(frame) > width * 0.6;
-        if (piece.hidden || trailing || CGRectGetWidth(frame) <= 0) {
+        if (piece.hidden || CGRectGetWidth(frame) <= 0 || CGRectGetMinX(frame) < size.width * 0.6) {
             continue;
         }
+        limit = MIN(limit, CGRectGetMinX(frame));
+        // Undo the line's scale for this piece, keeping its spot on screen.
         CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
-        CGPoint moved = CGPointMake(anchor.x + (center.x - anchor.x) * scale, anchor.y + (center.y - anchor.y) * scale);
+        CGPoint wanted = CGPointMake(center.x / scale, midY + (center.y - midY) / scale + lift / scale);
         piece.transform = CGAffineTransformScale(
-            CGAffineTransformMakeTranslation(moved.x - center.x, moved.y - center.y), scale, scale);
+            CGAffineTransformMakeTranslation(wanted.x - center.x, wanted.y - center.y), 1 / scale, 1 / scale);
         [pieces addObject:piece];
     }
+    if (scale <= 1.001) {
+        line.layer.mask = nil;
+        return;
+    }
+    // Fade the text out before the trailing pieces (or the line's end) as seen
+    // on screen; the mask lives in the line's own coordinates, so divide by scale.
+    CGFloat end = (limit - 4) / scale;
+    CGFloat fade = 18 / scale;
+    CGFloat pieceStart = limit / scale;
+    CAGradientLayer* mask = [line.layer.mask isKindOfClass:[CAGradientLayer class]] ? (CAGradientLayer*)line.layer.mask
+                                                                                    : [CAGradientLayer layer];
+    mask.frame = CGRectMake(0, -size.height, size.width / scale + size.width, size.height * 3);
+    mask.startPoint = CGPointMake(0, 0.5);
+    mask.endPoint = CGPointMake(1, 0.5);
+    CGFloat total = CGRectGetWidth(mask.frame);
+    id solid = (__bridge id)[UIColor blackColor].CGColor;
+    id clear = (__bridge id)[UIColor clearColor].CGColor;
+    mask.colors = @[ solid, solid, clear, clear, solid, solid ];
+    mask.locations = @[ @0, @(MAX(0, end - fade) / total), @(end / total), @(MAX(end, pieceStart - 0.5) / total),
+                        @(pieceStart / total), @1 ];
+    line.layer.mask = mask;
 }
 
 // MARK: The faded action row
@@ -1211,8 +1394,8 @@ static void DimActions(UIView* actions) {
             CGRectGetWidth(avatar.bounds) < 80) {
             ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
         }
-        if (fabs(gStyle.nameScale - 1) > 0.005 && CGRectGetWidth(author.bounds) > 40) {
-            ScaleNameLine(author, gStyle.nameScale);
+        if ((fabs(gStyle.nameScale - 1) > 0.005 || gStyle.nameGap > 0.05) && CGRectGetWidth(author.bounds) > 40) {
+            ScaleNameLine(author, gStyle.nameScale, gStyle.nameGap);
         }
     }
     UIView* actions = [self respondsToSelector:@selector(visibleInlineActionsView)]
@@ -1250,17 +1433,33 @@ static void DimActions(UIView* actions) {
 
 static const NSInteger kPillTag = 0x4E465050;
 
-static UIActivityIndicatorView* FindSpinner(UIView* view, int depth) {
-    if (depth > 6) {
+static UIView* FindSpinner(UIView* view, int depth) {
+    if (depth > 8) {
         return nil;
     }
     for (UIView* sub in view.subviews) {
-        if ([sub isKindOfClass:[UIActivityIndicatorView class]]) {
-            return (UIActivityIndicatorView*)sub;
+        if (sub.tag == kPillTag) {
+            continue;
         }
-        UIActivityIndicatorView* found = FindSpinner(sub, depth + 1);
+        NSString* name = NSStringFromClass(sub.class);
+        if ([sub isKindOfClass:[UIActivityIndicatorView class]] || [name containsString:@"Spinner"] ||
+            [name containsString:@"ActivityIndicator"] || [name containsString:@"Loading"]) {
+            return sub;
+        }
+        UIView* found = FindSpinner(sub, depth + 1);
         if (found) {
             return found;
+        }
+    }
+    return nil;
+}
+
+// The refresh control of a list: among the list's own subviews.
+static UIView* RefreshControlIn(UIScrollView* scroll) {
+    Class cls = NSClassFromString(@"TFNPullToRefreshControl");
+    for (UIView* sub in scroll.subviews) {
+        if ((cls && [sub isKindOfClass:cls]) || [NSStringFromClass(sub.class) containsString:@"RefreshControl"]) {
+            return sub;
         }
     }
     return nil;
@@ -1270,9 +1469,12 @@ static void LayoutPill(UIView* control) {
     UIView* pill = [control viewWithTag:kPillTag];
     UITableView* table = TableOf(control);
     NFBListKind kind = ListKind(table);
-    UIActivityIndicatorView* spinner = FindSpinner(control, 0);
+    UIView* spinner = FindSpinner(control, 0);
     if (!CardsOnFor(kind) || !spinner) {
         pill.hidden = YES;
+        gPillLog = [NSString stringWithFormat:@"no pill: kind=%ld spinner=%@ control=%@", (long)kind,
+                                              spinner ? NSStringFromClass(spinner.class) : @"none",
+                                              NSStringFromCGRect(control.frame)];
         return;
     }
     if (![pill isKindOfClass:[NFBCardView class]]) {
@@ -1307,10 +1509,12 @@ static void LayoutPill(UIView* control) {
     // Fade in with the pull: fully there once the control shows the whole pill.
     CGFloat shown = CGRectGetMaxY(control.bounds) - (center.y - size.height / 2);
     card.alpha = MAX(0, MIN(1, shown / size.height));
-    if (spinner.isAnimating) {
+    if ([spinner isKindOfClass:[UIActivityIndicatorView class]] && ((UIActivityIndicatorView*)spinner).isAnimating) {
         card.alpha = 1;
     }
     [control sendSubviewToBack:card];
+    gPillLog = [NSString stringWithFormat:@"pill alpha=%.2f at %@ spinner=%@", card.alpha,
+                                          NSStringFromCGPoint(center), NSStringFromClass(spinner.class)];
 }
 
 %hook TFNPullToRefreshControl
@@ -1324,6 +1528,35 @@ static void LayoutPill(UIView* control) {
     %orig;
     if ([self viewWithTag:kPillTag] || gCardsOn || gNoteCardsOn) {
         LayoutPill(self);
+    }
+}
+
+- (void)_setStatus:(unsigned long long)status fromScrolling:(BOOL)fromScrolling {
+    %orig;
+    if (gCardsOn || gNoteCardsOn) {
+        LayoutPill(self);
+    }
+}
+
+%end
+
+// 7.3.90 never showed the pill (the control is not laid out again while the
+// list is pulled), so the pull itself places it too.
+%hook UITableView
+
+- (void)setContentOffset:(CGPoint)offset {
+    %orig;
+    if (!(gCardsOn || gNoteCardsOn)) {
+        return;
+    }
+    UITableView* table = (UITableView*)self;
+    if (offset.y < -table.adjustedContentInset.top - 1) {
+        UIView* control = RefreshControlIn(table);
+        if (control) {
+            LayoutPill(control);
+        } else if (offset.y < -table.adjustedContentInset.top - 20) {
+            gPillLog = @"pulled, but no refresh control in the list";
+        }
     }
 }
 

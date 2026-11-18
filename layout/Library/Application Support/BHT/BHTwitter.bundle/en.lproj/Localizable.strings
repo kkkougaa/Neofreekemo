@@ -610,6 +610,7 @@
 "KEMO_CARD_BODY" = "Tweet text size";
 "KEMO_CARD_NAME" = "Name and handle size";
 "KEMO_CARD_AVATAR" = "Avatar size";
+"KEMO_CARD_NAME_GAP" = "Space between name and text";
 "KEMO_CARD_BODY_NOTE" = "Tweet text size applies to every tweet after reopening the app. Everything else changes at once.";
 "KEMO_CARD_RESET" = "Reset to defaults";
 "KEMO_CARD_PREVIEW_BODY1" = "This preview changes as you adjust the cards.";

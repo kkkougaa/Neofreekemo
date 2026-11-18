@@ -22,6 +22,7 @@ typedef struct {
     CGFloat bodyStep;    // points added to tweet text
     CGFloat nameScale;   // the name line (name and @handle), 1 = X's size
     CGFloat avatarScale; // the avatar, 1 = X's size
+    CGFloat nameGap;     // points the name line moves up, away from the tweet text
     NSInteger paper;     // NFBCardPaper*
 } NFBCardStyle;
 
@@ -40,6 +41,7 @@ extern NSString* const NFBCardInnerKey;
 extern NSString* const NFBCardBodyKey;   // tenths of a point
 extern NSString* const NFBCardNameKey;   // percent
 extern NSString* const NFBCardAvatarKey; // percent
+extern NSString* const NFBCardNameGapKey; // points
 extern NSString* const NFBCardPaperKey;
 extern NSString* const NFBCardPaperRGBKey;
 

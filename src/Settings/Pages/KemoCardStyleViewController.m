@@ -35,6 +35,7 @@ static NSString* L(NSString* key) {
     NFBCardView* _first;
     NFBCardView* _thread;
     UIView* _nest;
+    CAShapeLayer* _line;
     NSArray<NFBCardPreviewRow*>* _rows;
 }
 
@@ -69,6 +70,10 @@ static NSString* L(NSString* key) {
         [self addSubview:_first];
         [self addSubview:_thread];
         [self addSubview:_nest];
+        _line = [CAShapeLayer layer];
+        _line.fillColor = nil;
+        _line.lineWidth = 2;
+        _line.lineCap = kCALineCapRound;
         _rows = @[
             [self rowWithName:@"フェムト" handle:@"@femt_1240 · 8분" body:L(@"KEMO_CARD_PREVIEW_BODY1")
                         color:[UIColor colorWithRed:0.48 green:0.56 blue:0.69 alpha:1]],
@@ -128,7 +133,7 @@ static NSString* L(NSString* key) {
     // The avatar grows from its top right corner, as in the timeline.
     put(row.avatar, CGRectMake(16 + avatarSide - side, 12, side, side));
     row.avatar.layer.cornerRadius = side / 2;
-    put(row.name, CGRectMake(textX, 12, textW, nameH));
+    put(row.name, CGRectMake(textX, 12 - style.nameGap, textW, nameH));
     put(row.body, CGRectMake(textX, 12 + nameH + 2, textW, bodySize.height));
     put(row.actions, CGRectMake(textX, 12 + nameH + 2 + bodySize.height + 8, textW, 18));
     row.actions.alpha = 0.6;
@@ -176,6 +181,20 @@ static NSString* L(NSString* key) {
             [self bringSubviewToFront:view];
         }
     }
+    // The reply line: down from the first tweet's avatar, bending into the reply's.
+    CGRect head = _rows[1].avatar.frame, reply = _rows[2].avatar.frame;
+    CGFloat x = CGRectGetMidX(head), y = CGRectGetMidY(reply), bend = 10;
+    UIBezierPath* path = [UIBezierPath bezierPath];
+    [path moveToPoint:CGPointMake(x, CGRectGetMaxY(head) + 4)];
+    [path addLineToPoint:CGPointMake(x, y - bend)];
+    [path addQuadCurveToPoint:CGPointMake(x + bend, y) controlPoint:CGPointMake(x, y)];
+    [path addLineToPoint:CGPointMake(CGRectGetMinX(reply) - 4, y)];
+    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    _line.strokeColor = (dark ? [UIColor colorWithRed:0.20 green:0.21 blue:0.22 alpha:1]
+                              : [UIColor colorWithRed:0.81 green:0.85 blue:0.87 alpha:1]).CGColor;
+    _line.path = path.CGPath;
+    [_line removeFromSuperlayer];
+    [self.layer addSublayer:_line];
 }
 
 @end
@@ -249,6 +268,7 @@ static NSString* L(NSString* key) {
     [self addHeading:L(@"KEMO_CARD_SECTION_TEXT")];
     [self addSlider:NFBCardBodyKey title:L(@"KEMO_CARD_BODY") min:-10 max:40 unit:@"pt" divisor:10];
     [self addSlider:NFBCardNameKey title:L(@"KEMO_CARD_NAME") min:90 max:130 unit:@"%" divisor:1];
+    [self addSlider:NFBCardNameGapKey title:L(@"KEMO_CARD_NAME_GAP") min:0 max:8 unit:@"pt" divisor:1];
     [self addSlider:NFBCardAvatarKey title:L(@"KEMO_CARD_AVATAR") min:90 max:130 unit:@"%" divisor:1];
     UILabel* note = [UILabel new];
     note.text = L(@"KEMO_CARD_BODY_NOTE");
@@ -339,6 +359,7 @@ static NSString* L(NSString* key) {
         NFBCardBodyKey : @(round(style.bodyStep * 10)),
         NFBCardNameKey : @(round(style.nameScale * 100)),
         NFBCardAvatarKey : @(round(style.avatarScale * 100)),
+        NFBCardNameGapKey : @(round(style.nameGap)),
     };
     for (NSString* key in numbers) {
         self.sliders[key].value = [numbers[key] floatValue];

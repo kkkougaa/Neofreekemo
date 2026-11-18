@@ -13,6 +13,7 @@ NSString* const NFBCardInnerKey = @"kemo_card_inner";
 NSString* const NFBCardBodyKey = @"kemo_card_body";
 NSString* const NFBCardNameKey = @"kemo_card_name";
 NSString* const NFBCardAvatarKey = @"kemo_card_avatar";
+NSString* const NFBCardNameGapKey = @"kemo_card_name_gap";
 NSString* const NFBCardPaperKey = @"kemo_card_paper";
 NSString* const NFBCardPaperRGBKey = @"kemo_card_paper_rgb";
 
@@ -36,13 +37,14 @@ NFBCardStyle NFBCardStyleCurrent(void) {
     style.nameScale = Number(defaults, NFBCardNameKey, bigger ? 108 : 100, 90, 130) / 100.0;
     style.avatarScale = Number(defaults, NFBCardAvatarKey, bigger ? 112 : 100, 90, 130) / 100.0;
     style.paper = (NSInteger)Number(defaults, NFBCardPaperKey, NFBCardPaperDefault, 0, 4);
+    style.nameGap = Number(defaults, NFBCardNameGapKey, 0, 0, 8);
     return style;
 }
 
 void NFBCardStyleReset(void) {
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     for (NSString* key in @[ NFBCardLookKey, NFBCardRadiusKey, NFBCardGapKey, NFBCardInnerKey, NFBCardBodyKey,
-                             NFBCardNameKey, NFBCardAvatarKey, NFBCardPaperKey, NFBCardPaperRGBKey ]) {
+                             NFBCardNameKey, NFBCardAvatarKey, NFBCardPaperKey, NFBCardPaperRGBKey, NFBCardNameGapKey ]) {
         [defaults removeObjectForKey:key];
     }
     [defaults setBool:NO forKey:@"kemo_bigger_text"];
@@ -107,14 +109,26 @@ UIColor* NFBCardPageColor(UIColor* paper) {
     }];
 }
 
+// The card draws its own fill as a shape, with the shadow on that shape, both
+// inside a box that is cut off exactly at an open edge: two joined cards then
+// meet with no shadow or outline between them (7.3.90 showed a dark seam).
 @implementation NFBCardView {
+    CALayer* _shadowBox;
+    CAShapeLayer* _fill;
     CALayer* _outlineBox;
     CAShapeLayer* _outline;
+    UIColor* _fillColor;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.userInteractionEnabled = NO;
+        [super setBackgroundColor:[UIColor clearColor]];
+        _shadowBox = [CALayer layer];
+        _shadowBox.masksToBounds = YES;
+        _fill = [CAShapeLayer layer];
+        [_shadowBox addSublayer:_fill];
+        [self.layer addSublayer:_shadowBox];
         _outlineBox = [CALayer layer];
         _outlineBox.masksToBounds = YES;
         _outline = [CAShapeLayer layer];
@@ -124,6 +138,15 @@ UIColor* NFBCardPageColor(UIColor* paper) {
         _style = NFBCardStyleCurrent();
     }
     return self;
+}
+
+- (void)setBackgroundColor:(UIColor*)color {
+    _fillColor = color;
+    [self setNeedsLayout];
+}
+
+- (UIColor*)backgroundColor {
+    return _fillColor;
 }
 
 - (void)setStyle:(NFBCardStyle)style {
@@ -155,22 +178,14 @@ UIColor* NFBCardPageColor(UIColor* paper) {
     CGRect bounds = self.bounds;
     CGFloat radius = MIN(self.radiusOverride > 0 ? self.radiusOverride : self.style.radius,
                          MIN(CGRectGetWidth(bounds), CGRectGetHeight(bounds)) / 2);
-    CACornerMask corners = 0;
     UIRectCorner rounded = 0;
     if (!self.openTop) {
-        corners |= kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
         rounded |= UIRectCornerTopLeft | UIRectCornerTopRight;
     }
     if (!self.openBottom) {
-        corners |= kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
         rounded |= UIRectCornerBottomLeft | UIRectCornerBottomRight;
     }
-    // Circular corners, so the drawn outline (a bezier path) matches the fill.
-    self.layer.cornerCurve = kCACornerCurveCircular;
-    self.layer.cornerRadius = radius;
-    self.layer.maskedCorners = corners;
-
-    // Open edges reach past the bounds, where the box cuts them off.
+    // Open edges reach past the bounds, where the boxes cut them off.
     CGFloat reach = 40;
     CGRect shape = bounds;
     if (self.openTop) {
@@ -184,9 +199,37 @@ UIColor* NFBCardPageColor(UIColor* paper) {
     BOOL shadow = !self.plain && self.style.look == NFBCardLookFloating && !dark;
     BOOL line = !self.plain && !shadow;
     CGFloat hair = 1.0 / MAX(1.0, UIScreen.mainScreen.scale);
+    CGPathRef outlinePath = [UIBezierPath bezierPathWithRoundedRect:shape
+                                                  byRoundingCorners:rounded
+                                                        cornerRadii:CGSizeMake(radius, radius)]
+                                .CGPath;
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    // The shadow box: room for the shadow on closed edges, none on open ones.
+    CGFloat room = shadow ? 24 : 0;
+    CGRect box = CGRectInset(bounds, -room, 0);
+    if (!self.openTop) {
+        box.origin.y -= room;
+        box.size.height += room;
+    }
+    if (!self.openBottom) {
+        box.size.height += room;
+    }
+    _shadowBox.frame = box;
+    _fill.frame = CGRectMake(-box.origin.x, -box.origin.y, CGRectGetWidth(bounds), CGRectGetHeight(bounds));
+    _fill.path = outlinePath;
+    _fill.fillColor = [_fillColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+    if (shadow) {
+        _fill.shadowColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.10 alpha:1].CGColor;
+        _fill.shadowOpacity = 0.07;
+        _fill.shadowRadius = 7;
+        _fill.shadowOffset = CGSizeMake(0, 2);
+        _fill.shadowPath = outlinePath;
+    } else {
+        _fill.shadowOpacity = 0;
+        _fill.shadowPath = nil;
+    }
     _outlineBox.frame = bounds;
     _outline.hidden = !line;
     if (line) {
@@ -197,19 +240,6 @@ UIColor* NFBCardPageColor(UIColor* paper) {
                                               byRoundingCorners:rounded
                                                     cornerRadii:CGSizeMake(radius, radius)]
                             .CGPath;
-    }
-    if (shadow) {
-        self.layer.shadowColor = [UIColor colorWithRed:0.06 green:0.08 blue:0.10 alpha:1].CGColor;
-        self.layer.shadowOpacity = 0.07;
-        self.layer.shadowRadius = 7;
-        self.layer.shadowOffset = CGSizeMake(0, 2);
-        self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:shape
-                                                      byRoundingCorners:rounded
-                                                            cornerRadii:CGSizeMake(radius, radius)]
-                                    .CGPath;
-    } else {
-        self.layer.shadowOpacity = 0;
-        self.layer.shadowPath = nil;
     }
     [CATransaction commit];
 }

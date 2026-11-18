@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.97",
+      "subtitle": "NeoFreeBird version 7.3.98",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.98",
+          "buildVersion": "98",
+          "date": "2026-11-18T11:27:48Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.98/NeoFreeBird-Twitter-sideloaded_7.3.98_12.44.ipa",
+          "size": 270895250,
+          "minOSVersion": "15.0",
+          "localizedDescription": "스플래시 멈춤·긴 로딩 수정(레이아웃 훅 가볍게, 스레드 선 무한 재배치 차단). 홈 새로고침을 원래 모양으로(X 실험 스위치 끔, kemo 설정 토글). 카드 간격이 실제 카드 사이에, 안쪽 여백은 위아래에도. 알림 당겨서 답글 때 카드가 손가락을 따라옴. 스레드의 … 버튼 사각 배경 제거."
+        },
         {
           "version": "7.3.97",
           "buildVersion": "97",

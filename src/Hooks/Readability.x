@@ -93,16 +93,17 @@ static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gF
                  gPills = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
 static NSString* gPillLog = @"(no pull yet)";
+static NSString* gPeopleLog = @"(no people tap yet)";
 
 NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
-                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@",
+                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@ people: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
                                       (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog,
-                                      gPillLog];
+                                      gPillLog, gPeopleLog];
 }
 
 // MARK: Which list a cell is in
@@ -1093,6 +1094,246 @@ static void AttachReplySwipe(UITableViewCell* cell) {
 }
 
 
+// MARK: Who is behind a notification
+// A notification that gathers several people ("A and 6 others liked") shows a
+// row of their avatars (TFNAvatarHeaderView, 7.3.90 dump). Tapping that row
+// opens a sheet listing them: avatar and name, and their profile on a tap
+// when X tells the handle. A small chevron after the avatars says it opens.
+
+@interface NFBPerson : NSObject
+@property (nonatomic, strong) UIImage* image;
+@property (nonatomic, copy) NSString* name;
+@property (nonatomic, copy) NSString* handle;
+@end
+
+@implementation NFBPerson
+@end
+
+
+static NSString* StringFrom(id object, NSArray<NSString*>* names) {
+    for (NSString* name in names) {
+        SEL selector = NSSelectorFromString(name);
+        if ([object respondsToSelector:selector]) {
+            id value = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+            if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+                return value;
+            }
+        }
+    }
+    return nil;
+}
+
+// What the avatar knows about its person, looked for in a few likely places.
+static void FillPerson(NFBPerson* person, UIView* avatar) {
+    NSArray* nameKeys = @[ @"name", @"fullName", @"displayName" ];
+    NSArray* handleKeys = @[ @"screenName", @"username", @"userName" ];
+    NSMutableArray* owners = [NSMutableArray arrayWithObject:avatar];
+    for (UIView* sub in avatar.subviews) {
+        [owners addObject:sub];
+    }
+    for (id owner in [owners copy]) {
+        for (NSString* key in @[ @"user", @"twitterUser", @"viewModel", @"avatarViewModel", @"userViewModel" ]) {
+            SEL selector = NSSelectorFromString(key);
+            if ([owner respondsToSelector:selector]) {
+                id value = ((id (*)(id, SEL))objc_msgSend)(owner, selector);
+                if (value) {
+                    [owners addObject:value];
+                }
+            }
+        }
+    }
+    for (id owner in owners) {
+        person.name = person.name ?: StringFrom(owner, nameKeys);
+        person.handle = person.handle ?: StringFrom(owner, handleKeys);
+    }
+    if (!person.name) {
+        for (UIView* view in @[ avatar ]) {
+            NSString* label = view.accessibilityLabel;
+            if (label.length == 0) {
+                for (UIView* sub in view.subviews) {
+                    label = sub.accessibilityLabel.length ? sub.accessibilityLabel : label;
+                }
+            }
+            person.name = label.length ? label : nil;
+        }
+    }
+    // The face itself, as drawn.
+    UIView* face = FindView(avatar, @"AvatarImageView", 0) ?: avatar;
+    if (CGRectGetWidth(face.bounds) > 4) {
+        UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:face.bounds.size];
+        person.image = [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+            [face.layer renderInContext:context.CGContext];
+        }];
+    }
+}
+
+static NSArray<UIView*>* PeopleAvatars(UITableViewCell* cell) {
+    NSMutableArray<UIView*>* found = [NSMutableArray array];
+    NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:cell.contentView];
+    NSUInteger budget = 600;
+    while (queue.count > 0 && budget-- > 0) {
+        UIView* view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([NSStringFromClass(view.class) isEqualToString:@"TFNAvatarHeaderView"]) {
+            if (!view.hidden && CGRectGetWidth(view.bounds) > 12) {
+                [found addObject:view];
+            }
+            continue;
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+    return found;
+}
+
+@interface NFBPeopleSheet : UITableViewController
+@property (nonatomic, copy) NSArray<NFBPerson*>* people;
+@property (nonatomic, copy) NSString* headline;
+@end
+
+@implementation NFBPeopleSheet
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = self.headline;
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"Person"];
+    self.tableView.rowHeight = 60;
+}
+
+- (NSInteger)tableView:(UITableView*)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.people.count;
+}
+
+- (UITableViewCell*)tableView:(UITableView*)tableView cellForRowAtIndexPath:(NSIndexPath*)indexPath {
+    UITableViewCell* cell = [tableView dequeueReusableCellWithIdentifier:@"Person" forIndexPath:indexPath];
+    NFBPerson* person = self.people[indexPath.row];
+    UIListContentConfiguration* content = [UIListContentConfiguration subtitleCellConfiguration];
+    content.text = person.name ?: [NSString stringWithFormat:@"%ld", (long)indexPath.row + 1];
+    content.secondaryText = person.handle ? [@"@" stringByAppendingString:person.handle] : nil;
+    content.secondaryTextProperties.color = [UIColor secondaryLabelColor];
+    content.image = person.image;
+    content.imageProperties.maximumSize = CGSizeMake(40, 40);
+    content.imageProperties.cornerRadius = 20;
+    cell.contentConfiguration = content;
+    cell.accessoryType = person.handle ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+    cell.selectionStyle = person.handle ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    return cell;
+}
+
+- (void)tableView:(UITableView*)tableView didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString* handle = self.people[indexPath.row].handle;
+    if (!handle) {
+        return;
+    }
+    NSURL* url = [NSURL URLWithString:[NSString stringWithFormat:@"twitter://user?screen_name=%@",
+                                                                  [handle stringByAddingPercentEncodingWithAllowedCharacters:
+                                                                              NSCharacterSet.URLQueryAllowedCharacterSet]]];
+    [self dismissViewControllerAnimated:YES
+                             completion:^{
+                                 [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+                             }];
+}
+
+@end
+
+@interface NFBPeopleButton : UIButton
+@property (nonatomic, weak) UITableViewCell* cell;
+@end
+
+@implementation NFBPeopleButton
+@end
+
+static const void* kPeopleButtonKey = &kPeopleButtonKey;
+
+static UIViewController* ControllerOf(UIView* view) {
+    for (UIResponder* responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            return (UIViewController*)responder;
+        }
+    }
+    return nil;
+}
+
+@interface NFBPeopleHandler : NSObject
++ (void)open:(NFBPeopleButton*)button;
+@end
+
+@implementation NFBPeopleHandler
+
++ (void)open:(NFBPeopleButton*)button {
+    UITableViewCell* cell = button.cell;
+    NSArray<UIView*>* avatars = cell ? PeopleAvatars(cell) : @[];
+    NSMutableArray<NFBPerson*>* people = [NSMutableArray array];
+    NSInteger named = 0, handles = 0;
+    for (UIView* avatar in avatars) {
+        NFBPerson* person = [NFBPerson new];
+        FillPerson(person, avatar);
+        named += person.name != nil;
+        handles += person.handle != nil;
+        [people addObject:person];
+    }
+    gPeopleLog = [NSString stringWithFormat:@"%lu avatars, %ld named, %ld handles, first avatar %@ label=%@",
+                                            (unsigned long)avatars.count, (long)named, (long)handles,
+                                            avatars.count ? NSStringFromClass(avatars.firstObject.class) : @"-",
+                                            avatars.firstObject.accessibilityLabel ?: @"nil"];
+    UIViewController* host = ControllerOf(cell);
+    if (people.count == 0 || !host) {
+        return;
+    }
+    NFBPeopleSheet* sheet = [[NFBPeopleSheet alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    sheet.people = people;
+    // The notification's own first line ("A and 6 others liked your post").
+    UIView* text = FindView(cell.contentView, @"AttributedTextView", 0) ?: FindView(cell.contentView, @"Label", 0);
+    NSString* headline = text.accessibilityLabel;
+    if (headline.length == 0 && [text isKindOfClass:[UILabel class]]) {
+        headline = ((UILabel*)text).text;
+    }
+    sheet.headline = headline.length > 60 ? [[headline substringToIndex:60] stringByAppendingString:@"…"] : headline;
+    UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:sheet];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    UISheetPresentationController* presentation = nav.sheetPresentationController;
+    presentation.detents = @[ UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent ];
+    presentation.prefersGrabberVisible = YES;
+    [host presentViewController:nav animated:YES completion:nil];
+}
+
+@end
+
+// Puts (or takes away) the tappable area over a notification's row of avatars.
+static void UpdatePeopleButton(UITableViewCell* cell, BOOL wanted) {
+    NFBPeopleButton* button = objc_getAssociatedObject(cell, kPeopleButtonKey);
+    NSArray<UIView*>* avatars = wanted ? PeopleAvatars(cell) : @[];
+    if (avatars.count < 2) {
+        button.hidden = YES;
+        return;
+    }
+    if (!button) {
+        button = [NFBPeopleButton buttonWithType:UIButtonTypeCustom];
+        button.cell = cell;
+        UIImageSymbolConfiguration* config = [UIImageSymbolConfiguration configurationWithPointSize:11
+                                                                                             weight:UIImageSymbolWeightSemibold];
+        [button setImage:[UIImage systemImageNamed:@"chevron.down" withConfiguration:config] forState:UIControlStateNormal];
+        button.tintColor = [UIColor secondaryLabelColor];
+        button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
+        button.accessibilityLabel = @"People";
+        [button addTarget:[NFBPeopleHandler class] action:@selector(open:) forControlEvents:UIControlEventTouchUpInside];
+        objc_setAssociatedObject(cell, kPeopleButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    CGRect area = CGRectNull;
+    for (UIView* avatar in avatars) {
+        area = CGRectUnion(area, [avatar convertRect:avatar.bounds toView:cell]);
+    }
+    area = CGRectInset(area, -4, -4);
+    area.size.width += 22; // room for the chevron
+    button.frame = area;
+    button.contentEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 4);
+    button.hidden = NO;
+    if (button.superview != cell) {
+        [cell addSubview:button];
+    }
+    [cell bringSubviewToFront:button];
+}
+
 // MARK: Hooks
 
 %hook UITableViewCell
@@ -1107,6 +1348,9 @@ static void AttachReplySwipe(UITableViewCell* cell) {
     ApplyCard(cell, kind);
     if (kind == NFBListNotifications && gNoteCardsOn) {
         AttachReplySwipe(cell);
+    }
+    if (kind == NFBListNotifications || objc_getAssociatedObject(cell, kPeopleButtonKey)) {
+        UpdatePeopleButton(cell, kind == NFBListNotifications && gNoteCardsOn);
     }
 }
 

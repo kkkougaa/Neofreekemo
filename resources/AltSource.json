@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.83",
+      "subtitle": "NeoFreeBird version 7.3.84",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.84",
+          "buildVersion": "84",
+          "date": "2026-11-18T05:47:25Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.84/NeoFreeBird-Twitter-sideloaded_7.3.84_12.44.ipa",
+          "size": 253471132,
+          "minOSVersion": "15.0",
+          "localizedDescription": "불러온 트윗 검색: 당긴 거리를 손가락 이동으로 재서 새로고침에 막히지 않게 하고, 홈 타임라인에 항상 붙도록 고침. 흔들기 덤프에 검색 상태 표시."
+        },
         {
           "version": "7.3.83",
           "buildVersion": "83",

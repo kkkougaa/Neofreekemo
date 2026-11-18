@@ -26,7 +26,9 @@
 
 static NSString* const kCompactKey = @"kemo_compact_media";
 static NSString* const kSensitiveKey = @"disable_sensitive_tweet_warnings"; // NSFW mode
-static const CGFloat kThumbSide = 92.0;
+static NSString* const kThumbKey = @"kemo_thumb_side";     // the small square's side, 40-92
+static NSString* const kCornerKey = @"kemo_corner_media";  // one photo sits beside the text
+static const CGFloat kCornerGap = 8.0;
 static const CGFloat kCardWidth = 190.0;
 
 static const void* kLayoutModeKey = &kLayoutModeKey;
@@ -45,6 +47,23 @@ static CGFloat gLastMediaWidth = 0;
 
 static BOOL NFBCompactMedia(void) {
     return [BHTSettings boolForKey:kCompactKey] && ![BHTSettings boolForKey:kSensitiveKey];
+}
+
+// 7.3.99: 92 points was large next to a line or two of text; 56 is about three
+// lines. Chosen on the "Cards and text" page.
+static CGFloat ThumbSide(void) {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:kThumbKey];
+    CGFloat side = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 56;
+    return MAX(40, MIN(92, side));
+}
+
+// What X's cached layouts were made for: off, or the side and whether one
+// photo goes beside the text. Any change makes the old layouts stale.
+static NSInteger NFBMediaMode(void) {
+    if (!NFBCompactMedia()) {
+        return 0;
+    }
+    return (NSInteger)ThumbSide() * 2 + ([BHTSettings boolForKey:kCornerKey] ? 1 : 0);
 }
 
 static id NFBObjectForSelector(id object, NSString* name) {
@@ -118,10 +137,10 @@ static BOOL NFBIsPreviewCard(id viewModel) {
     }
     if (NFBMediaCount(viewModel) > 1) {
         gStrips++;
-        return CGSizeMake(size.width, MIN(size.height, kThumbSide));
+        return CGSizeMake(size.width, MIN(size.height, ThumbSide()));
     }
     gSquares++;
-    CGFloat side = MIN(kThumbSide, MIN(size.width, width));
+    CGFloat side = MIN(ThumbSide(), MIN(size.width, width));
     return CGSizeMake(side, side);
 }
 
@@ -133,7 +152,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
         return size;
     }
     gVertical++;
-    CGFloat side = MIN(kThumbSide, MIN(size.width, width));
+    CGFloat side = MIN(ThumbSide(), MIN(size.width, width));
     return CGSizeMake(side, side);
 }
 
@@ -162,7 +181,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
     id state = %orig;
     if (state) {
         gLayoutStateClass = [state class];
-        objc_setAssociatedObject(state, kLayoutModeKey, @(NFBCompactMedia()),
+        objc_setAssociatedObject(state, kLayoutModeKey, @(NFBMediaMode()),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return state;
@@ -170,7 +189,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 
 - (BOOL)isLayoutState:(id)state validForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
     NSNumber* mode = state ? objc_getAssociatedObject(state, kLayoutModeKey) : nil;
-    if ((mode ? mode.boolValue : NO) != NFBCompactMedia()) {
+    if ((mode ? mode.integerValue : 0) != NFBMediaMode()) {
         return NO;
     }
     return %orig;
@@ -192,7 +211,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
         return size;
     }
     gVerticalVideos++;
-    CGFloat side = MIN(kThumbSide, MIN(size.width, width));
+    CGFloat side = MIN(ThumbSide(), MIN(size.width, width));
     return CGSizeMake(side, side);
 }
 
@@ -219,7 +238,7 @@ static NSString* gRightLog = @"-";
 static NSInteger gRightContainers = 0;
 
 static BOOL NFBIsThumb(CGSize size) {
-    return size.width >= 40 && size.width <= kThumbSide + 1 && fabs(size.width - size.height) <= 1.5;
+    return size.width >= 40 && size.width <= ThumbSide() + 1 && fabs(size.width - size.height) <= 1.5;
 }
 
 // The right edge of the tweet's text column, in `host` coordinates: the right
@@ -282,7 +301,7 @@ static UIView* SmallSquare(UIView* view, int depth) {
         }
         CGRect frame = sub.frame;
         CGFloat w = CGRectGetWidth(frame), h = CGRectGetHeight(frame);
-        if (!sub.hidden && w >= 40 && w <= kThumbSide + 1 && fabs(w - h) <= 1.5 &&
+        if (!sub.hidden && w >= 40 && w <= ThumbSide() + 1 && fabs(w - h) <= 1.5 &&
             CGRectGetWidth(view.bounds) >= w + 8) {
             return sub;
         }
@@ -294,9 +313,155 @@ static UIView* SmallSquare(UIView* view, int depth) {
     return nil;
 }
 
+// MARK: One small photo beside the text
+// A single small photo sat under the text, alone on its own line, however
+// short the text: most of that line was empty. With "kemo_corner_media" it
+// sits at the top right, beside the name line and the first lines of text:
+//
+//  - where X makes the row's layout, the tweet's column is made narrower on the
+//    right by the photo and a gap (Readability.x does that, with the reply
+//    indent, in its hook on +[T1StatusCell cellLayoutForViewModel:...]), so the
+//    name line and the text wrap before the photo;
+//  - the row is made shorter by the room the photo no longer takes under the
+//    text (never shorter than the photo needs), noted on the layout;
+//  - after X has laid the tweet out, the photo's container is moved up into the
+//    freed strip and everything X had put below it moves up by what was noted.
+//
+// X's text view cannot wrap around a shape, so the text is narrower all the
+// way down, not just beside the photo.
+
+static const void* kCornerNoteKey = &kCornerNoteKey; // on a row's layout: {side, taken off the height}
+static BOOL gPlacingCorner = NO;
+static NSInteger gCornerPlaced = 0, gCornerSkipped = 0;
+
+// The side of the photo that goes beside the text for this tweet, or 0.
+CGFloat NFBCornerThumbFor(id viewModel) {
+    if (!viewModel || !NFBCompactMedia() || ![BHTSettings boolForKey:kCornerKey]) {
+        return 0;
+    }
+    return NFBMediaCount(viewModel) == 1 ? ThumbSide() : 0;
+}
+
+CGFloat NFBCornerGap(void) {
+    return kCornerGap;
+}
+
+// Takes the photo's old place under the text off the row's height. Safe to
+// call again on a layout X hands out a second time.
+void NFBCornerAdjustLayout(id layout, CGFloat thumb) {
+    if (!layout) {
+        return;
+    }
+    NSValue* was = objc_getAssociatedObject(layout, kCornerNoteKey);
+    CGPoint old = was ? was.CGPointValue : CGPointZero;
+    if (fabs(old.x - thumb) < 0.01) {
+        return;
+    }
+    SEL getter = NSSelectorFromString(@"size"), setter = NSSelectorFromString(@"setSize:");
+    if (![layout respondsToSelector:getter] || ![layout respondsToSelector:setter]) {
+        return;
+    }
+    CGSize size = ((CGSize (*)(id, SEL))objc_msgSend)(layout, getter);
+    if (size.height <= 0) {
+        return;
+    }
+    CGFloat natural = size.height + old.y;
+    CGFloat reduction = thumb > 0 ? MAX(0, MIN(thumb, natural - (thumb + 26))) : 0;
+    size.height = natural - reduction;
+    ((void (*)(id, SEL, CGSize))objc_msgSend)(layout, setter, size);
+    objc_setAssociatedObject(layout, kCornerNoteKey,
+                             thumb > 0 ? [NSValue valueWithCGPoint:CGPointMake(thumb, reduction)] : nil,
+                             OBJC_ASSOCIATION_RETAIN);
+}
+
+static BOOL NFBIsThumb(CGSize size);
+
+static UIView* ThumbContainer(UIView* view, int depth) {
+    Class containerClass = NSClassFromString(@"T1StatusViewAttachmentContainerView");
+    if (depth > 2 || !containerClass) {
+        return nil;
+    }
+    for (UIView* sub in view.subviews) {
+        if ([NSStringFromClass(sub.class) containsString:@"Quoted"]) {
+            continue;
+        }
+        if ([sub isKindOfClass:containerClass] && !sub.hidden && NFBIsThumb(sub.frame.size)) {
+            return sub;
+        }
+        UIView* found = ThumbContainer(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+// Called by Readability.x right after X has laid a tweet out.
+void NFBPlaceCornerMedia(UIView* status) {
+    UITableViewCell* cell = nil;
+    int depth = 0;
+    for (UIView* up = status.superview; up && depth < 8; up = up.superview, depth++) {
+        if ([up isKindOfClass:[UITableViewCell class]]) {
+            cell = (UITableViewCell*)up;
+            break;
+        }
+    }
+    SEL layoutSelector = NSSelectorFromString(@"cellLayout");
+    if (!cell || ![cell respondsToSelector:layoutSelector]) {
+        return;
+    }
+    id layout = ((id (*)(id, SEL))objc_msgSend)(cell, layoutSelector);
+    NSValue* note = layout ? objc_getAssociatedObject(layout, kCornerNoteKey) : nil;
+    if (!note) {
+        return;
+    }
+    CGFloat thumb = note.CGPointValue.x, reduction = note.CGPointValue.y;
+    SEL sizeSelector = NSSelectorFromString(@"size");
+    CGFloat layoutHeight = [layout respondsToSelector:sizeSelector]
+                               ? ((CGSize (*)(id, SEL))objc_msgSend)(layout, sizeSelector).height
+                               : 0;
+    // Only when the row really is as tall as its layout says.
+    if (thumb <= 0 || fabs(CGRectGetHeight(cell.bounds) - layoutHeight) > 2) {
+        gCornerSkipped++;
+        return;
+    }
+    UIView* container = ThumbContainer(status, 0);
+    SEL authorSelector = NSSelectorFromString(@"visibleAuthorView");
+    UIView* author = [status respondsToSelector:authorSelector] ? ((id (*)(id, SEL))objc_msgSend)(status, authorSelector) : nil;
+    UIView* host = container.superview;
+    if (!container || !host || !author.superview) {
+        gCornerSkipped++;
+        return;
+    }
+    CGRect name = [author.superview convertRect:author.frame toView:host];
+    CGRect old = container.frame;
+    CGRect target = CGRectMake(CGRectGetMaxX(name) + kCornerGap, CGRectGetMinY(name), CGRectGetWidth(old),
+                               CGRectGetHeight(old));
+    if (fabs(CGRectGetMinX(old) - CGRectGetMinX(target)) < 0.5 && fabs(CGRectGetMinY(old) - CGRectGetMinY(target)) < 0.5) {
+        return; // already there, and what was below it already moved
+    }
+    if (CGRectGetMinY(old) <= CGRectGetMaxY(name)) {
+        gCornerSkipped++;
+        return; // not where X puts media (under the text)
+    }
+    for (UIView* view in host.subviews) {
+        if (view != container && CGRectGetMinY(view.frame) >= CGRectGetMaxY(old) - 0.5) {
+            view.frame = CGRectOffset(view.frame, 0, -reduction);
+        }
+    }
+    gPlacingCorner = YES;
+    container.frame = target;
+    gPlacingCorner = NO;
+    gCornerPlaced++;
+}
+
 %hook T1StatusViewAttachmentContainerView
 
 - (void)setFrame:(CGRect)frame {
+    if (gPlacingCorner) {
+        %orig; // our own move beside the text
+        return;
+    }
     %orig(NFBRightAligned((T1StatusViewAttachmentContainerView*)self, frame));
 }
 
@@ -326,7 +491,7 @@ static UIView* SmallSquare(UIView* view, int depth) {
     for (UIView* view = square; view && view != container; view = view.superview) {
         CGRect inner = view.frame;
         CGFloat x = CGRectGetWidth(view.superview.bounds) - CGRectGetWidth(inner);
-        if (x > 0.5 && fabs(CGRectGetMinX(inner) - x) > 0.5 && CGRectGetWidth(inner) <= kThumbSide + 1) {
+        if (x > 0.5 && fabs(CGRectGetMinX(inner) - x) > 0.5 && CGRectGetWidth(inner) <= ThumbSide() + 1) {
             inner.origin.x = x;
             view.frame = inner;
             gRightAligned++;
@@ -348,7 +513,7 @@ static UIView* SmallSquare(UIView* view, int depth) {
                   mediaInfos:(id)mediaInfos {
     CGFloat height = %orig;
     gCarouselCalls++;
-    return NFBCompactMedia() ? MIN(height, kThumbSide) : height;
+    return NFBCompactMedia() ? MIN(height, ThumbSide()) : height;
 }
 
 + (CGFloat)carouselHeightFor:(CGFloat)width
@@ -358,7 +523,7 @@ static UIView* SmallSquare(UIView* view, int depth) {
             itemAspectRatios:(id)ratios {
     CGFloat height = %orig;
     gCarouselCalls++;
-    return NFBCompactMedia() ? MIN(height, kThumbSide) : height;
+    return NFBCompactMedia() ? MIN(height, ThumbSide()) : height;
 }
 
 %end
@@ -376,8 +541,8 @@ static void NFBReloadTimelines(UIView* view) {
 }
 
 static void NFBWatchMode(void) {
-    static BOOL lastMode;
-    lastMode = NFBCompactMedia();
+    static NSInteger lastMode;
+    lastMode = NFBMediaMode();
     // No queue here: with the main queue, a background thread that changes a default
     // waits for the main thread to run this block, and X writes defaults from
     // background threads during launch while the main thread waits on them (7.3.79
@@ -387,11 +552,11 @@ static void NFBWatchMode(void) {
                     object:nil
                      queue:nil
                 usingBlock:^(NSNotification* note) {
-                    if (NFBCompactMedia() == lastMode) {
+                    if (NFBMediaMode() == lastMode) {
                         return;
                     }
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        BOOL mode = NFBCompactMedia();
+                        NSInteger mode = NFBMediaMode();
                         if (mode == lastMode) {
                             return;
                         }
@@ -407,13 +572,15 @@ static void NFBWatchMode(void) {
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
                                       @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld "
-                                      @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) lastViewModel=%@",
+                                      @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) side=%.0f corner=%d "
+                                      @"cornerPlaced=%ld cornerSkipped=%ld lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
                                       (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gVerticalVideos,
                                       gVerticalVideoHooked, (long)gRightContainers, (long)gRightAligned, gRightLog,
-                                      gLastViewModelClass ?: @"-"];
+                                      ThumbSide(), [BHTSettings boolForKey:kCornerKey], (long)gCornerPlaced,
+                                      (long)gCornerSkipped, gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

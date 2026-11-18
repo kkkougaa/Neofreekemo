@@ -29,6 +29,7 @@ extern NSString* NFBReadabilityDebugText(void);
 extern NSArray<NSString*>* NFBRowLayoutClasses(void);
 extern CGFloat NFBLastMediaWidth(void);
 extern NSString* NFBPullAnimationDebugText(void);
+extern NSString* NFBTweetSheetDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -554,7 +555,8 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
-    [out appendFormat:@"== HEADER ==%c%@%c%@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(), 10];
+    [out appendFormat:@"== HEADER ==%c%@%c%@%csheet: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(), 10,
+                      NFBTweetSheetDebugText(), 10];
     // The top navigation bar (where the logo is), hidden pieces included, with
     // which picture each image view shows.
     UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);
@@ -616,6 +618,15 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
                           NSStringFromCGRect(mediaBox.superview.bounds), 10];
         NSUInteger mediaLines = kMaxLines - 22;
         DumpView(mediaBox, 0, out, &mediaLines);
+    }
+    // The first link preview on screen, to see what it is made of (for a
+    // one-line preview with small media).
+    UIView* linkCard = FindViewByClassParts(window, @[ @"T1", @"CardView" ]);
+    if (linkCard) {
+        [out appendFormat:@"== LINK CARD == in %@ %@%c", NSStringFromClass(linkCard.superview.class),
+                          NSStringFromCGRect(linkCard.superview.bounds), 10];
+        NSUInteger cardLines = kMaxLines - 26;
+        DumpView(linkCard, 0, out, &cardLines);
     }
     UIView* status = FindViewByClassParts(window, @[ @"T1StandardStatusView" ]);
     SEL authorSel = NSSelectorFromString(@"visibleAuthorView");

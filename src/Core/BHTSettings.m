@@ -471,6 +471,16 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_sheet_open",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_card_press",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_paw_loading",
                         @"default": @YES,
                         @"type": @"toggle"
@@ -490,6 +500,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_compact_media",
                         @"default": @NO,
                         @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_corner_media",
+                        @"default": @YES,
+                        @"type": @"toggle",
+                        @"parentKey": @"kemo_compact_media"
                     },
                     @{
                         @"key": @"kemo_media_only",

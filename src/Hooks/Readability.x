@@ -49,17 +49,23 @@ static NSString* const kDimKey = @"kemo_dim_actions";
 static const CGFloat kCardSide = 8.0;    // page colour left and right of a card
 static const CGFloat kPileStep = 3.5;    // how far each card edge under a pile peeks out
 static const CGFloat kNestIndent = 46.0; // where a thread's inner box starts, from the card's left edge
-static const CGFloat kDimAlpha = 0.45;
+static const CGFloat kDimAlpha = 0.6; // 0.45 until 7.3.98: the counts were hard to read
 static const CGFloat kReplyPull = 80.0;  // pull this far to answer
 
 // Switches and the card style, read once and refreshed when settings change
 // (the cell hook runs a lot). gStamp changes whenever the style does, so cells
 // know to redo their colours.
-static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn;
+static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn, gPressOn;
 static NFBCardStyle gStyle;
 static NSInteger gStamp = 0;
 
 static void RefreshOnScreen(void);
+
+// CompactMedia.x: one small photo beside the text (see there).
+extern CGFloat NFBCornerThumbFor(id viewModel);
+extern CGFloat NFBCornerGap(void);
+extern void NFBCornerAdjustLayout(id layout, CGFloat thumb);
+extern void NFBPlaceCornerMedia(UIView* status);
 static BOOL gSwitchesRead = NO;
 static NSString* const kReplyIndentKey = @"kemo_thread_indent_measured";
 
@@ -76,6 +82,7 @@ static void ReadSwitches(void) {
     BOOL cards = [BHTSettings boolForKey:kCardsKey];
     BOOL notes = [BHTSettings boolForKey:kNoteCardsKey];
     BOOL dim = [BHTSettings boolForKey:kDimKey];
+    gPressOn = [BHTSettings boolForKey:@"kemo_card_press"];
     gCompactOn = [BHTSettings boolForKey:@"kemo_compact_media"] &&
                  ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
     NFBCardStyle style = NFBCardStyleCurrent();
@@ -83,6 +90,14 @@ static void ReadSwitches(void) {
     NSArray* rgb = [[NSUserDefaults standardUserDefaults] arrayForKey:NFBCardPaperRGBKey];
     BOOL changed = cards != gCardsOn || notes != gNoteCardsOn || dim != gDimOn || !SameStyle(style, gStyle) ||
                    !((rgb == nil && lastRGB == nil) || [rgb isEqual:lastRGB]);
+    // The small photo's size and place change each row's height too.
+    static NSInteger lastMedia = -1;
+    NSInteger media = [[NSUserDefaults standardUserDefaults] integerForKey:@"kemo_thumb_side"] * 2 +
+                      ([BHTSettings boolForKey:@"kemo_corner_media"] ? 1 : 0);
+    if (media != lastMedia) {
+        changed = changed || lastMedia >= 0;
+        lastMedia = media;
+    }
     gCardsOn = cards;
     gNoteCardsOn = notes;
     gDimOn = dim;
@@ -334,6 +349,7 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, assign) BOOL active;
 @property (nonatomic, assign) NSInteger thread; // last thread flags, to notice changes
 @property (nonatomic, strong) NSHashTable<UIView*>* hiddenLines;
+@property (nonatomic, strong) NSHashTable<UIView*>* keptLines; // told to stay hidden (see KeepsHidden)
 @property (nonatomic, strong) NSMapTable<UIView*, UIColor*>* clearedBacking;
 @property (nonatomic, strong) NFBCardBackground* highlight; // the card-shaped tap highlight
 @property (nonatomic, strong) UIView* oldSelectedBackgroundView;
@@ -580,6 +596,13 @@ static void FindConnectors(UIView* view, int depth, NSMutableArray<UIView*>* fou
     }
 }
 
+// X shows its lines again after we hide them: the connectors lay themselves
+// out after the tweet does, which is after the row's card is set up (the line
+// from the first tweet's avatar was still there in 7.3.97 and 7.3.98). A line
+// hidden here is marked, and the hooks on X's two line classes keep a marked
+// line hidden for as long as it sits in a row of a thread card.
+static const void* kKeepHiddenKey = &kKeepHiddenKey;
+
 static void SetThreadLinesHidden(UITableViewCell* cell, NFBCardMemory* memory, BOOL hidden) {
     if (hidden) {
         NSMutableArray<UIView*>* lines = [NSMutableArray array];
@@ -587,19 +610,47 @@ static void SetThreadLinesHidden(UITableViewCell* cell, NFBCardMemory* memory, B
         FindThreadLines(cell.contentView, cell.contentView, 0, lines);
         if (!memory.hiddenLines) {
             memory.hiddenLines = [NSHashTable weakObjectsHashTable];
+            memory.keptLines = [NSHashTable weakObjectsHashTable];
         }
         for (UIView* line in lines) {
+            if (!objc_getAssociatedObject(line, kKeepHiddenKey)) {
+                objc_setAssociatedObject(line, kKeepHiddenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                [memory.keptLines addObject:line];
+            }
             if (!line.hidden) {
                 line.hidden = YES;
                 [memory.hiddenLines addObject:line];
             }
         }
-    } else if (memory.hiddenLines.count > 0) {
+    } else if (memory.hiddenLines.count > 0 || memory.keptLines.count > 0) {
+        for (UIView* line in memory.keptLines.allObjects) {
+            objc_setAssociatedObject(line, kKeepHiddenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        [memory.keptLines removeAllObjects];
         for (UIView* line in memory.hiddenLines.allObjects) {
             line.hidden = NO;
         }
         [memory.hiddenLines removeAllObjects];
     }
+}
+
+// Is this line of X's marked, and still in a row of a thread card? (X hands
+// its views from row to row; elsewhere the mark is dropped and X decides.)
+static BOOL KeepsHidden(UIView* view) {
+    if (!objc_getAssociatedObject(view, kKeepHiddenKey)) {
+        return NO;
+    }
+    for (UIView* up = view.superview; up; up = up.superview) {
+        if ([up isKindOfClass:[UITableViewCell class]]) {
+            NFBCardMemory* memory = objc_getAssociatedObject(up, kCardMemoryKey);
+            if (memory.active && memory.thread) {
+                return YES;
+            }
+            break;
+        }
+    }
+    objc_setAssociatedObject(view, kKeepHiddenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return NO;
 }
 
 // X puts a plain white view behind each tweet, as big as the row. Drawn
@@ -1160,39 +1211,41 @@ static BOOL AreCardMetrics(id metrics) {
     return fabs(display.left - margin) <= 0.5 && fabs(display.right - margin) <= 0.5;
 }
 
-// The metrics for a reply in a thread card, or nil for any other row. The
-// last answer is kept: rows are laid out in runs, and making a copy of X's
-// metrics for each tweet was part of 7.3.97's slow start.
-static os_unfair_lock gReplyLock = OS_UNFAIR_LOCK_INIT;
-static id gReplySource = nil, gReplyResult = nil;
-static CGFloat gReplyFor = -1;
+// The metrics for one row: further in on the left (a reply in a thread card)
+// and narrower on the right (one small photo beside the text). The last
+// answer is kept: rows are laid out in runs, and making a copy of X's metrics
+// for each tweet was part of 7.3.97's slow start.
+static os_unfair_lock gRowLock = OS_UNFAIR_LOCK_INIT;
+static id gRowSource = nil, gRowResult = nil;
+static CGFloat gRowLeft = -1, gRowRight = -1;
 
-static id MetricsForReply(id metrics, NSUInteger connector) {
-    if (!(connector & kConnectorUpBit)) {
-        return nil;
-    }
-    CGFloat indent = ReplyIndentFor(metrics);
+static id MetricsForRow(id metrics, CGFloat left, CGFloat right) {
     id result = nil;
-    os_unfair_lock_lock(&gReplyLock);
-    if (gReplyResult && fabs(gReplyFor - indent) < 0.01 && (gReplySource == metrics || [gReplySource isEqual:metrics])) {
-        result = gReplyResult;
+    os_unfair_lock_lock(&gRowLock);
+    if (gRowResult && fabs(gRowLeft - left) < 0.01 && fabs(gRowRight - right) < 0.01 &&
+        (gRowSource == metrics || [gRowSource isEqual:metrics])) {
+        result = gRowResult;
     }
-    os_unfair_lock_unlock(&gReplyLock);
+    os_unfair_lock_unlock(&gRowLock);
     if (!result) {
         CGFloat before = MetricNumber(metrics, @"contentWidth");
         UIEdgeInsets content = MetricInsets(metrics, @"contentEdgeInsets");
-        content.left += indent;
+        content.left += left;
+        content.right += right;
         result = MetricsWithInsets(metrics, @"layoutMetricsWithContentEdgeInsets:", content);
-        if (!result || MetricNumber(result, @"contentWidth") > before - indent / 2) {
+        if (!result || MetricNumber(result, @"contentWidth") > before - (left + right) / 2) {
             return nil;
         }
-        os_unfair_lock_lock(&gReplyLock);
-        gReplySource = metrics;
-        gReplyResult = result;
-        gReplyFor = indent;
-        os_unfair_lock_unlock(&gReplyLock);
+        os_unfair_lock_lock(&gRowLock);
+        gRowSource = metrics;
+        gRowResult = result;
+        gRowLeft = left;
+        gRowRight = right;
+        os_unfair_lock_unlock(&gRowLock);
     }
-    gIndentedRows++;
+    if (left > 0) {
+        gIndentedRows++;
+    }
     return result;
 }
 
@@ -1270,6 +1323,153 @@ static CGRect FrameWithRoom(UITableViewCell* cell, CGRect frame) {
     return frame;
 }
 
+// MARK: "Show more replies" as a pill
+// In a thread card X's "show more replies" row is a line of blue text. It is
+// drawn as a small pill instead, with the faces of the replies next to it (the
+// people of this thread that are on screen; X does not say who is behind the
+// row), so it reads as something to press. X's own label is only faded, and
+// the row is pressed as before: the pill takes no touches.
+
+static const void* kMorePillKey = &kMorePillKey;
+static const void* kMoreFadedKey = &kMoreFadedKey;
+static void BiggestImage(UIView* view, int depth, UIImage** best, CGFloat* bestArea);
+
+static UILabel* FirstLabel(UIView* view, int depth) {
+    if (depth > 5) {
+        return nil;
+    }
+    for (UIView* sub in view.subviews) {
+        if ([sub isKindOfClass:[UILabel class]] && ((UILabel*)sub).text.length > 0) {
+            return (UILabel*)sub;
+        }
+        UILabel* found = FirstLabel(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void UpdateMorePill(UITableViewCell* cell, NFBCardMemory* memory, UITableView* table, BOOL show) {
+    UIView* pill = objc_getAssociatedObject(cell, kMorePillKey);
+    UILabel* own = show ? FirstLabel(cell.contentView, 0) : nil;
+    if (!show || own.text.length == 0) {
+        if (pill) {
+            [pill removeFromSuperview];
+            objc_setAssociatedObject(cell, kMorePillKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            UIView* faded = objc_getAssociatedObject(cell, kMoreFadedKey);
+            faded.alpha = 1;
+            objc_setAssociatedObject(cell, kMoreFadedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        return;
+    }
+    UILabel* words = nil;
+    NSArray<UIImageView*>* faces = nil;
+    if (!pill) {
+        pill = [UIView new];
+        pill.userInteractionEnabled = NO;
+        pill.layer.cornerCurve = kCACornerCurveContinuous;
+        words = [UILabel new];
+        words.tag = 1;
+        words.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [pill addSubview:words];
+        for (NSInteger i = 0; i < 2; i++) {
+            UIImageView* face = [UIImageView new];
+            face.tag = 2 + i;
+            face.contentMode = UIViewContentModeScaleAspectFill;
+            face.clipsToBounds = YES;
+            face.layer.cornerRadius = 10;
+            face.layer.borderWidth = 1.5;
+            [pill addSubview:face];
+        }
+        objc_setAssociatedObject(cell, kMorePillKey, pill, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    words = (UILabel*)[pill viewWithTag:1];
+    faces = @[ (UIImageView*)[pill viewWithTag:2], (UIImageView*)[pill viewWithTag:3] ];
+    if (own.alpha > 0) {
+        own.alpha = 0;
+        objc_setAssociatedObject(cell, kMoreFadedKey, own, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    // The faces of the replies above and below.
+    NSMutableArray<UIImage*>* pictures = [NSMutableArray array];
+    for (NSNumber* step in @[ @1, @(-1), @2 ]) {
+        UITableViewCell* other = Neighbour(table, cell, step.integerValue);
+        UIImage* picture = nil;
+        CGFloat area = 0;
+        if (other && pictures.count < 2) {
+            BiggestImage(AvatarOf(other), 0, &picture, &area);
+        }
+        if (picture && ![pictures containsObject:picture]) {
+            [pictures addObject:picture];
+        }
+    }
+    UIColor* paper = memory.background.paper ?: [UIColor systemBackgroundColor];
+    pill.backgroundColor = paper;
+    words.text = own.text;
+    words.textColor = [UIColor labelColor];
+    CGFloat x = 8;
+    for (NSUInteger i = 0; i < faces.count; i++) {
+        UIImageView* face = faces[i];
+        face.hidden = i >= pictures.count;
+        if (!face.hidden) {
+            face.image = pictures[i];
+            face.layer.borderColor = [paper resolvedColorWithTraitCollection:cell.traitCollection].CGColor;
+            face.frame = CGRectMake(x, 4, 20, 20);
+            x += 14;
+        }
+    }
+    if (pictures.count > 0) {
+        x += 12;
+    }
+    CGFloat wordsWidth = ceil([words sizeThatFits:CGSizeMake(CGFLOAT_MAX, 28)].width);
+    words.frame = CGRectMake(x, 0, wordsWidth, 28);
+    CGFloat width = x + wordsWidth + 12;
+    CGFloat left = ThreadX() + 23 + 8;
+    pill.layer.cornerRadius = 14;
+    pill.frame = CGRectMake(left, round((CGRectGetHeight(cell.bounds) - 28) / 2), MIN(width, CGRectGetWidth(cell.bounds) - left - 24), 28);
+    if (pill.superview != cell) {
+        [cell addSubview:pill];
+    }
+}
+
+// MARK: A pressed card
+// A card that is pressed goes in a little (0.98, 140 ms), like something that
+// can be pressed. It follows the row's own highlight, which UIKit only sets
+// when the touch is not a scroll, and not when the finger is on a picture, a
+// link preview, a quoted tweet, the avatar or a button. The row's sublayer
+// transform is used, so nothing X lays out is touched.
+static void MoveSublayers(CALayer* layer, CATransform3D to, CFTimeInterval duration, BOOL spring);
+
+static void PressCard(UITableViewCell* cell, BOOL down) {
+    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
+    BOOL press = down && gPressOn && memory.active;
+    if (press) {
+        UITableView* table = TableOf(cell);
+        if (table.isDragging || table.isDecelerating) {
+            press = NO;
+        } else {
+            CGPoint point = [table.panGestureRecognizer locationInView:cell];
+            UIView* hit = CGRectContainsPoint(cell.bounds, point) ? [cell hitTest:point withEvent:nil] : nil;
+            for (UIView* view = hit; view && view != cell; view = view.superview) {
+                NSString* name = NSStringFromClass(view.class);
+                if ([view isKindOfClass:[UIControl class]] || [name containsString:@"Media"] ||
+                    [name containsString:@"Photo"] || [name containsString:@"Video"] ||
+                    [name containsString:@"Attachment"] || [name containsString:@"Card"] ||
+                    [name containsString:@"Quoted"] || [name containsString:@"Avatar"] ||
+                    [name containsString:@"FleetLine"]) {
+                    press = NO;
+                    break;
+                }
+            }
+        }
+    }
+    CATransform3D target = press ? CATransform3DMakeScale(0.98, 0.98, 1) : CATransform3DIdentity;
+    if (CATransform3DEqualToTransform(cell.layer.sublayerTransform, target)) {
+        return;
+    }
+    MoveSublayers(cell.layer, target, press ? 0.14 : 0.2, NO);
+}
+
 // MARK: Putting a card on a row
 
 static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
@@ -1292,6 +1492,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
                 (CGRectGetHeight(cell.bounds) >= 36 || (flags & NFBThreadUp));
     if (!want) {
         RemoveCard(cell, memory);
+        UpdateMorePill(cell, memory, table, NO);
         if (!listOn && kind != NFBListOther) {
             SetTablePage(table, nil);
         }
@@ -1375,6 +1576,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         cell.selectedBackgroundView = highlight;
     }
     SetThreadLinesHidden(cell, memory, flags != 0);
+    UpdateMorePill(cell, memory, table, flags != 0 && [NSStringFromClass(cell.class) containsString:@"ShowMore"]);
     if (memory.thread != flags) {
         // The neighbours decide their own edges from this row; let them look again.
         if ((memory.thread ^ flags) & NFBThreadUp) {
@@ -1429,7 +1631,11 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     if (nested) {
         CGRect drawn = AvatarDrawnRect(avatar, cell);
         CGFloat line = ThreadX();
-        if (fits && !CGRectIsNull(drawn) && fabs(CGRectGetMidX(drawn) - line) <= 16) {
+        if (fits && CGRectIsNull(drawn)) {
+            // "Show more replies" and other rows without an avatar: as X laid
+            // them out, inside the inner box.
+            background.nestLeft = line - 23 - 8;
+        } else if (fits && !CGRectIsNull(drawn) && fabs(CGRectGetMidX(drawn) - line) <= 16) {
             // X laid this reply out further in already: only settle its
             // avatar on the line, at full size.
             CGFloat delta = line - CGRectGetMidX(drawn);
@@ -1848,6 +2054,12 @@ static void AttachReplySwipe(UITableViewCell* cell) {
 @interface TFNTableViewCell : UITableViewCell
 @end
 
+@interface TFNRoundedCornerView : UIView
+@end
+
+@interface ConversationConnectorView : UIView
+@end
+
 @interface T1StatusTableRowAdapter : NSObject
 @end
 
@@ -1951,11 +2163,17 @@ static void LayoutCard(UITableViewCell* cell) {
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     %orig;
     KeepCardCleanSoon((UITableViewCell*)self);
+    PressCard((UITableViewCell*)self, highlighted);
 }
 
 - (void)setSelected:(BOOL)selected animated:(BOOL)animated {
     %orig;
     KeepCardCleanSoon((UITableViewCell*)self);
+}
+
+- (void)prepareForReuse {
+    %orig;
+    PressCard((UITableViewCell*)self, NO);
 }
 
 - (void)layoutSubviews {
@@ -1983,6 +2201,31 @@ static void LayoutCard(UITableViewCell* cell) {
 
 - (CGRect)contentFrame {
     return FrameWithRoom((UITableViewCell*)self, %orig);
+}
+
+%end
+
+%end
+
+// X's two kinds of thread line stay hidden while they are marked (see KeepsHidden).
+%group RoundedLines
+
+%hook TFNRoundedCornerView
+
+- (void)setHidden:(BOOL)hidden {
+    %orig(hidden || KeepsHidden((UIView*)self));
+}
+
+%end
+
+%end
+
+%group ConnectorLines
+
+%hook ConversationConnectorView
+
+- (void)setHidden:(BOOL)hidden {
+    %orig(hidden || KeepsHidden((UIView*)self));
 }
 
 %end
@@ -2069,8 +2312,12 @@ static void LayoutCard(UITableViewCell* cell) {
           withPreviousLayout:(id)previousLayout {
     BOOL cards = AreCardMetrics(layoutMetrics);
     NSUInteger connector = cards ? ConnectorFor(viewModel, options) : 0;
-    id indented = (cards && gCardsOn) ? MetricsForReply(layoutMetrics, connector) : nil;
-    id layout = indented ? %orig(viewModel, options, account, indented, previousLayout) : %orig;
+    CGFloat left = (cards && gCardsOn && (connector & kConnectorUpBit)) ? ReplyIndentFor(layoutMetrics) : 0;
+    CGFloat thumb = NFBCornerThumbFor(viewModel);
+    CGFloat right = thumb > 0 ? thumb + NFBCornerGap() : 0;
+    id narrowed = (layoutMetrics && (left > 0 || right > 0)) ? MetricsForRow(layoutMetrics, left, right) : nil;
+    id layout = narrowed ? %orig(viewModel, options, account, narrowed, previousLayout) : %orig;
+    NFBCornerAdjustLayout(layout, (narrowed && right > 0) ? thumb : 0);
     GiveCardRoom(layout, cards, connector);
     return layout;
 }
@@ -2787,6 +3034,8 @@ static void DimActions(UIView* actions) {
     %orig;
     // Quoted tweets and other kinds keep X's sizes.
     if (plain) {
+        // First, so the thread line and the card below see the tweet as it ends up.
+        NFBPlaceCornerMedia((UIView*)status);
         avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
         author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
         if (fabs(gStyle.avatarScale - 1) > 0.005 && CGRectGetWidth(avatar.bounds) > 20 &&
@@ -2809,6 +3058,19 @@ static void DimActions(UIView* actions) {
                     ApplyCard((UITableViewCell*)up, ListKind(TableOf(up)));
                     if (author) {
                         ArrangeNameLine(author); // a reply's time is left out once the row knows it is one
+                    }
+                    if (memory.thread) {
+                        // X's connectors lay themselves out after this and may
+                        // add a line that was not there yet: once more when
+                        // this layout pass is over.
+                        __weak UITableViewCell* weakRow = (UITableViewCell*)up;
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            UITableViewCell* row = weakRow;
+                            NFBCardMemory* later = row ? objc_getAssociatedObject(row, kCardMemoryKey) : nil;
+                            if (later.active && later.thread) {
+                                SetThreadLinesHidden(row, later, YES);
+                            }
+                        });
                     }
                 }
                 break;
@@ -2957,6 +3219,12 @@ void NFBNotePullStatus(UIView* control, unsigned long long status) {
         if (class_getInstanceMethod(tfnCell, NSSelectorFromString(@"contentFrame"))) {
             %init(TFNFrame);
         }
+    }
+    if (objc_getClass("TFNRoundedCornerView")) {
+        %init(RoundedLines);
+    }
+    if (objc_getClass("ConversationConnectorView")) {
+        %init(ConnectorLines);
     }
     Class statusCell = objc_getClass("T1StatusCell");
     Class rowAdapter = objc_getClass("T1StatusTableRowAdapter");

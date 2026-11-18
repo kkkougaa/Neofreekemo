@@ -534,6 +534,10 @@
 "KEMO_DDAY_HEADER" = "D-day";
 "KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
 "KEMO_PLAIN_REFRESH_TITLE" = "Plain pull to refresh on Home";
+"KEMO_SHEET_OPEN_TITLE" = "Open a tweet as a sheet";
+"KEMO_CARD_PRESS_TITLE" = "Cards press in";
+"KEMO_CORNER_MEDIA_TITLE" = "A single photo beside the text";
+"KEMO_THUMB_SIDE" = "Small photo size";
 "KEMO_HEADER_BUBBLE_TITLE" = "Logo speech bubble";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "Bubble when the Spotify song changes";
 "KEMO_BUBBLE_MENU_TITLE" = "Speech bubble";

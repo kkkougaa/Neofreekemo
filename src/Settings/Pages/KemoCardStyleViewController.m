@@ -32,7 +32,13 @@ static const CGFloat kPreviewSide = 8;    // page colour beside a card (kCardSid
 static const CGFloat kPreviewPad = 9;     // X's own margin inside a row
 static const CGFloat kPreviewAvatar = 38; // X's avatar
 static const CGFloat kPreviewColumnGap = 8;
-static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
+static NSString* const kPreviewThumbKey = @"kemo_thumb_side"; // the small photo's side (CompactMedia.x)
+
+static CGFloat PreviewThumb(void) {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:kPreviewThumbKey];
+    CGFloat side = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 56;
+    return MAX(40, MIN(92, side));
+}
 
 @interface NFBPreviewRow : UIView
 @property (nonatomic, copy) NSDictionary* sample;
@@ -41,6 +47,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
 @property (nonatomic, assign) BOOL down;    // joined to the row below
 @property (nonatomic, assign) BOOL nestUp;  // the row above is a reply too
 @property (nonatomic, assign) BOOL compact; // small media
+@property (nonatomic, assign) BOOL corner;  // one small photo sits beside the text
 @property (nonatomic, assign) BOOL dim;     // faded action row
 - (CGFloat)layoutForWidth:(CGFloat)width;
 @end
@@ -154,6 +161,13 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     CGFloat left = margin + indent, right = width - margin;
     CGFloat avatarRight = left + kPreviewPad + kPreviewAvatar;
     CGFloat columnX = avatarRight + kPreviewColumnGap, columnRight = right - kPreviewPad;
+    // One small photo sits at the top right; the tweet's column ends before it.
+    UIImage* picture = [sample[@"media"] isKindOfClass:[UIImage class]] ? sample[@"media"] : nil;
+    CGFloat thumb = PreviewThumb();
+    BOOL beside = picture && self.compact && self.corner;
+    if (beside) {
+        columnRight -= thumb + 8;
+    }
     CGFloat columnWidth = MAX(40, columnRight - columnX);
     // Half the gap and the inner room above the content, unless the row is
     // joined to the one above (and the same below), as in the timeline.
@@ -250,13 +264,16 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
 
     // Its picture: a small square at the right end of the text column with
     // small media on, else as wide as the column.
-    UIImage* picture = [sample[@"media"] isKindOfClass:[UIImage class]] ? sample[@"media"] : nil;
     _media.hidden = picture == nil;
-    if (picture) {
+    if (beside) {
+        _media.image = picture;
+        _media.frame = CGRectMake(columnRight + 8, nameTop, thumb, thumb);
+        _media.layer.cornerRadius = 12;
+    } else if (picture) {
         y += 8;
         _media.image = picture;
         if (self.compact) {
-            CGFloat side = MIN(kPreviewThumb, columnWidth);
+            CGFloat side = MIN(thumb, columnWidth);
             _media.frame = CGRectMake(columnRight - side, y, side, side);
             _media.layer.cornerRadius = 12;
             y += side;
@@ -283,7 +300,11 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     }
     CGRect replyIcon = _actionIcons.firstObject.frame;
     y += 18 + 10;
-    CGFloat height = MAX(y, CGRectGetMaxY(_avatar.frame) + 10) + (self.down ? 0 : roomAtEnd);
+    CGFloat height = MAX(y, CGRectGetMaxY(_avatar.frame) + 10);
+    if (beside) {
+        height = MAX(height, CGRectGetMaxY(_media.frame) + 10);
+    }
+    height += self.down ? 0 : roomAtEnd;
 
     // The card (Readability.x's NFBCardBackground): as wide as the row, with
     // half the gap above and below unless joined to the next row.
@@ -443,6 +464,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     for (NFBPreviewRow* row in _rows) {
         row.style = style;
         row.compact = compact;
+        row.corner = [BHTSettings boolForKey:@"kemo_corner_media"];
         row.dim = dim;
         CGFloat height = [row layoutForWidth:width];
         row.frame = CGRectMake(0, y, width, height);
@@ -517,6 +539,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     [self addSlider:NFBCardRadiusKey title:L(@"KEMO_CARD_RADIUS") min:0 max:30 unit:@"pt" divisor:1];
     [self addSlider:NFBCardGapKey title:L(@"KEMO_CARD_GAP") min:0 max:24 unit:@"pt" divisor:1];
     [self addSlider:NFBCardInnerKey title:L(@"KEMO_CARD_INNER") min:0 max:18 unit:@"pt" divisor:1];
+    [self addSlider:kPreviewThumbKey title:L(@"KEMO_THUMB_SIDE") min:40 max:92 unit:@"pt" divisor:1];
     [self addPaperRow];
 
     [self addHeading:L(@"KEMO_CARD_SECTION_TEXT")];
@@ -610,6 +633,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
         NFBCardRadiusKey : @(style.radius),
         NFBCardGapKey : @(style.gap),
         NFBCardInnerKey : @(style.inner),
+        kPreviewThumbKey : @(PreviewThumb()),
         NFBCardBodyKey : @(round(style.bodyStep * 10)),
         NFBCardNameKey : @(round(style.nameScale * 100)),
         NFBCardAvatarKey : @(round(style.avatarScale * 100)),
@@ -654,6 +678,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
         [defaults setInteger:(NSInteger)value forKey:key];
         [self showValueFor:key];
         self.preview.style = NFBCardStyleCurrent();
+        [self.preview setNeedsLayout];
     }
 }
 

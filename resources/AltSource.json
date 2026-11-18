@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.84",
+      "subtitle": "NeoFreeBird version 7.3.85",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.85",
+          "buildVersion": "85",
+          "date": "2026-11-18T05:53:54Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.85/NeoFreeBird-Twitter-sideloaded_7.3.85_12.44.ipa",
+          "size": 253471376,
+          "minOSVersion": "15.0",
+          "localizedDescription": "불러온 트윗 검색: 홈 타임라인의 새로고침 표시가 나타날 때도 당김 감지를 붙여서, 당겨도 새로고침만 되던 문제를 고침."
+        },
         {
           "version": "7.3.84",
           "buildVersion": "84",

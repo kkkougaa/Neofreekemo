@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.100",
+      "subtitle": "NeoFreeBird version 7.3.102",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.102",
+          "buildVersion": "102",
+          "date": "2026-11-18T12:06:10Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.102/NeoFreeBird-Twitter-sideloaded_7.3.102_12.44.ipa",
+          "size": 270907447,
+          "minOSVersion": "15.0",
+          "localizedDescription": "글 옆 작은 사진이 카드 밖으로 나가던 문제 수정(이름 줄 아래, 글 칸 오른쪽 끝에 놓임). 카드 눌림 효과 제거. 작은 사진의 콘텐츠 경고는 눈 아이콘과 보기 버튼만 남김."
+        },
         {
           "version": "7.3.100",
           "buildVersion": "100",

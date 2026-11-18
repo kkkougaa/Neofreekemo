@@ -542,4 +542,4 @@
 "KEMO_DIM_ACTIONS_TITLE" = "트윗 아래 숫자 줄 흐리게";
 "KEMO_DIM_ACTIONS_DETAIL" = "답글·재게시·마음에 들어요·조회수 줄을 흐리게 해서 글이 먼저 읽히게 해요.";
 "KEMO_BIGGER_TEXT_TITLE" = "트윗 글자 조금 크게";
-"KEMO_BIGGER_TEXT_DETAIL" = "트윗 본문 글자를 조금 키워요. 앱을 다시 열면 모든 트윗에 적용돼요.";
+"KEMO_BIGGER_TEXT_DETAIL" = "트윗 본문 글자를 조금 키우고, 프로필 사진과 이름·아이디도 함께 조금 키워 본문과 구분되게 해요. 앱을 다시 열면 모든 트윗에 적용돼요.";

@@ -217,6 +217,8 @@
 @interface T1StandardStatusView : UIView
 @property (nonatomic) __weak id<TTACoreStatusViewEventHandler> eventHandler;
 @property (readonly, nonatomic) UIView* visibleInlineActionsView;
+@property (readonly, nonatomic) UIView* visibleAvatarView;
+@property (readonly, nonatomic) UIView* visibleAuthorView;
 @end
 
 @interface T1TweetDetailsFocalStatusView : UIView

@@ -590,4 +590,4 @@
 "KEMO_DIM_ACTIONS_TITLE" = "Fade the row under tweets";
 "KEMO_DIM_ACTIONS_DETAIL" = "Fades the reply, repost, like and view counts so the text is read first.";
 "KEMO_BIGGER_TEXT_TITLE" = "Slightly bigger tweet text";
-"KEMO_BIGGER_TEXT_DETAIL" = "Makes tweet text a little larger. Reopen the app for it to apply to every tweet.";
+"KEMO_BIGGER_TEXT_DETAIL" = "Makes tweet text a little larger, with a slightly bigger avatar and name line so the name still stands out. Reopen the app for it to apply to every tweet.";

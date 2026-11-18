@@ -370,21 +370,165 @@ static UITableViewCell* FindPileCell(UIView* view, int depth) {
     return nil;
 }
 
+// The biggest list on screen (the timeline or notifications being looked at).
+static UITableView* FindMainTable(UIView* view, int depth, UITableView* best) {
+    if (depth > 30 || view.hidden || view.alpha < 0.05) {
+        return best;
+    }
+    if ([view isKindOfClass:[UITableView class]] && view.window) {
+        CGRect frame = [view convertRect:view.bounds toView:nil];
+        CGRect visible = CGRectIntersection(frame, view.window.bounds);
+        CGFloat area = CGRectIsNull(visible) ? 0 : CGRectGetWidth(visible) * CGRectGetHeight(visible);
+        CGRect bestFrame = best ? CGRectIntersection([best convertRect:best.bounds toView:nil], best.window.bounds) : CGRectNull;
+        CGFloat bestArea = CGRectIsNull(bestFrame) ? 0 : CGRectGetWidth(bestFrame) * CGRectGetHeight(bestFrame);
+        if (area > bestArea) {
+            best = (UITableView*)view;
+        }
+    }
+    for (UIView* sub in view.subviews) {
+        best = FindMainTable(sub, depth + 1, best);
+    }
+    return best;
+}
+
+static NSString* ColorText(UIColor* color, UITraitCollection* traits) {
+    if (!color) {
+        return @"nil";
+    }
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    [[color resolvedColorWithTraitCollection:traits] getRed:&r green:&g blue:&b alpha:&a];
+    return [NSString stringWithFormat:@"%02x%02x%02x/%.2f", (int)(r * 255), (int)(g * 255), (int)(b * 255), a];
+}
+
+// Views inside a row that paint a solid colour or round their corners.
+static void DumpPainted(UIView* view, UIView* cell, int depth, NSMutableString* out, NSUInteger* lines) {
+    if (depth > 6 || *lines > 6) {
+        return;
+    }
+    if ([NSStringFromClass(view.class) hasPrefix:@"NFBCard"]) {
+        return;
+    }
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    [[view.backgroundColor resolvedColorWithTraitCollection:view.traitCollection] getRed:&r green:&g blue:&b alpha:&a];
+    if (view != cell && (a > 0.3 || view.layer.cornerRadius > 0) && !view.hidden) {
+        CGRect frame = [view convertRect:view.bounds toView:cell];
+        [out appendFormat:@"     %*s%@ %@ bg=%@ r=%.0f%@%c", depth, "", NSStringFromClass(view.class),
+                          NSStringFromCGRect(frame), ColorText(view.backgroundColor, view.traitCollection),
+                          view.layer.cornerRadius, view.clipsToBounds ? @" clip" : @"", 10];
+        (*lines)++;
+    }
+    for (UIView* sub in view.subviews) {
+        DumpPainted(sub, cell, depth + 1, out, lines);
+    }
+}
+
+static NSString* FirstText(UIView* view, int depth) {
+    if (depth > 14 || view.hidden) {
+        return nil;
+    }
+    if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length > 0) {
+        return Trim(((UILabel*)view).text);
+    }
+    if (view.accessibilityLabel.length > 0 && ![view isKindOfClass:[UIButton class]] && depth > 0) {
+        return Trim(view.accessibilityLabel);
+    }
+    for (UIView* sub in view.subviews) {
+        NSString* found = FirstText(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void DumpCardRows(UIWindow* window, NSMutableString* out) {
+    UITableView* table = FindMainTable(window, 0, nil);
+    if (!table) {
+        [out appendFormat:@"== CARD ROWS == (no list)%c", 10];
+        return;
+    }
+    UIViewController* owner = nil;
+    for (UIResponder* r = table.nextResponder; r; r = r.nextResponder) {
+        if ([r isKindOfClass:[UIViewController class]]) {
+            owner = (UIViewController*)r;
+            break;
+        }
+    }
+    [out appendFormat:@"== CARD ROWS == %@ in %@ bg=%@ inset=%@ offset=%.0f%c", NSStringFromClass(table.class),
+                      owner ? NSStringFromClass(owner.class) : @"-", ColorText(table.backgroundColor, table.traitCollection),
+                      NSStringFromUIEdgeInsets(table.adjustedContentInset), table.contentOffset.y, 10];
+    for (UIView* sub in table.subviews) {
+        if (![sub isKindOfClass:[UITableViewCell class]] && !sub.hidden && sub.alpha > 0.05 &&
+            CGRectGetHeight(sub.frame) > 2) {
+            [out appendFormat:@"  [list sub] %@ %@ bg=%@%c", NSStringFromClass(sub.class), NSStringFromCGRect(sub.frame),
+                              ColorText(sub.backgroundColor, sub.traitCollection), 10];
+        }
+    }
+    NSArray<UITableViewCell*>* cells = [table.visibleCells sortedArrayUsingComparator:^NSComparisonResult(UIView* a, UIView* b) {
+        return CGRectGetMinY(a.frame) < CGRectGetMinY(b.frame) ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    NSUInteger shown = 0;
+    for (UITableViewCell* cell in cells) {
+        if (shown++ >= 8) {
+            break;
+        }
+        NSString* connector = @"-";
+        UIView* status = FindViewByClassParts(cell.contentView, @[ @"T1StandardStatusView" ]);
+        if (status && [status respondsToSelector:NSSelectorFromString(@"conversationConnectorType")]) {
+            NSUInteger type = ((NSUInteger (*)(id, SEL))objc_msgSend)(status, NSSelectorFromString(@"conversationConnectorType"));
+            connector = [NSString stringWithFormat:@"%lu", (unsigned long)type];
+        }
+        NSString* texts = FirstText(cell.contentView, 0) ?: @"";
+        if (texts.length > 40) {
+            texts = [texts substringToIndex:40];
+        }
+        [out appendFormat:@"  %@ y=%.0f h=%.0f card=%@ bgView=%@ conn=%@ cellBg=%@ \"%@\"%c", NSStringFromClass(cell.class),
+                          CGRectGetMinY(cell.frame), CGRectGetHeight(cell.frame),
+                          [NSStringFromClass(cell.backgroundView.class) hasPrefix:@"NFBCard"] ? @"Y" : @"n",
+                          cell.backgroundView ? NSStringFromClass(cell.backgroundView.class) : @"nil", connector,
+                          ColorText(cell.backgroundColor, cell.traitCollection), texts, 10];
+        NSUInteger lines = 0;
+        for (UIView* sub in cell.subviews) {
+            if (sub == cell.backgroundView) {
+                continue;
+            }
+            DumpPainted(sub, cell, 0, out, &lines);
+        }
+    }
+}
+
+// The name line of the first tweet: what draws it and in which font.
+static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUInteger* lines) {
+    if (depth > 5 || *lines > 10) {
+        return;
+    }
+    UIFont* font = [view respondsToSelector:@selector(font)] ? ((UILabel*)view).font : nil;
+    [out appendFormat:@"   %*s%@ %@%@%c", depth, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+                      [font isKindOfClass:[UIFont class]]
+                          ? [NSString stringWithFormat:@" font=%@ %.1f", font.fontName, font.pointSize]
+                          : @"",
+                      10];
+    (*lines)++;
+    for (UIView* sub in view.subviews) {
+        DumpAuthorFonts(sub, depth + 1, out, lines);
+    }
+}
+
 static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
+    [out appendFormat:@"== COMPACT MEDIA ==%c%@ mediaWidth=%.1f%c", 10, NFBCompactMediaDebugText(), NFBLastMediaWidth(), 10];
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
-    [out appendFormat:@"== ROW LAYOUT PROBE == mediaWidth=%.1f%c", NFBLastMediaWidth(), 10];
-    NSArray* layoutWords = @[ @"width", @"layout", @"size", @"frame", @"text", @"attach", @"media", @"column",
-                              @"inset", @"margin", @"height" ];
-    NSMutableArray<NSString*>* names = [NSMutableArray
-        arrayWithArray:@[ @"T1StandardStatusView", @"TTAStatusBodyAttributedTextView",
-                          @"T1StatusViewAttachmentContainerView", @"T1StandardStatusAttachmentViewAdapter" ]];
-    [names addObjectsFromArray:NFBRowLayoutClasses()];
-    for (NSString* name in names) {
-        Class cls = NSClassFromString(name);
-        if (cls) {
-            DumpClassInfoMatching(cls, out, layoutWords, 25);
-        } else {
-            [out appendFormat:@"-- %@ (not found)%c", name, 10];
+    DumpCardRows(window, out);
+    UIView* status = FindViewByClassParts(window, @[ @"T1StandardStatusView" ]);
+    SEL authorSel = NSSelectorFromString(@"visibleAuthorView");
+    SEL avatarSel = NSSelectorFromString(@"visibleAvatarView");
+    if (status && [status respondsToSelector:authorSel]) {
+        UIView* author = ((id (*)(id, SEL))objc_msgSend)(status, authorSel);
+        UIView* avatar = [status respondsToSelector:avatarSel] ? ((id (*)(id, SEL))objc_msgSend)(status, avatarSel) : nil;
+        [out appendFormat:@"== AUTHOR LINE == avatar=%@ %@ t=%@%c", avatar ? NSStringFromClass(avatar.class) : @"-",
+                          avatar ? NSStringFromCGRect(avatar.frame) : @"", avatar ? NSStringFromCGAffineTransform(avatar.transform) : @"", 10];
+        NSUInteger lines = 0;
+        if (author) {
+            DumpAuthorFonts(author, 0, out, &lines);
         }
     }
     UITableViewCell* pile = FindPileCell(window, 0);
@@ -399,6 +543,20 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
             DumpClassInfoMatching(avatar, out, peopleWords, 15);
         }
     }
+    // Where X sets the width of a row's text column (for media beside the text).
+    // 7.3.87's paste stopped inside the adapter, so the layout classes go first.
+    [out appendFormat:@"== ROW LAYOUT ==%c", 10];
+    NSArray* layoutWords = @[ @"width", @"layout", @"size", @"frame", @"text", @"attach", @"media", @"column",
+                              @"inset", @"margin", @"height", @"avatar", @"author", @"name" ];
+    NSMutableArray<NSString*>* names = [NSMutableArray arrayWithArray:NFBRowLayoutClasses()];
+    [names addObject:@"T1StandardStatusAttachmentViewAdapter"];
+    for (NSString* name in names) {
+        Class cls = NSClassFromString(name);
+        if (cls) {
+            DumpClassInfoMatching(cls, out, layoutWords, 40);
+        }
+    }
+    [out appendFormat:@"== END OF ROW PROBES ==%c", 10];
 }
 
 // Builds the outline of what's on screen and puts it on the pasteboard.
@@ -498,7 +656,6 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
-    [out appendFormat:@"== COMPACT MEDIA ==%c%@%c", 10, NFBCompactMediaDebugText(), 10];
     [out appendFormat:@"== LOCAL SEARCH ==%c%@%c", 10, NFBLocalSearchDebugText(), 10];
     [out appendFormat:@"== LAST CRASH ==%c%@%c", 10, NFBLastCrashText(), 10];
 

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.92",
+      "subtitle": "NeoFreeBird version 7.3.93",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.93",
+          "buildVersion": "93",
+          "date": "2026-11-18T07:43:11Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.93/NeoFreeBird-Twitter-sideloaded_7.3.93_12.44.ipa",
+          "size": 270851594,
+          "minOSVersion": "15.0",
+          "localizedDescription": "카드 모서리에 겹쳐 보이던 흰 사각형 제거. 스레드 카드에 답글로 꺾여 들어가는 선. 떠 있는 카드 이음매 정리. 이름 줄 커져도 … 버튼 제자리, 끝은 흐리게. 꾸미기에 '이름과 본문 사이 간격' 추가. 당겨서 새로고침 알약 다시 시도."
+        },
         {
           "version": "7.3.92",
           "buildVersion": "92",

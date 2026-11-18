@@ -315,16 +315,64 @@ static UIColor* XPaperColor(UITableViewCell* cell, UITableView* table) {
     return [UIColor systemBackgroundColor];
 }
 
-static void SetDividersHidden(UITableViewCell* cell, BOOL hidden) {
-    for (UIView* view in cell.subviews) {
-        if (IsDivider(view)) {
-            view.hidden = hidden;
-        }
+// The faint line X draws between rows. It can be UIKit's separator on the
+// cell, a divider view deeper inside the row, or the list's own separators, so
+// all three are looked for: views named like a divider, and hairline views
+// spanning most of the row's width at its top or bottom edge.
+static const void* kOldSeparatorStyleKey = &kOldSeparatorStyleKey;
+
+static void FindDividers(UIView* view, UITableViewCell* cell, int depth, NSMutableArray<UIView*>* found) {
+    if (depth > 5) {
+        return;
     }
-    for (UIView* view in cell.contentView.subviews) {
-        if (IsDivider(view)) {
-            view.hidden = hidden;
+    CGFloat width = CGRectGetWidth(cell.bounds), height = CGRectGetHeight(cell.bounds);
+    for (UIView* sub in view.subviews) {
+        if ([sub isKindOfClass:[NFBCardBackground class]] || sub == cell.backgroundView) {
+            continue;
         }
+        if (IsDivider(sub)) {
+            [found addObject:sub];
+            continue;
+        }
+        CGRect frame = [sub convertRect:sub.bounds toView:cell];
+        BOOL hairline = CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.6 &&
+                        (CGRectGetMinY(frame) < 2 || CGRectGetMaxY(frame) > height - 2) && sub.subviews.count == 0;
+        if (hairline) {
+            [found addObject:sub];
+            continue;
+        }
+        FindDividers(sub, cell, depth + 1, found);
+    }
+}
+
+static const void* kHiddenDividersKey = &kHiddenDividersKey;
+
+static void SetDividersHidden(UITableViewCell* cell, BOOL hidden) {
+    NSHashTable<UIView*>* done = objc_getAssociatedObject(cell, kHiddenDividersKey);
+    if (hidden) {
+        if (!done) {
+            done = [NSHashTable weakObjectsHashTable];
+            objc_setAssociatedObject(cell, kHiddenDividersKey, done, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        NSMutableArray<UIView*>* found = [NSMutableArray array];
+        FindDividers(cell, cell, 0, found);
+        for (UIView* view in found) {
+            if (!view.hidden) {
+                view.hidden = YES;
+                [done addObject:view];
+            }
+        }
+        UITableView* table = TableOf(cell);
+        if (table && table.separatorStyle != UITableViewCellSeparatorStyleNone) {
+            objc_setAssociatedObject(table, kOldSeparatorStyleKey, @(table.separatorStyle),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            table.separatorStyle = UITableViewCellSeparatorStyleNone;
+        }
+    } else {
+        for (UIView* view in done.allObjects) {
+            view.hidden = NO;
+        }
+        [done removeAllObjects];
     }
 }
 
@@ -343,6 +391,11 @@ static void SetTablePage(UITableView* table, UIColor* page) {
         table.backgroundColor = page;
         objc_setAssociatedObject(table, kTablePageStampKey, @(gStamp), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     } else if (old) {
+        NSNumber* separators = objc_getAssociatedObject(table, kOldSeparatorStyleKey);
+        if (separators) {
+            table.separatorStyle = (UITableViewCellSeparatorStyle)separators.integerValue;
+            objc_setAssociatedObject(table, kOldSeparatorStyleKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         table.backgroundColor = old;
         objc_setAssociatedObject(table, kOldTableColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(table, kTablePageStampKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -777,8 +830,16 @@ static BOOL PressReply(UIView* button) {
     self.decided = NO;
 }
 
+// 7.3.89 called super first: when one move crossed both the pan's own start
+// distance and ours, the pan asked to begin before this pull had decided, was
+// refused, and failed, so no more touches came and the card stayed put. Decide
+// first, then let the pan see the move.
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+    [self followTouches:touches];
     [super touchesMoved:touches withEvent:event];
+}
+
+- (void)followTouches:(NSSet<UITouch*>*)touches {
     UITableViewCell* cell = self.cell;
     if (!cell) {
         return;
@@ -818,7 +879,11 @@ static BOOL PressReply(UIView* button) {
 - (void)reset {
     [super reset];
     // Another gesture (the list scrolling) took over: put the card back.
-    [self endTracking:NO];
+    if (self.tracking) {
+        NSInteger moves = self.moves;
+        [self endTracking:NO];
+        gSwipeLog = [NSString stringWithFormat:@"taken over after %ld moves", (long)moves];
+    }
     self.decided = NO;
 }
 
@@ -861,7 +926,9 @@ static BOOL PressReply(UIView* button) {
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
-    return NO;
+    // The list's own scrolling must not make this pull fail before it has
+    // decided; once the card follows the finger the list is stopped anyway.
+    return [other.view isKindOfClass:[UITableView class]];
 }
 
 // The card is moved from the touches themselves; nothing to do here.
@@ -935,6 +1002,43 @@ static void Unscale(UIView* view) {
     }
 }
 
+// The name line also holds the "..." button at its right end; scaling the whole
+// line (7.3.89) pushed that button off the card. Only the pieces on the left
+// (name, badges, @handle, time) grow, each moved as if the line were scaled
+// from its left middle, and anything at the right end stays as X put it.
+static const void* kScaledPiecesKey = &kScaledPiecesKey;
+
+static void UnscaleNameLine(UIView* line) {
+    NSHashTable<UIView*>* pieces = line ? objc_getAssociatedObject(line, kScaledPiecesKey) : nil;
+    for (UIView* piece in pieces.allObjects) {
+        piece.transform = CGAffineTransformIdentity;
+    }
+    [pieces removeAllObjects];
+    Unscale(line);
+}
+
+static void ScaleNameLine(UIView* line, CGFloat scale) {
+    NSHashTable<UIView*>* pieces = objc_getAssociatedObject(line, kScaledPiecesKey);
+    if (!pieces) {
+        pieces = [NSHashTable weakObjectsHashTable];
+        objc_setAssociatedObject(line, kScaledPiecesKey, pieces, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    CGFloat width = CGRectGetWidth(line.bounds);
+    CGPoint anchor = CGPointMake(0, CGRectGetMidY(line.bounds));
+    for (UIView* piece in line.subviews) {
+        CGRect frame = piece.frame;
+        BOOL trailing = [piece isKindOfClass:[UIControl class]] || CGRectGetMinX(frame) > width * 0.6;
+        if (piece.hidden || trailing || CGRectGetWidth(frame) <= 0) {
+            continue;
+        }
+        CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        CGPoint moved = CGPointMake(anchor.x + (center.x - anchor.x) * scale, anchor.y + (center.y - anchor.y) * scale);
+        piece.transform = CGAffineTransformScale(
+            CGAffineTransformMakeTranslation(moved.x - center.x, moved.y - center.y), scale, scale);
+        [pieces addObject:piece];
+    }
+}
+
 %hook T1StandardStatusView
 
 - (void)layoutSubviews {
@@ -943,7 +1047,7 @@ static void Unscale(UIView* view) {
     UIView* avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
     UIView* author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
     Unscale(avatar);
-    Unscale(author);
+    UnscaleNameLine(author);
     %orig;
     // Quoted tweets and other kinds keep X's sizes.
     if (plain) {
@@ -954,7 +1058,7 @@ static void Unscale(UIView* view) {
             ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
         }
         if (fabs(gStyle.nameScale - 1) > 0.005 && CGRectGetWidth(author.bounds) > 40) {
-            ScaleFrom(author, gStyle.nameScale, CGPointMake(0, 0.5));
+            ScaleNameLine(author, gStyle.nameScale);
         }
     }
     UIView* actions = [self respondsToSelector:@selector(visibleInlineActionsView)]

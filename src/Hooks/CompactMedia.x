@@ -554,6 +554,86 @@ void NFBPlaceCornerMedia(UIView* status) {
 
 %end
 
+// MARK: The content warning on a small photo
+// X's cover over sensitive media (HFSensitiveTweetBlurredInterstitialView) has
+// an eye icon, a title, an explanation and a "View" button, laid out for a
+// full-width photo. On a small square the two texts ran into the icon and the
+// button. There they are left out: the icon sits above, the button below.
+// A cover on media of normal size is left as X draws it.
+@interface HFSensitiveTweetBlurredInterstitialView : UIView
+@end
+
+static const void* kCoverHiddenKey = &kCoverHiddenKey;
+
+static void CollectCover(UIView* view, int depth, NSMutableArray<UILabel*>* labels, UIImageView* __strong* icon,
+                         UIControl* __strong* button) {
+    if (depth > 5) {
+        return;
+    }
+    for (UIView* sub in view.subviews) {
+        if ([sub isKindOfClass:[UIControl class]]) {
+            if (!*button) {
+                *button = (UIControl*)sub; // its own title is not one of the texts
+            }
+            continue;
+        }
+        if ([sub isKindOfClass:[UILabel class]]) {
+            [labels addObject:(UILabel*)sub];
+            continue;
+        }
+        if ([sub isKindOfClass:[UIImageView class]] && !*icon && ((UIImageView*)sub).image &&
+            CGRectGetWidth(sub.bounds) > 0 && CGRectGetWidth(sub.bounds) <= 48) {
+            *icon = (UIImageView*)sub;
+        }
+        CollectCover(sub, depth + 1, labels, icon, button);
+    }
+}
+
+static void TidyCover(UIView* cover) {
+    CGRect bounds = cover.bounds;
+    BOOL small = NFBCompactMedia() && CGRectGetWidth(bounds) > 0 && CGRectGetWidth(bounds) <= 130 &&
+                 CGRectGetHeight(bounds) <= 130;
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    UIImageView* icon = nil;
+    UIControl* button = nil;
+    CollectCover(cover, 0, labels, &icon, &button);
+    for (UILabel* label in labels) {
+        BOOL ours = objc_getAssociatedObject(label, kCoverHiddenKey) != nil;
+        if (small && !label.hidden) {
+            label.hidden = YES;
+            objc_setAssociatedObject(label, kCoverHiddenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        } else if (!small && ours) {
+            label.hidden = NO;
+            objc_setAssociatedObject(label, kCoverHiddenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    }
+    if (!small) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(bounds), height = CGRectGetHeight(bounds);
+    if (icon.superview) {
+        icon.center = [cover convertPoint:CGPointMake(width / 2, height * (button ? 0.30 : 0.5)) toView:icon.superview];
+    }
+    if (button.superview) {
+        CGFloat buttonHeight = MIN(28, MAX(20, height * 0.36));
+        button.bounds = CGRectMake(0, 0, MAX(24, width - 12), buttonHeight);
+        button.center = [cover convertPoint:CGPointMake(width / 2, height * (icon ? 0.72 : 0.5)) toView:button.superview];
+    }
+}
+
+%group SensitiveCover
+
+%hook HFSensitiveTweetBlurredInterstitialView
+
+- (void)layoutSubviews {
+    %orig;
+    TidyCover((UIView*)self);
+}
+
+%end
+
+%end
+
 // MARK: Mode changes
 
 static void NFBReloadTimelines(UIView* view) {
@@ -644,6 +724,9 @@ CGFloat NFBLastMediaWidth(void) {
         class_getClassMethod(adapter, NSSelectorFromString(@"_t1_isVerticalVideoFillWidthEligibleForViewModel:displayType:"))) {
         %init(VerticalVideoLayout);
         gVerticalVideoHooked = YES;
+    }
+    if (objc_getClass("HFSensitiveTweetBlurredInterstitialView")) {
+        %init(SensitiveCover);
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         NFBWatchMode();

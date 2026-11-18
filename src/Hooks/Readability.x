@@ -26,12 +26,12 @@
 //
 // 7.3.90: a thread in the home timeline is drawn as one card: the first tweet
 // on top, and the replies under it (with "show more replies") nested in an
-// inner box. The spinner of pull to refresh sits on a small card-coloured pill.
+// inner box. (The pill behind the refresh spinner of 7.3.90-7.3.96 is gone.)
 //
 // 7.3.93: X's white backing view behind each tweet is cleared while a row has
 // a card (it showed as square corners over the round card); threads follow
 // X's connector (1 up, 2 down); the reply line bends into each reply's avatar;
-// floating cards meet without a seam; the refresh pill is placed from the pull.
+// floating cards meet without a seam.
 //
 // The cards never change X's layout (moving views after X has laid them out
 // made 7.3.76's small media jump back and forth). The row's content is only
@@ -97,11 +97,9 @@ static void ReadSwitches(void) {
 }
 
 // For the shake dump.
-static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0,
-                 gPills = 0;
+static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
 static NSInteger gAvatarShrinksKept = 0;
-static NSString* gPillLog = @"(no pull yet)";
 // 7.3.97: what X answered when asked to lay rows out inside the card margin,
 // how the name line's labels were told apart, and what a pull looked like.
 static NSString* gMetricsLog = @"(not asked yet)";
@@ -114,14 +112,14 @@ static CGFloat gReplyIndent = -1; // how far a reply is moved in a thread card, 
 NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
-                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@ pill: %@\n"
+                                      @"threadRows=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@\n"
                                       @"metrics: calls=%ld fitRows=%ld scaledRows=%ld indentedRows=%ld indent=%.1f "
                                       @"indentHook=%d cellHook=%d %@\nnameLine: %@\npull: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
-                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, (long)gAvatarShrinksKept, gSwipeLog,
-                                      gPillLog, (long)gMetricsCalls, (long)gFitRows, (long)gScaledRows,
+                                      (long)gThreadRows, (long)gFontCalls, (long)gSwipeBegins, (long)gAvatarShrinksKept, gSwipeLog,
+                                      (long)gMetricsCalls, (long)gFitRows, (long)gScaledRows,
                                       (long)gIndentedRows, gReplyIndent, gIndentHooked, gCellHooked, gMetricsLog,
                                       gNameLineLog, gPullLog];
 }
@@ -2557,24 +2555,24 @@ static void DimActions(UIView* actions) {
 
 %end
 
-// MARK: The pull to refresh pill
-// In a list with cards, X's refresh spinner (or the paws that stand in for it
-// on the home timeline) sits on a small card-coloured pill instead of floating
-// over the page. The pill fades in as the list is pulled.
-
-@interface TFNPullToRefreshControl : UIView
-@end
-
-static const NSInteger kPillTag = 0x4E465050;
+// MARK: Pull to refresh
+// 7.3.90-7.3.96 put a small card-coloured pill behind X's refresh spinner: a
+// view of ours first inside the refresh control, then (7.3.96) beside it in
+// the control's parent, placed again whenever the control was laid out, moved
+// or shown. With it the spinner no longer showed, and in 7.3.96 the top bar
+// moved down with the pull and showed X's logo. All of it is gone: nothing
+// here adds to, moves or hooks the refresh control any more, and pulling to
+// refresh is X's own again.
+//
+// What a pull looked like the moment the refresh started is still noted for
+// the dump (read only, called from HeaderLogoLoading.x's hook), in case the
+// top bar or the spinner is still wrong without the pill.
 
 static UIView* FindSpinner(UIView* view, int depth) {
     if (depth > 8) {
         return nil;
     }
     for (UIView* sub in view.subviews) {
-        if (sub.tag == kPillTag) {
-            continue;
-        }
         NSString* name = NSStringFromClass(sub.class);
         if ([sub isKindOfClass:[UIActivityIndicatorView class]] || [name containsString:@"Spinner"] ||
             [name containsString:@"ActivityIndicator"] || [name containsString:@"Loading"]) {
@@ -2588,103 +2586,6 @@ static UIView* FindSpinner(UIView* view, int depth) {
     return nil;
 }
 
-// The refresh control of a list: among the list's own subviews.
-static UIView* RefreshControlIn(UIScrollView* scroll) {
-    Class cls = NSClassFromString(@"TFNPullToRefreshControl");
-    for (UIView* sub in scroll.subviews) {
-        if ((cls && [sub isKindOfClass:cls]) || [NSStringFromClass(sub.class) containsString:@"RefreshControl"]) {
-            return sub;
-        }
-    }
-    return nil;
-}
-
-// The pill lives beside the control (just under it in its superview), not
-// inside it: 7.3.93-7.3.95 put it in the control's subviews, which X and the
-// paws code look through.
-static const void* kPillKey = &kPillKey;
-
-static void LayoutPill(UIView* control) {
-    UIView* pill = objc_getAssociatedObject(control, kPillKey);
-    UITableView* table = TableOf(control);
-    NFBListKind kind = ListKind(table);
-    if (kind == NFBListOther) {
-        // The control may sit outside the list (7.3.94 dump: no list found);
-        // its controllers tell which screen it is on.
-        for (UIResponder* responder = control.nextResponder; responder; responder = responder.nextResponder) {
-            NSString* name = NSStringFromClass(responder.class);
-            if ([name containsString:@"HomeTimeline"]) {
-                kind = NFBListHome;
-                break;
-            }
-            if ([name containsString:@"NotificationsViewController"]) {
-                kind = NFBListNotifications;
-                break;
-            }
-        }
-    }
-    UIView* spinner = FindSpinner(control, 0);
-    if (!CardsOnFor(kind) || !spinner) {
-        pill.hidden = YES;
-        if (kind != NFBListOther) {
-            gPillLog = [NSString stringWithFormat:@"no pill: kind=%ld table=%@ spinner=%@ control=%@ in %@", (long)kind,
-                                                  table ? @"yes" : @"no",
-                                                  spinner ? NSStringFromClass(spinner.class) : @"none",
-                                                  NSStringFromCGRect(control.frame),
-                                                  NSStringFromClass(control.superview.class)];
-        }
-        return;
-    }
-    UIView* host = control.superview;
-    if (!host) {
-        return;
-    }
-    if (![pill isKindOfClass:[NFBCardView class]]) {
-        pill = [NFBCardView new];
-        pill.tag = kPillTag;
-        pill.userInteractionEnabled = NO;
-        objc_setAssociatedObject(control, kPillKey, pill, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        gPills++;
-    }
-    if (pill.superview != host) {
-        [pill removeFromSuperview];
-        [host insertSubview:pill belowSubview:control];
-    }
-    NFBCardView* card = (NFBCardView*)pill;
-    card.hidden = NO;
-
-    NFBCardStyle style = gStyle;
-    card.style = style;
-    // Room for the paws (84 x 36) when they run, else for the spinner alone.
-    BOOL paws = NO;
-    for (UIView* sub in spinner.subviews) {
-        if (CGRectGetWidth(sub.bounds) > 60) {
-            paws = YES;
-        }
-    }
-    CGSize size = paws ? CGSizeMake(104, 46) : CGSizeMake(56, 36);
-    card.radiusOverride = size.height / 2;
-    UIColor* xPaper = (table ? objc_getAssociatedObject(table, kOldTableColorKey) : nil) ?: [UIColor systemBackgroundColor];
-    card.backgroundColor = NFBCardPaperColor(style, xPaper, CurrentAccentColor());
-    CGPoint center = [spinner.superview convertPoint:spinner.center toView:control];
-    CGPoint centerInHost = [spinner.superview convertPoint:spinner.center toView:host];
-    card.bounds = CGRectMake(0, 0, size.width, size.height);
-    card.center = centerInHost;
-    // Fade in with the pull: fully there once the control shows the whole pill.
-    CGFloat shown = CGRectGetMaxY(control.bounds) - (center.y - size.height / 2);
-    card.alpha = MAX(0, MIN(1, shown / size.height));
-    if ([spinner isKindOfClass:[UIActivityIndicatorView class]] && ((UIActivityIndicatorView*)spinner).isAnimating) {
-        card.alpha = 1;
-    }
-    card.alpha *= control.hidden ? 0 : control.alpha;
-    gPillLog = [NSString stringWithFormat:@"pill alpha=%.2f at %@ spinner=%@", card.alpha,
-                                          NSStringFromCGPoint(center), NSStringFromClass(spinner.class)];
-}
-
-// What a pull looked like the moment the refresh started, for the dump: a
-// pull cannot be held while the phone is shaken. (7.3.96: the header moves
-// down with the pull and no spinner shows; where the control sits and what is
-// in front of it is not known yet.)
 void NFBNotePullStatus(UIView* control, unsigned long long status) {
     if (status != 1 || !control.window) {
         return;
@@ -2726,10 +2627,9 @@ void NFBNotePullStatus(UIView* control, unsigned long long status) {
         }
         [queue addObjectsFromArray:view.subviews];
     }
-    UIView* pill = objc_getAssociatedObject(control, kPillKey);
     gPullLog = [NSString
         stringWithFormat:@"control %@ inWindow=%@ a=%.2f hidden=%d index=%lu/%lu%@ | above:%@ | scroll=%@ offset=%.0f inset=%@ bg=%d | "
-                         @"spinner=%@ %@ a=%.2f hidden=%d | bar=%@ inWindow=%@ | pill %@ a=%.2f hidden=%d in %@",
+                         @"spinner=%@ %@ a=%.2f hidden=%d | bar=%@ inWindow=%@",
                          NSStringFromCGRect(control.frame),
                          NSStringFromCGRect([control convertRect:control.bounds toView:window]), control.alpha,
                          control.hidden, (unsigned long)index, (unsigned long)siblings.count, chain, above,
@@ -2738,41 +2638,8 @@ void NFBNotePullStatus(UIView* control, unsigned long long status) {
                          spinner ? NSStringFromClass(spinner.class) : @"-",
                          spinner ? NSStringFromCGRect([spinner convertRect:spinner.bounds toView:window]) : @"",
                          spinner.alpha, spinner.hidden, bar ? NSStringFromClass(bar.class) : @"-",
-                         bar ? NSStringFromCGRect([bar convertRect:bar.bounds toView:window]) : @"",
-                         pill ? NSStringFromCGRect([pill convertRect:pill.bounds toView:window]) : @"-", pill.alpha,
-                         pill.hidden, pill.superview ? NSStringFromClass(pill.superview.class) : @"-"];
+                         bar ? NSStringFromCGRect([bar convertRect:bar.bounds toView:window]) : @""];
 }
-
-%hook TFNPullToRefreshControl
-
-- (void)layoutSubviews {
-    %orig;
-    LayoutPill(self);
-}
-
-- (void)setFrame:(CGRect)frame {
-    %orig;
-    if (gCardsOn || gNoteCardsOn) {
-        LayoutPill(self);
-    }
-}
-
-- (void)setHidden:(BOOL)hidden {
-    %orig;
-    UIView* pill = objc_getAssociatedObject(self, kPillKey);
-    if (hidden) {
-        pill.hidden = YES;
-    } else if (gCardsOn || gNoteCardsOn) {
-        LayoutPill(self);
-    }
-}
-
-%end
-
-// 7.3.93 also hooked -[UITableView setContentOffset:] to place the pill while
-// pulling. UITableView does not implement that method itself, so the hook
-// added one that skipped later hooks on UIScrollView's (Timeline.x keeps the
-// reading position with one): it is gone.
 
 %ctor {
     dispatch_async(dispatch_get_main_queue(), ^{

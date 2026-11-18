@@ -2982,7 +2982,17 @@ static void DimActions(UIView* actions) {
         NFBPlaceCornerMedia((UIView*)status);
         avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
         author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
-        if (avatar && AvatarTakesOurSize(avatar)) {
+        // 7.3.104: the sizes chosen on the "Cards and text" page are for
+        // rows with a card only. The avatar used to be drawn larger in every
+        // list; without the card's inner room it grew into the left edge.
+        BOOL inCard = NO;
+        for (UIView* up = status.superview; up; up = up.superview) {
+            if ([up isKindOfClass:[UITableViewCell class]]) {
+                inCard = ((NFBCardMemory*)objc_getAssociatedObject(up, kCardMemoryKey)).active;
+                break;
+            }
+        }
+        if (avatar && inCard && AvatarTakesOurSize(avatar)) {
             // With small media on X's shrinks are not taken at all.
             if (gCompactOn) {
                 objc_setAssociatedObject(avatar, kXTransformKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -3047,7 +3057,9 @@ static void DimActions(UIView* actions) {
 %hook XFontCatalog
 
 + (UIFont*)contentFontWithOffset:(CGFloat)offset weight:(NSInteger)weight {
-    if (fabs(gStyle.bodyStep) < 0.05) {
+    // Only with cards on (7.3.104). A font is not asked for by list, so with
+    // cards on in one list the other lists' tweets follow the size too.
+    if (fabs(gStyle.bodyStep) < 0.05 || (!gCardsOn && !gNoteCardsOn)) {
         return %orig;
     }
     gFontCalls++;

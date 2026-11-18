@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.90",
+      "subtitle": "NeoFreeBird version 7.3.91",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.91",
+          "buildVersion": "91",
+          "date": "2026-11-18T07:28:03Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.91/NeoFreeBird-Twitter-sideloaded_7.3.91_12.44.ipa",
+          "size": 270839631,
+          "minOSVersion": "15.0",
+          "localizedDescription": "알림 밀어서 답글: 카드가 손가락을 따라 움직이도록 다시 수정. 이름 줄을 키워도 오른쪽 … 버튼이 제자리에 있게. 카드 사이 얇은 구분선 숨김."
+        },
         {
           "version": "7.3.90",
           "buildVersion": "90",

@@ -521,7 +521,7 @@ static void DumpCardRows(UIWindow* window, NSMutableString* out) {
 
 // The name line of the first tweet: what draws it and in which font.
 static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUInteger* lines) {
-    if (depth > 5 || *lines > 10) {
+    if (depth > 3 || *lines > 24) {
         return;
     }
     UIFont* font = [view respondsToSelector:@selector(font)] ? ((UILabel*)view).font : nil;

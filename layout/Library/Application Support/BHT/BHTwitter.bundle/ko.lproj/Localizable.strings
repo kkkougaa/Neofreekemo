@@ -557,7 +557,13 @@
 "KEMO_CARD_LOOK_FLOATING" = "떠 있는 카드";
 "KEMO_CARD_RADIUS" = "모서리 곡률";
 "KEMO_CARD_GAP" = "카드 간격";
-"KEMO_CARD_INNER" = "카드 안쪽 여백";
+"KEMO_CARD_INNER" = "카드 안쪽 여백 (좌우)";
+"KEMO_CARD_INNER_V" = "카드 안쪽 여백 (위아래)";
+"KEMO_CARD_PAGE" = "카드 뒤 바탕";
+"KEMO_CARD_PAGE_DEFAULT" = "기본";
+"KEMO_CARD_PAGE_LIGHT" = "옅게";
+"KEMO_CARD_PAGE_TINT" = "테마색";
+"KEMO_CARD_PAGE_NONE" = "없음";
 "KEMO_CARD_PAPER" = "카드 바탕색";
 "KEMO_CARD_PAPER_DEFAULT" = "기본";
 "KEMO_CARD_PAPER_GRAY" = "회색";

@@ -18,7 +18,9 @@ typedef struct {
     NFBCardLook look;
     CGFloat radius;      // corner radius
     CGFloat gap;         // page colour between two cards
-    CGFloat inner;       // extra room between the card edge and the row's content
+    CGFloat inner;       // extra room between the card edge and the row's content, left and right
+    CGFloat innerV;      // the same above and below (7.3.100; until then `inner` did both)
+    NSInteger page;      // NFBCardPage*: the colour behind the cards
     CGFloat bodyStep;    // points added to tweet text
     CGFloat nameScale;   // the name line (name and @handle), 1 = X's size
     CGFloat avatarScale; // the avatar, 1 = X's size
@@ -34,10 +36,19 @@ typedef NS_ENUM(NSInteger, NFBCardPaper) {
     NFBCardPaperCustom = 4,  // kemo_card_paper_rgb
 };
 
+typedef NS_ENUM(NSInteger, NFBCardPage) {
+    NFBCardPageDefault = 0, // a step of blue-grey away from the card
+    NFBCardPageLight = 1,   // half that step
+    NFBCardPageTint = 2,    // a hint of the accent colour
+    NFBCardPageNone = 3,    // the card's own colour: only the outline or shadow tells cards apart
+};
+
 extern NSString* const NFBCardLookKey;
 extern NSString* const NFBCardRadiusKey;
 extern NSString* const NFBCardGapKey;
 extern NSString* const NFBCardInnerKey;
+extern NSString* const NFBCardInnerVKey;
+extern NSString* const NFBCardPageKey;
 extern NSString* const NFBCardBodyKey;   // tenths of a point
 extern NSString* const NFBCardNameKey;   // percent
 extern NSString* const NFBCardAvatarKey; // percent

@@ -75,7 +75,7 @@ static const void* kScaledKey = &kScaledKey;
 static BOOL SameStyle(NFBCardStyle a, NFBCardStyle b) {
     return a.look == b.look && a.radius == b.radius && a.gap == b.gap && a.inner == b.inner &&
            a.bodyStep == b.bodyStep && a.nameScale == b.nameScale && a.avatarScale == b.avatarScale &&
-           a.paper == b.paper && a.nameGap == b.nameGap;
+           a.paper == b.paper && a.nameGap == b.nameGap && a.innerV == b.innerV && a.page == b.page;
 }
 
 static void ReadSwitches(void) {
@@ -1274,9 +1274,21 @@ static void GiveCardRoom(id layout, BOOL cards, NSUInteger connector) {
     if (!cards && !was) {
         return;
     }
-    CGFloat edge = gStyle.gap / 2 + gStyle.inner;
+    CGFloat edge = gStyle.gap / 2 + gStyle.innerV;
     CGFloat top = (cards && !(connector & 1)) ? edge : 0;
     CGFloat bottom = (cards && !(connector & 2)) ? edge : 0;
+    // A tweet with a line above it ("... reposted") starts its name and avatar
+    // about 19 points lower, and the line is small and grey, so the card looks
+    // as if it had a wide margin on top. Such a row gets up to 8 points less
+    // room above. X's layout says where the avatar is.
+    SEL stateSelector = NSSelectorFromString(@"statusViewLayoutState"), avatarSelector = NSSelectorFromString(@"avatarFrame");
+    if (top > 0 && [layout respondsToSelector:stateSelector]) {
+        id state = ((id (*)(id, SEL))objc_msgSend)(layout, stateSelector);
+        if ([state respondsToSelector:avatarSelector] &&
+            ((CGRect (*)(id, SEL))objc_msgSend)(state, avatarSelector).origin.y > 22) {
+            top = MAX(0, top - 8);
+        }
+    }
     UIEdgeInsets old = was ? was.UIEdgeInsetsValue : UIEdgeInsetsZero;
     if (fabs(old.top - top) < 0.01 && fabs(old.bottom - bottom) < 0.01) {
         return;
@@ -1321,115 +1333,6 @@ static CGRect FrameWithRoom(UITableViewCell* cell, CGRect frame) {
     frame.origin.y += room.top;
     frame.size.height -= room.top + room.bottom;
     return frame;
-}
-
-// MARK: "Show more replies" as a pill
-// In a thread card X's "show more replies" row is a line of blue text. It is
-// drawn as a small pill instead, with the faces of the replies next to it (the
-// people of this thread that are on screen; X does not say who is behind the
-// row), so it reads as something to press. X's own label is only faded, and
-// the row is pressed as before: the pill takes no touches.
-
-static const void* kMorePillKey = &kMorePillKey;
-static const void* kMoreFadedKey = &kMoreFadedKey;
-static void BiggestImage(UIView* view, int depth, UIImage** best, CGFloat* bestArea);
-
-static UILabel* FirstLabel(UIView* view, int depth) {
-    if (depth > 5) {
-        return nil;
-    }
-    for (UIView* sub in view.subviews) {
-        if ([sub isKindOfClass:[UILabel class]] && ((UILabel*)sub).text.length > 0) {
-            return (UILabel*)sub;
-        }
-        UILabel* found = FirstLabel(sub, depth + 1);
-        if (found) {
-            return found;
-        }
-    }
-    return nil;
-}
-
-static void UpdateMorePill(UITableViewCell* cell, NFBCardMemory* memory, UITableView* table, BOOL show) {
-    UIView* pill = objc_getAssociatedObject(cell, kMorePillKey);
-    UILabel* own = show ? FirstLabel(cell.contentView, 0) : nil;
-    if (!show || own.text.length == 0) {
-        if (pill) {
-            [pill removeFromSuperview];
-            objc_setAssociatedObject(cell, kMorePillKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            UIView* faded = objc_getAssociatedObject(cell, kMoreFadedKey);
-            faded.alpha = 1;
-            objc_setAssociatedObject(cell, kMoreFadedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        return;
-    }
-    UILabel* words = nil;
-    NSArray<UIImageView*>* faces = nil;
-    if (!pill) {
-        pill = [UIView new];
-        pill.userInteractionEnabled = NO;
-        pill.layer.cornerCurve = kCACornerCurveContinuous;
-        words = [UILabel new];
-        words.tag = 1;
-        words.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-        [pill addSubview:words];
-        for (NSInteger i = 0; i < 2; i++) {
-            UIImageView* face = [UIImageView new];
-            face.tag = 2 + i;
-            face.contentMode = UIViewContentModeScaleAspectFill;
-            face.clipsToBounds = YES;
-            face.layer.cornerRadius = 10;
-            face.layer.borderWidth = 1.5;
-            [pill addSubview:face];
-        }
-        objc_setAssociatedObject(cell, kMorePillKey, pill, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    words = (UILabel*)[pill viewWithTag:1];
-    faces = @[ (UIImageView*)[pill viewWithTag:2], (UIImageView*)[pill viewWithTag:3] ];
-    if (own.alpha > 0) {
-        own.alpha = 0;
-        objc_setAssociatedObject(cell, kMoreFadedKey, own, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    // The faces of the replies above and below.
-    NSMutableArray<UIImage*>* pictures = [NSMutableArray array];
-    for (NSNumber* step in @[ @1, @(-1), @2 ]) {
-        UITableViewCell* other = Neighbour(table, cell, step.integerValue);
-        UIImage* picture = nil;
-        CGFloat area = 0;
-        if (other && pictures.count < 2) {
-            BiggestImage(AvatarOf(other), 0, &picture, &area);
-        }
-        if (picture && ![pictures containsObject:picture]) {
-            [pictures addObject:picture];
-        }
-    }
-    UIColor* paper = memory.background.paper ?: [UIColor systemBackgroundColor];
-    pill.backgroundColor = paper;
-    words.text = own.text;
-    words.textColor = [UIColor labelColor];
-    CGFloat x = 8;
-    for (NSUInteger i = 0; i < faces.count; i++) {
-        UIImageView* face = faces[i];
-        face.hidden = i >= pictures.count;
-        if (!face.hidden) {
-            face.image = pictures[i];
-            face.layer.borderColor = [paper resolvedColorWithTraitCollection:cell.traitCollection].CGColor;
-            face.frame = CGRectMake(x, 4, 20, 20);
-            x += 14;
-        }
-    }
-    if (pictures.count > 0) {
-        x += 12;
-    }
-    CGFloat wordsWidth = ceil([words sizeThatFits:CGSizeMake(CGFLOAT_MAX, 28)].width);
-    words.frame = CGRectMake(x, 0, wordsWidth, 28);
-    CGFloat width = x + wordsWidth + 12;
-    CGFloat left = ThreadX() + 23 + 8;
-    pill.layer.cornerRadius = 14;
-    pill.frame = CGRectMake(left, round((CGRectGetHeight(cell.bounds) - 28) / 2), MIN(width, CGRectGetWidth(cell.bounds) - left - 24), 28);
-    if (pill.superview != cell) {
-        [cell addSubview:pill];
-    }
 }
 
 // MARK: A pressed card
@@ -1492,7 +1395,6 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
                 (CGRectGetHeight(cell.bounds) >= 36 || (flags & NFBThreadUp));
     if (!want) {
         RemoveCard(cell, memory);
-        UpdateMorePill(cell, memory, table, NO);
         if (!listOn && kind != NFBListOther) {
             SetTablePage(table, nil);
         }
@@ -1576,7 +1478,6 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         cell.selectedBackgroundView = highlight;
     }
     SetThreadLinesHidden(cell, memory, flags != 0);
-    UpdateMorePill(cell, memory, table, flags != 0 && [NSStringFromClass(cell.class) containsString:@"ShowMore"]);
     if (memory.thread != flags) {
         // The neighbours decide their own edges from this row; let them look again.
         if ((memory.thread ^ flags) & NFBThreadUp) {
@@ -3000,6 +2901,23 @@ static void DimActions(UIView* actions) {
 
 // The same for the row's content view.
 %hook UITableViewCellContentView
+
+// UIKit puts the content view over the whole row on every layout, then X (or
+// the hook on its row, below) took the room off again: the content changed
+// size twice per layout, and the tweet inside was laid out again each time.
+// The room is taken off right here, so the frame only ever has one value.
+- (void)setFrame:(CGRect)frame {
+    UIView* cell = ((UIView*)self).superview;
+    if ([cell isKindOfClass:[UITableViewCell class]]) {
+        CGRect wanted = FrameWithRoom((UITableViewCell*)cell, frame);
+        if (!CGRectEqualToRect(wanted, frame)) {
+            gRoomInsets++;
+            %orig(wanted);
+            return;
+        }
+    }
+    %orig;
+}
 
 - (void)setBackgroundColor:(UIColor*)color {
     UIView* cell = ((UIView*)self).superview;

@@ -37,7 +37,7 @@ static NSString* const kPreviewThumbKey = @"kemo_thumb_side"; // the small photo
 static CGFloat PreviewThumb(void) {
     id value = [[NSUserDefaults standardUserDefaults] objectForKey:kPreviewThumbKey];
     CGFloat side = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 56;
-    return MAX(40, MIN(92, side));
+    return MAX(32, MIN(92, side));
 }
 
 @interface NFBPreviewRow : UIView
@@ -171,7 +171,7 @@ static CGFloat PreviewThumb(void) {
     CGFloat columnWidth = MAX(40, columnRight - columnX);
     // Half the gap and the inner room above the content, unless the row is
     // joined to the one above (and the same below), as in the timeline.
-    CGFloat roomAtEnd = style.gap / 2 + style.inner;
+    CGFloat roomAtEnd = style.gap / 2 + style.innerV;
     CGFloat y = 12 + (self.up ? 0 : roomAtEnd);
 
     // "... reposted" above the tweet.
@@ -481,6 +481,7 @@ static CGFloat PreviewThumb(void) {
 @property (nonatomic, strong) NFBCardPreview* preview;
 @property (nonatomic, strong) UIStackView* stack;
 @property (nonatomic, strong) UISegmentedControl* lookControl;
+@property (nonatomic, strong) UISegmentedControl* pageControl;
 @property (nonatomic, strong) NSMutableArray<UIButton*>* swatches;
 @property (nonatomic, strong) NSMutableDictionary<NSString*, UISlider*>* sliders;
 @property (nonatomic, strong) NSMutableDictionary<NSString*, UILabel*>* values;
@@ -539,8 +540,21 @@ static CGFloat PreviewThumb(void) {
     [self addSlider:NFBCardRadiusKey title:L(@"KEMO_CARD_RADIUS") min:0 max:30 unit:@"pt" divisor:1];
     [self addSlider:NFBCardGapKey title:L(@"KEMO_CARD_GAP") min:0 max:24 unit:@"pt" divisor:1];
     [self addSlider:NFBCardInnerKey title:L(@"KEMO_CARD_INNER") min:0 max:18 unit:@"pt" divisor:1];
-    [self addSlider:kPreviewThumbKey title:L(@"KEMO_THUMB_SIDE") min:40 max:92 unit:@"pt" divisor:1];
+    [self addSlider:NFBCardInnerVKey title:L(@"KEMO_CARD_INNER_V") min:0 max:18 unit:@"pt" divisor:1];
+    [self addSlider:kPreviewThumbKey title:L(@"KEMO_THUMB_SIDE") min:32 max:92 unit:@"pt" divisor:1];
     [self addPaperRow];
+    // The colour behind the cards.
+    UILabel* pageName = [UILabel new];
+    pageName.text = L(@"KEMO_CARD_PAGE");
+    pageName.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    self.pageControl = [[UISegmentedControl alloc] initWithItems:@[
+        L(@"KEMO_CARD_PAGE_DEFAULT"), L(@"KEMO_CARD_PAGE_LIGHT"), L(@"KEMO_CARD_PAGE_TINT"), L(@"KEMO_CARD_PAGE_NONE")
+    ]];
+    [self.pageControl addTarget:self action:@selector(pageChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView* pageRow = [[UIStackView alloc] initWithArrangedSubviews:@[ pageName, self.pageControl ]];
+    pageRow.axis = UILayoutConstraintAxisVertical;
+    pageRow.spacing = 8;
+    [self.stack addArrangedSubview:pageRow];
 
     [self addHeading:L(@"KEMO_CARD_SECTION_TEXT")];
     [self addSlider:NFBCardBodyKey title:L(@"KEMO_CARD_BODY") min:-10 max:40 unit:@"pt" divisor:10];
@@ -629,10 +643,12 @@ static CGFloat PreviewThumb(void) {
 - (void)reload {
     NFBCardStyle style = NFBCardStyleCurrent();
     self.lookControl.selectedSegmentIndex = style.look;
+    self.pageControl.selectedSegmentIndex = style.page;
     NSDictionary* numbers = @{
         NFBCardRadiusKey : @(style.radius),
         NFBCardGapKey : @(style.gap),
         NFBCardInnerKey : @(style.inner),
+        NFBCardInnerVKey : @(style.innerV),
         kPreviewThumbKey : @(PreviewThumb()),
         NFBCardBodyKey : @(round(style.bodyStep * 10)),
         NFBCardNameKey : @(round(style.nameScale * 100)),
@@ -680,6 +696,12 @@ static CGFloat PreviewThumb(void) {
         self.preview.style = NFBCardStyleCurrent();
         [self.preview setNeedsLayout];
     }
+}
+
+- (void)pageChanged:(UISegmentedControl*)control {
+    [[NSUserDefaults standardUserDefaults] setInteger:control.selectedSegmentIndex forKey:NFBCardPageKey];
+    [self reload];
+    [self.preview setNeedsLayout];
 }
 
 - (void)lookChanged:(UISegmentedControl*)control {

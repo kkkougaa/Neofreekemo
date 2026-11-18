@@ -120,7 +120,13 @@ static NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
     // "kemo_plain_refresh" on, the default, the switch and its variants
     // (foreground, latest, navigate) read as off, so every account refreshes the
     // way it always did. Only the value read on the device changes.
-    if ([key hasPrefix:@"home_timeline_pull_to_refresh_animation"]) {
+    //
+    // 7.3.100: the names above are from X 11.37 and are not in 12.44, so
+    // 7.3.98 changed nothing. In 12.44 the switch is
+    // "ios_home_timeline_logo_pull_to_refresh_enabled" (read from the binary of
+    // the build itself); it puts a HomeRefreshLogoView in the logo's place.
+    if ([key isEqualToString:@"ios_home_timeline_logo_pull_to_refresh_enabled"] ||
+        [key hasPrefix:@"home_timeline_pull_to_refresh_animation"]) {
         gPullAnimationAsked++;
         return [BHTSettings boolForKey:@"kemo_plain_refresh"] ? @NO : nil;
     }

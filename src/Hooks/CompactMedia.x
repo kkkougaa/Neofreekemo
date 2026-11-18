@@ -26,7 +26,7 @@
 
 static NSString* const kCompactKey = @"kemo_compact_media";
 static NSString* const kSensitiveKey = @"disable_sensitive_tweet_warnings"; // NSFW mode
-static NSString* const kThumbKey = @"kemo_thumb_side";     // the small square's side, 40-92
+static NSString* const kThumbKey = @"kemo_thumb_side";     // the small square's side, 32-92
 static NSString* const kCornerKey = @"kemo_corner_media";  // one photo sits beside the text
 static const CGFloat kCornerGap = 8.0;
 static const CGFloat kCardWidth = 190.0;
@@ -54,7 +54,7 @@ static BOOL NFBCompactMedia(void) {
 static CGFloat ThumbSide(void) {
     id value = [[NSUserDefaults standardUserDefaults] objectForKey:kThumbKey];
     CGFloat side = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 56;
-    return MAX(40, MIN(92, side));
+    return MAX(32, MIN(92, side));
 }
 
 // What X's cached layouts were made for: off, or the side and whether one
@@ -219,6 +219,32 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 
 %end
 
+// 7.3.100: X 12.44 does not have the method above (the build's own class
+    // list says so: the hook was never installed, and tall videos stayed large).
+    // There, +isVerticalVideoLayoutForViewModel:displayType: decides whether a
+    // video takes X's tall layout, and a second switch lets it fill the width.
+    // With small media both say no, and the video takes the size path that is
+    // already made small.
+%group VerticalVideoLayout
+
+%hook T1StandardStatusAttachmentViewAdapter
+
++ (BOOL)isVerticalVideoLayoutForViewModel:(id)viewModel displayType:(NSUInteger)displayType {
+    if (NFBCompactMedia()) {
+        gVerticalVideos++;
+        return NO;
+    }
+    return %orig;
+}
+
++ (BOOL)_t1_isVerticalVideoFillWidthEligibleForViewModel:(id)viewModel displayType:(NSUInteger)displayType {
+    return NFBCompactMedia() ? NO : %orig;
+}
+
+%end
+
+%end
+
 // A single small photo sits at the right end of the tweet's text column
 // instead of the left.
 //
@@ -238,7 +264,7 @@ static NSString* gRightLog = @"-";
 static NSInteger gRightContainers = 0;
 
 static BOOL NFBIsThumb(CGSize size) {
-    return size.width >= 40 && size.width <= ThumbSide() + 1 && fabs(size.width - size.height) <= 1.5;
+    return size.width >= 30 && size.width <= ThumbSide() + 1 && fabs(size.width - size.height) <= 1.5;
 }
 
 // The right edge of the tweet's text column, in `host` coordinates: the right
@@ -611,6 +637,12 @@ CGFloat NFBLastMediaWidth(void) {
     if (adapter &&
         class_getInstanceMethod(adapter, NSSelectorFromString(@"_t1_verticalVideoViewSizeForViewModel:width:anatomyFeatures:"))) {
         %init(VerticalVideo);
+        gVerticalVideoHooked = YES;
+    }
+    if (adapter &&
+        class_getClassMethod(adapter, NSSelectorFromString(@"isVerticalVideoLayoutForViewModel:displayType:")) &&
+        class_getClassMethod(adapter, NSSelectorFromString(@"_t1_isVerticalVideoFillWidthEligibleForViewModel:displayType:"))) {
+        %init(VerticalVideoLayout);
         gVerticalVideoHooked = YES;
     }
     dispatch_async(dispatch_get_main_queue(), ^{

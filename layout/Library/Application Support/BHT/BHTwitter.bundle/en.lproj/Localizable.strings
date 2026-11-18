@@ -605,7 +605,13 @@
 "KEMO_CARD_LOOK_FLOATING" = "Floating";
 "KEMO_CARD_RADIUS" = "Corner radius";
 "KEMO_CARD_GAP" = "Gap between cards";
-"KEMO_CARD_INNER" = "Room inside cards";
+"KEMO_CARD_INNER" = "Room inside a card (left and right)";
+"KEMO_CARD_INNER_V" = "Room inside a card (above and below)";
+"KEMO_CARD_PAGE" = "Behind the cards";
+"KEMO_CARD_PAGE_DEFAULT" = "Default";
+"KEMO_CARD_PAGE_LIGHT" = "Lighter";
+"KEMO_CARD_PAGE_TINT" = "Tint";
+"KEMO_CARD_PAGE_NONE" = "None";
 "KEMO_CARD_PAPER" = "Card colour";
 "KEMO_CARD_PAPER_DEFAULT" = "Default";
 "KEMO_CARD_PAPER_GRAY" = "Grey";

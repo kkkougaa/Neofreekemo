@@ -10,6 +10,10 @@ NSString* const NFBCardLookKey = @"kemo_card_look";
 NSString* const NFBCardRadiusKey = @"kemo_card_radius";
 NSString* const NFBCardGapKey = @"kemo_card_gap";
 NSString* const NFBCardInnerKey = @"kemo_card_inner";
+NSString* const NFBCardInnerVKey = @"kemo_card_inner_v";
+NSString* const NFBCardPageKey = @"kemo_card_page";
+
+extern UIColor* CurrentAccentColor(void);
 NSString* const NFBCardBodyKey = @"kemo_card_body";
 NSString* const NFBCardNameKey = @"kemo_card_name";
 NSString* const NFBCardAvatarKey = @"kemo_card_avatar";
@@ -33,6 +37,8 @@ NFBCardStyle NFBCardStyleCurrent(void) {
     style.radius = Number(defaults, NFBCardRadiusKey, 16, 0, 30);
     style.gap = Number(defaults, NFBCardGapKey, 10, 0, 24);
     style.inner = Number(defaults, NFBCardInnerKey, 6, 0, 18);
+    style.innerV = Number(defaults, NFBCardInnerVKey, 4, 0, 18);
+    style.page = (NSInteger)Number(defaults, NFBCardPageKey, NFBCardPageDefault, 0, 3);
     style.bodyStep = Number(defaults, NFBCardBodyKey, bigger ? 15 : 0, -10, 40) / 10.0;
     style.nameScale = Number(defaults, NFBCardNameKey, bigger ? 108 : 100, 90, 130) / 100.0;
     style.avatarScale = Number(defaults, NFBCardAvatarKey, bigger ? 112 : 100, 90, 130) / 100.0;
@@ -43,7 +49,7 @@ NFBCardStyle NFBCardStyleCurrent(void) {
 
 void NFBCardStyleReset(void) {
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    for (NSString* key in @[ NFBCardLookKey, NFBCardRadiusKey, NFBCardGapKey, NFBCardInnerKey, NFBCardBodyKey,
+    for (NSString* key in @[ NFBCardLookKey, NFBCardRadiusKey, NFBCardGapKey, NFBCardInnerKey, NFBCardInnerVKey, NFBCardPageKey, NFBCardBodyKey,
                              NFBCardNameKey, NFBCardAvatarKey, NFBCardPaperKey, NFBCardPaperRGBKey, NFBCardNameGapKey ]) {
         [defaults removeObjectForKey:key];
     }
@@ -97,15 +103,32 @@ UIColor* NFBCardPaperColor(NFBCardStyle style, UIColor* xPaper, UIColor* accent)
 }
 
 UIColor* NFBCardPageColor(UIColor* paper) {
+    NSInteger page = NFBCardStyleCurrent().page;
+    UIColor* accent = page == NFBCardPageTint ? CurrentAccentColor() : nil;
     return [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
         CGFloat r = 0, g = 0, b = 0, a = 0;
         [[paper resolvedColorWithTraitCollection:traits] getRed:&r green:&g blue:&b alpha:&a];
+        if (page == NFBCardPageNone) {
+            return [UIColor colorWithRed:r green:g blue:b alpha:1];
+        }
         CGFloat light = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (accent) {
+            // The card's colour with a little of the accent in it.
+            CGFloat ar = 0, ag = 0, ab = 0, aa = 0;
+            [[accent resolvedColorWithTraitCollection:traits] getRed:&ar green:&ag blue:&ab alpha:&aa];
+            CGFloat mix = light > 0.5 ? 0.07 : 0.16;
+            return [UIColor colorWithRed:r + (ar - r) * mix green:g + (ag - g) * mix blue:b + (ab - b) * mix alpha:1];
+        }
+        CGFloat strength = page == NFBCardPageLight ? 0.5 : 1.0;
         if (light > 0.5) {
             // A touch darker, leaning slightly blue-grey.
-            return [UIColor colorWithRed:r + (0.12 - r) * 0.07 green:g + (0.20 - g) * 0.07 blue:b + (0.28 - b) * 0.07 alpha:1];
+            CGFloat step = 0.07 * strength;
+            return [UIColor colorWithRed:r + (0.12 - r) * step green:g + (0.20 - g) * step blue:b + (0.28 - b) * step alpha:1];
         }
-        return [UIColor colorWithRed:MIN(1, r + 0.07) green:MIN(1, g + 0.07) blue:MIN(1, b + 0.08) alpha:1];
+        return [UIColor colorWithRed:MIN(1, r + 0.07 * strength)
+                               green:MIN(1, g + 0.07 * strength)
+                                blue:MIN(1, b + 0.08 * strength)
+                               alpha:1];
     }];
 }
 

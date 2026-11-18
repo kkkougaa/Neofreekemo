@@ -19,6 +19,10 @@
 //
 // The freeze is done in Timeline.x, where the list's sections are set
 // (NFBLocalSearchHold); the pull is watched on the table's own pan gesture.
+//
+// 7.3.85: the pull is also watched from X's pull-to-refresh control, which
+// sits inside the home list's scroll view, in case the list itself is never
+// matched to the home timeline.
 
 static NSString* const kSearchKey = @"kemo_local_search";
 // How far the finger must travel down, starting with the list at its top, to
@@ -454,7 +458,7 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
     CGFloat stretch = -(scroll.contentOffset.y + scroll.adjustedContentInset.top);
 
     if (pan.state == UIGestureRecognizerStateBegan) {
-        self.fromTop = stretch >= -2.0;
+        self.fromTop = stretch >= -20.0;
         self.farthest = 0;
         return;
     }
@@ -531,14 +535,61 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
 
 @end
 
-// Called from Timeline.x for home timeline lists; watches each list's pull once.
-void NFBLocalSearchAttach(TFNItemsDataViewController* controller) {
+// Watches one scroll view's pull, once.
+static void AttachToScroll(UIScrollView* table, NSString* how) {
     static const void* kAttachedKey = &kAttachedKey;
-    UIScrollView* table = (UIScrollView*)controller.tableView;
     if (![table isKindOfClass:[UIScrollView class]] || objc_getAssociatedObject(table, kAttachedKey)) {
         return;
     }
     objc_setAssociatedObject(table, kAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     gAttachedLists++;
+    gSearchLog = [NSString stringWithFormat:@"attached via %@ to %@", how, NSStringFromClass(table.class)];
     [table.panGestureRecognizer addTarget:[NFBLocalSearchPull shared] action:@selector(pan:)];
 }
+
+// Called from Timeline.x for home timeline lists.
+void NFBLocalSearchAttach(TFNItemsDataViewController* controller) {
+    AttachToScroll((UIScrollView*)controller.tableView, @"list");
+}
+
+// The other way in: X's pull-to-refresh control sits inside the home list's
+// scroll view, so wherever it shows on the home timeline, watch that scroll view.
+@interface TFNPullToRefreshControl : UIView
+@end
+
+static void AttachFromRefresh(UIView* control) {
+    if (![BHTSettings boolForKey:kSearchKey] || !control.window) {
+        return;
+    }
+    UIScrollView* scroll = nil;
+    for (UIView* view = control.superview; view; view = view.superview) {
+        if ([view isKindOfClass:[UIScrollView class]]) {
+            scroll = (UIScrollView*)view;
+            break;
+        }
+    }
+    if (!scroll) {
+        return;
+    }
+    for (UIResponder* responder = scroll; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]] &&
+            [NSStringFromClass([(UIViewController*)responder class]) containsString:@"HomeTimeline"]) {
+            AttachToScroll(scroll, @"refresh control");
+            return;
+        }
+    }
+}
+
+%hook TFNPullToRefreshControl
+
+- (void)didMoveToWindow {
+    %orig;
+    AttachFromRefresh(self);
+}
+
+- (void)_setStatus:(unsigned long long)status fromScrolling:(BOOL)fromScrolling {
+    %orig;
+    AttachFromRefresh(self);
+}
+
+%end

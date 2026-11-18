@@ -182,6 +182,12 @@ jobs:
           ./rebrand.sh${{ inputs.twitter_branding && ' --twitter-branding' || '' }} $IMAGE_FLAG \
             "packages/$(ls -t packages | head -n1)"
 
+      - name: Swap in Pretendard JP
+        if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
+        run: |
+          cd ${{ github.workspace }}/main
+          python3 branding/ipa_fonts.py "packages/$(ls -t packages | head -n1)"
+
       - name: Rename IPA to include IPA version
         if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: |

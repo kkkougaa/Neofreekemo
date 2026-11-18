@@ -155,7 +155,10 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     CGFloat avatarRight = left + kPreviewPad + kPreviewAvatar;
     CGFloat columnX = avatarRight + kPreviewColumnGap, columnRight = right - kPreviewPad;
     CGFloat columnWidth = MAX(40, columnRight - columnX);
-    CGFloat y = 12;
+    // Half the gap and the inner room above the content, unless the row is
+    // joined to the one above (and the same below), as in the timeline.
+    CGFloat roomAtEnd = style.gap / 2 + style.inner;
+    CGFloat y = 12 + (self.up ? 0 : roomAtEnd);
 
     // "... reposted" above the tweet.
     NSString* context = [sample[@"context"] isKindOfClass:[NSString class]] ? sample[@"context"] : nil;
@@ -280,7 +283,7 @@ static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
     }
     CGRect replyIcon = _actionIcons.firstObject.frame;
     y += 18 + 10;
-    CGFloat height = MAX(y, CGRectGetMaxY(_avatar.frame) + 10);
+    CGFloat height = MAX(y, CGRectGetMaxY(_avatar.frame) + 10) + (self.down ? 0 : roomAtEnd);
 
     // The card (Readability.x's NFBCardBackground): as wide as the row, with
     // half the gap above and below unless joined to the next row.

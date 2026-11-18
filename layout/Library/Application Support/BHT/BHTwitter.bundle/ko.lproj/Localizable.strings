@@ -488,6 +488,7 @@
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "이미지 장수 배지 (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
 "KEMO_LOGO_LOADING_TITLE" = "로고 로딩 점 애니메이션";
+"KEMO_PLAIN_REFRESH_TITLE" = "홈 새로고침을 원래 모양으로";
 "KEMO_HEADER_BUBBLE_TITLE" = "로고 말풍선 (새 트윗·DM·알림·D-day)";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "곡이 바뀌면 말풍선으로 알림";
 "KEMO_BUBBLE_MENU_TITLE" = "말풍선";

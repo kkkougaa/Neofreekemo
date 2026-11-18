@@ -28,6 +28,7 @@ extern NSString* NFBLocalSearchDebugText(void);
 extern NSString* NFBReadabilityDebugText(void);
 extern NSArray<NSString*>* NFBRowLayoutClasses(void);
 extern CGFloat NFBLastMediaWidth(void);
+extern NSString* NFBPullAnimationDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -532,12 +533,16 @@ static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUIn
         return;
     }
     UIFont* font = [view respondsToSelector:@selector(font)] ? ((UILabel*)view).font : nil;
-    [out appendFormat:@"   %*s%@ %@%@%@%@%c", depth, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+    CGFloat backingAlpha = 0;
+    [[view.backgroundColor resolvedColorWithTraitCollection:view.traitCollection] getWhite:NULL alpha:&backingAlpha];
+    [out appendFormat:@"   %*s%@ %@%@%@%@%@%c", depth, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
                       [font isKindOfClass:[UIFont class]]
                           ? [NSString stringWithFormat:@" font=%@ %.1f", font.fontName, font.pointSize]
                           : @"",
                       view.accessibilityIdentifier.length ? [@" id=" stringByAppendingString:view.accessibilityIdentifier] : @"",
-                      view.hidden ? @" [hidden]" : @"", 10];
+                      view.hidden ? @" [hidden]" : @"",
+                      backingAlpha > 0.05 ? [NSString stringWithFormat:@" bg=%.2f%@", backingAlpha, view.opaque ? @" opaque" : @""] : @"",
+                      10];
     (*lines)++;
     for (UIView* sub in view.subviews) {
         DumpAuthorFonts(sub, depth + 1, out, lines);
@@ -549,7 +554,7 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
-    [out appendFormat:@"== HEADER ==%c%@%c", 10, NFBBubbleDebugText(), 10];
+    [out appendFormat:@"== HEADER ==%c%@%c%@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(), 10];
     // The top navigation bar (where the logo is), hidden pieces included, with
     // which picture each image view shows.
     UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);

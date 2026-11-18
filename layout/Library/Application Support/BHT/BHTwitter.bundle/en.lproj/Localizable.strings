@@ -533,6 +533,7 @@
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
 "KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
+"KEMO_PLAIN_REFRESH_TITLE" = "Plain pull to refresh on Home";
 "KEMO_HEADER_BUBBLE_TITLE" = "Logo speech bubble";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "Bubble when the Spotify song changes";
 "KEMO_BUBBLE_MENU_TITLE" = "Speech bubble";

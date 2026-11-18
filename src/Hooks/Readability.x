@@ -4,6 +4,7 @@
 //
 
 #import <QuartzCore/QuartzCore.h>
+#import <os/lock.h>
 #import <UIKit/UIGestureRecognizerSubclass.h>
 #import "HookHelpers.h"
 #import "Core/NFBCardStyle.h"
@@ -103,7 +104,8 @@ static NSInteger gAvatarShrinksKept = 0;
 // 7.3.97: what X answered when asked to lay rows out inside the card margin,
 // how the name line's labels were told apart, and what a pull looked like.
 static NSString* gMetricsLog = @"(not asked yet)";
-static NSInteger gMetricsCalls = 0, gIndentedRows = 0, gScaledRows = 0, gFitRows = 0;
+static NSInteger gMetricsCalls = 0, gMetricsMisses = 0, gIndentedRows = 0, gScaledRows = 0, gFitRows = 0;
+static NSInteger gRoomRows = 0, gRoomInsets = 0;
 static BOOL gIndentHooked = NO, gCellHooked = NO;
 static NSString* gNameLineLog = @"(no name line yet)";
 static NSString* gPullLog = @"(no pull yet)";
@@ -113,14 +115,14 @@ NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
                                       @"threadRows=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@\n"
-                                      @"metrics: calls=%ld fitRows=%ld scaledRows=%ld indentedRows=%ld indent=%.1f "
+                                      @"metrics: calls=%ld misses=%ld fitRows=%ld scaledRows=%ld indentedRows=%ld roomRows=%ld roomInsets=%ld indent=%.1f "
                                       @"indentHook=%d cellHook=%d %@\nnameLine: %@\npull: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
                                       (long)gThreadRows, (long)gFontCalls, (long)gSwipeBegins, (long)gAvatarShrinksKept, gSwipeLog,
-                                      (long)gMetricsCalls, (long)gFitRows, (long)gScaledRows,
-                                      (long)gIndentedRows, gReplyIndent, gIndentHooked, gCellHooked, gMetricsLog,
+                                      (long)gMetricsCalls, (long)gMetricsMisses, (long)gFitRows, (long)gScaledRows,
+                                      (long)gIndentedRows, (long)gRoomRows, (long)gRoomInsets, gReplyIndent, gIndentHooked, gCellHooked, gMetricsLog,
                                       gNameLineLog, gPullLog];
 }
 
@@ -326,6 +328,8 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, strong) UIColor* oldContentColor;
 @property (nonatomic, strong) UIColor* xPaper; // X's own colour for the row
 @property (nonatomic, assign) NSInteger xPaperStyle; // light or dark when that colour was taken
+@property (nonatomic, assign) CATransform3D baseTransform; // the content's transform without a swipe
+@property (nonatomic, assign) CGFloat swipeOffset;         // how far the row is pulled sideways
 @property (nonatomic, assign) NSInteger stamp;
 @property (nonatomic, assign) BOOL active;
 @property (nonatomic, assign) NSInteger thread; // last thread flags, to notice changes
@@ -806,6 +810,7 @@ static CGRect ThroughContentTransform(CGRect rect, UITableViewCell* cell) {
 
 static CGFloat gThreadX = -1; // the line, in row coordinates
 static __weak UITableView* gHomeTable; // the home timeline's list, for the settings preview
+static NSHashTable<UITableView*>* gCardTables; // lists that show cards, to lay out again when the look changes
 static CGFloat gNestAvatarX = -1; // a reply's avatar centre as X lays it out (content view coordinates)
 
 static UIView* AvatarOf(UITableViewCell* cell) {
@@ -865,15 +870,30 @@ static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background,
         }
         CGRect from = CGRectIsNull(button) ? face : button;
         CGFloat x = CGRectGetMidX(from);
-        if (fabs(x - gThreadX) > 0.5) {
-            // Replies already on screen were placed for the old line: again.
+        // Only a real reply button, in a row X laid out itself, moves the
+        // line. 7.3.97 also took the avatar of a row without a button and
+        // rows drawn smaller: two rows that disagreed then laid each other
+        // out again and again (replies on screen are placed for the line),
+        // which is a list that never finishes laying out. The others are
+        // also asked to lay out again a few times at most.
+        if (!CGRectIsNull(button) && plainLayout && fabs(x - gThreadX) > 0.5) {
             gThreadX = x;
-            for (UITableViewCell* other in TableOf(cell).visibleCells) {
-                if (other != cell) {
-                    [other setNeedsLayout];
+            static CFAbsoluteTime since = 0;
+            static NSInteger asked = 0;
+            CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+            if (now - since > 2) {
+                since = now;
+                asked = 0;
+            }
+            if (asked++ < 4) {
+                for (UITableViewCell* other in TableOf(cell).visibleCells) {
+                    if (other != cell) {
+                        [other setNeedsLayout];
+                    }
                 }
             }
         }
+        CGFloat lineX = gThreadX > 0 ? gThreadX : x;
         // Measure how far in a reply has to sit, once the avatar has its final size.
         BOOL scaled = objc_getAssociatedObject(avatar, kScaledKey) != nil;
         BOOL wantsScale = fabs(gStyle.avatarScale - 1) > 0.005;
@@ -881,8 +901,8 @@ static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background,
             NoteReplyIndent(x - CGRectGetMidX(face), TableOf(cell));
         }
         if (down) {
-            [path moveToPoint:CGPointMake(gThreadX, CGRectGetMaxY(from) + 3)];
-            [path addLineToPoint:CGPointMake(gThreadX, height)];
+            [path moveToPoint:CGPointMake(lineX, CGRectGetMaxY(from) + 3)];
+            [path addLineToPoint:CGPointMake(lineX, height)];
         }
     } else {
         CGFloat x = ThreadX();
@@ -946,10 +966,25 @@ static UIViewController* OwnerOf(UIView* view) {
     return nil;
 }
 
+@interface NFBKindNote : NSObject
+@property (nonatomic, assign) NSInteger kind;
+@property (nonatomic, assign) void* parent;
+@property (nonatomic, assign) BOOL inWindow;
+@end
+
+@implementation NFBKindNote
+@end
+
+// X asks for its metrics very often, so the answer is remembered: for good
+// once the list is told apart, and otherwise until the controller gets another
+// parent or its view comes on screen (7.3.97 walked the controllers and
+// compared class names on every call).
 static NFBListKind KindOfController(UIViewController* controller) {
-    NSNumber* known = objc_getAssociatedObject(controller, kControllerKindKey);
-    if (known) {
-        return (NFBListKind)known.integerValue;
+    NFBKindNote* note = objc_getAssociatedObject(controller, kControllerKindKey);
+    UIViewController* parent = controller.parentViewController;
+    BOOL inWindow = controller.viewIfLoaded.window != nil;
+    if (note && (note.kind != NFBListOther || (note.parent == (__bridge void*)parent && note.inWindow == inWindow))) {
+        return (NFBListKind)note.kind;
     }
     NFBListKind kind = NFBListOther;
     for (UIViewController* up = controller; up && kind == NFBListOther; up = up.parentViewController) {
@@ -960,7 +995,7 @@ static NFBListKind KindOfController(UIViewController* controller) {
             kind = NFBListNotifications;
         }
     }
-    if (kind == NFBListOther && controller.viewIfLoaded.window) {
+    if (kind == NFBListOther && inWindow) {
         for (UIResponder* responder = controller.viewIfLoaded.superview; responder && kind == NFBListOther;
              responder = responder.nextResponder) {
             if (![responder isKindOfClass:[UIViewController class]]) {
@@ -974,13 +1009,26 @@ static NFBListKind KindOfController(UIViewController* controller) {
             }
         }
     }
-    // Only a list that was told apart is remembered: one asked before it sits
-    // among its controllers is asked again.
-    if (kind != NFBListOther) {
-        objc_setAssociatedObject(controller, kControllerKindKey, @(kind), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    note = [NFBKindNote new];
+    note.kind = kind;
+    note.parent = (__bridge void*)parent;
+    note.inWindow = inWindow;
+    objc_setAssociatedObject(controller, kControllerKindKey, note, OBJC_ASSOCIATION_RETAIN);
     return kind;
 }
+
+// What was answered for a controller's metrics, so the same question gets the
+// very same object back (see the hook on -calculatedLayoutMetrics).
+@interface NFBMetricsNote : NSObject
+@property (nonatomic, strong) id source;
+@property (nonatomic, strong) id result;
+@property (nonatomic, assign) CGFloat extra;
+@end
+
+@implementation NFBMetricsNote
+@end
+
+static const void* kMetricsNoteKey = &kMetricsNoteKey;
 
 static UIEdgeInsets MetricInsets(id metrics, NSString* name) {
     SEL selector = NSSelectorFromString(name);
@@ -1034,6 +1082,7 @@ static id MetricsWithMargin(id metrics, CGFloat extra) {
         }
     }
     gMarginVariant = variant;
+    gMetricsMisses++;
     gMetricsLog = [NSString stringWithFormat:@"variant=%ld extra=%.0f canvas=%.0f content %.0f>%.0f avatarX %.1f>%.1f bodyX %.1f>%.1f",
                                              (long)variant, extra, MetricNumber(metrics, @"canvasWidth"), before,
                                              result ? MetricNumber(result, @"contentWidth") : -1,
@@ -1084,37 +1133,141 @@ static CGFloat ReplyIndentFor(id metrics) {
     return MAX(20, MIN(80, bodyX + 10 - drawnCentre));
 }
 
-// The metrics for a reply in a thread card, or nil for any other row.
-static id MetricsForReply(id viewModel, NSUInteger options, id metrics) {
-    if (!gCardsOn || gMarginVariant != 1 || !viewModel || !metrics) {
-        return nil;
+// X's thread connector for a tweet (1 = joined to the row above, 2 = to the
+// row below), where a row's layout is made.
+static NSUInteger ConnectorFor(id viewModel, NSUInteger options) {
+    static Class config = Nil;
+    static SEL selector = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        selector = NSSelectorFromString(@"connectorTypeForViewModel:anatomyFeatures:statusOptions:");
+        Class found = objc_getClass("T1StandardStatusConversationConnectorsConfiguration");
+        config = (found && [found respondsToSelector:selector]) ? found : Nil;
+    });
+    if (!config || !viewModel) {
+        return 0;
     }
-    // Only rows of a list with cards: its metrics carry the card margin.
+    return ((NSUInteger (*)(id, SEL, id, id, NSUInteger))objc_msgSend)(config, selector, viewModel, tAnatomyFeatures, options);
+}
+
+// Are these the metrics of a list with cards? They carry the card margin.
+static BOOL AreCardMetrics(id metrics) {
+    if (gMarginVariant != 1 || !metrics || (!gCardsOn && !gNoteCardsOn)) {
+        return NO;
+    }
     UIEdgeInsets display = MetricInsets(metrics, @"displayAreaEdgeInsets");
     CGFloat margin = kCardSide + gStyle.inner;
-    if (fabs(display.left - margin) > 0.5 || fabs(display.right - margin) > 0.5) {
-        return nil;
-    }
-    Class config = objc_getClass("T1StandardStatusConversationConnectorsConfiguration");
-    SEL selector = NSSelectorFromString(@"connectorTypeForViewModel:anatomyFeatures:statusOptions:");
-    if (!config || ![config respondsToSelector:selector]) {
-        return nil;
-    }
-    NSUInteger connector =
-        ((NSUInteger (*)(id, SEL, id, id, NSUInteger))objc_msgSend)(config, selector, viewModel, tAnatomyFeatures, options);
+    return fabs(display.left - margin) <= 0.5 && fabs(display.right - margin) <= 0.5;
+}
+
+// The metrics for a reply in a thread card, or nil for any other row. The
+// last answer is kept: rows are laid out in runs, and making a copy of X's
+// metrics for each tweet was part of 7.3.97's slow start.
+static os_unfair_lock gReplyLock = OS_UNFAIR_LOCK_INIT;
+static id gReplySource = nil, gReplyResult = nil;
+static CGFloat gReplyFor = -1;
+
+static id MetricsForReply(id metrics, NSUInteger connector) {
     if (!(connector & kConnectorUpBit)) {
         return nil;
     }
-    CGFloat before = MetricNumber(metrics, @"contentWidth");
     CGFloat indent = ReplyIndentFor(metrics);
-    UIEdgeInsets content = MetricInsets(metrics, @"contentEdgeInsets");
-    content.left += indent;
-    id result = MetricsWithInsets(metrics, @"layoutMetricsWithContentEdgeInsets:", content);
-    if (!result || MetricNumber(result, @"contentWidth") > before - indent / 2) {
-        return nil;
+    id result = nil;
+    os_unfair_lock_lock(&gReplyLock);
+    if (gReplyResult && fabs(gReplyFor - indent) < 0.01 && (gReplySource == metrics || [gReplySource isEqual:metrics])) {
+        result = gReplyResult;
+    }
+    os_unfair_lock_unlock(&gReplyLock);
+    if (!result) {
+        CGFloat before = MetricNumber(metrics, @"contentWidth");
+        UIEdgeInsets content = MetricInsets(metrics, @"contentEdgeInsets");
+        content.left += indent;
+        result = MetricsWithInsets(metrics, @"layoutMetricsWithContentEdgeInsets:", content);
+        if (!result || MetricNumber(result, @"contentWidth") > before - indent / 2) {
+            return nil;
+        }
+        os_unfair_lock_lock(&gReplyLock);
+        gReplySource = metrics;
+        gReplyResult = result;
+        gReplyFor = indent;
+        os_unfair_lock_unlock(&gReplyLock);
     }
     gIndentedRows++;
     return result;
+}
+
+// MARK: Room above and below a card
+// Until 7.3.97 a card was drawn inside the row X had measured: half the gap
+// was taken off its top and bottom. So a wider gap did not move the cards
+// apart, it made each card shorter and its content sit closer to its edges,
+// and the "room inside a card" setting only worked sideways.
+//
+// Now the row itself is made taller where X makes a tweet row's layout: by
+// half the gap plus the inner room at each end that is not joined to another
+// row of its thread. The gap is then really between the cards, and the inner
+// room is added above and below the content as it is at the sides. The cell
+// puts its content that much lower (X's -contentFrame, and once more after
+// X's layout in case X does not take the frame from there). What was added is
+// remembered on the layout, so the cell takes off exactly that, and a layout X
+// hands out again is only changed by the difference.
+
+static const void* kRoomKey = &kRoomKey; // on a row's layout: the room added, as insets
+
+static void GiveCardRoom(id layout, BOOL cards, NSUInteger connector) {
+    if (!layout) {
+        return;
+    }
+    NSValue* was = objc_getAssociatedObject(layout, kRoomKey);
+    if (!cards && !was) {
+        return;
+    }
+    CGFloat edge = gStyle.gap / 2 + gStyle.inner;
+    CGFloat top = (cards && !(connector & 1)) ? edge : 0;
+    CGFloat bottom = (cards && !(connector & 2)) ? edge : 0;
+    UIEdgeInsets old = was ? was.UIEdgeInsetsValue : UIEdgeInsetsZero;
+    if (fabs(old.top - top) < 0.01 && fabs(old.bottom - bottom) < 0.01) {
+        return;
+    }
+    SEL getter = NSSelectorFromString(@"size"), setter = NSSelectorFromString(@"setSize:");
+    if (![layout respondsToSelector:getter] || ![layout respondsToSelector:setter]) {
+        return;
+    }
+    CGSize size = ((CGSize (*)(id, SEL))objc_msgSend)(layout, getter);
+    if (size.height <= 0) {
+        return; // a row that measures itself
+    }
+    size.height += (top + bottom) - (old.top + old.bottom);
+    ((void (*)(id, SEL, CGSize))objc_msgSend)(layout, setter, size);
+    objc_setAssociatedObject(layout, kRoomKey, [NSValue valueWithUIEdgeInsets:UIEdgeInsetsMake(top, 0, bottom, 0)],
+                             OBJC_ASSOCIATION_RETAIN);
+    gRoomRows++;
+}
+
+// `frame` (the content's place in its row) with the row's added room taken
+// off, when the row really is as tall as its layout says.
+static CGRect FrameWithRoom(UITableViewCell* cell, CGRect frame) {
+    SEL layoutSelector = NSSelectorFromString(@"cellLayout");
+    if (![cell respondsToSelector:layoutSelector]) {
+        return frame;
+    }
+    id layout = ((id (*)(id, SEL))objc_msgSend)(cell, layoutSelector);
+    NSValue* note = layout ? objc_getAssociatedObject(layout, kRoomKey) : nil;
+    if (!note) {
+        return frame;
+    }
+    UIEdgeInsets room = note.UIEdgeInsetsValue;
+    SEL sizeSelector = NSSelectorFromString(@"size");
+    if (room.top + room.bottom < 0.5 || ![layout respondsToSelector:sizeSelector]) {
+        return frame;
+    }
+    CGFloat layoutHeight = ((CGSize (*)(id, SEL))objc_msgSend)(layout, sizeSelector).height;
+    CGFloat rowHeight = CGRectGetHeight(cell.bounds);
+    if (fabs(rowHeight - layoutHeight) > 2 || CGRectGetHeight(frame) < rowHeight - 2 || CGRectGetMinY(frame) > 0.5) {
+        return frame; // the row did not get the room, or the frame has it taken off already
+    }
+    frame.origin.y += room.top;
+    frame.size.height -= room.top + room.bottom;
+    return frame;
 }
 
 // MARK: Putting a card on a row
@@ -1125,6 +1278,14 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     BOOL listOn = CardsOnFor(kind);
     if (kind == NFBListHome && table && gHomeTable != table) {
         gHomeTable = table;
+    }
+    if (listOn && table) {
+        if (!gCardTables) {
+            gCardTables = [NSHashTable weakObjectsHashTable];
+        }
+        if (![gCardTables containsObject:table]) {
+            [gCardTables addObject:table];
+        }
     }
     NFBThreadFlags flags = (listOn && kind == NFBListHome) ? ThreadFlags(table, cell) : 0;
     BOOL want = listOn && CGRectGetWidth(cell.bounds) > 120 &&
@@ -1298,8 +1459,17 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         CGFloat scale = MAX(0.8, (cellWidth - margin * 2) / MAX(1, width));
         transform = CATransform3DMakeScale(scale, scale, 1);
     }
-    if (!CATransform3DEqualToTransform(contentView.layer.sublayerTransform, transform)) {
-        contentView.layer.sublayerTransform = transform;
+    // A row being pulled sideways (notifications) keeps its pull.
+    memory.baseTransform = transform;
+    CATransform3D shown = fabs(memory.swipeOffset) > 0.01
+                              ? CATransform3DConcat(transform, CATransform3DMakeTranslation(memory.swipeOffset, 0, 0))
+                              : transform;
+    if (!CATransform3DEqualToTransform(contentView.layer.sublayerTransform, shown) &&
+        ![contentView.layer animationForKey:@"nfbSwipe"]) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        contentView.layer.sublayerTransform = shown;
+        [CATransaction commit];
         [background setNeedsLayout];
     }
     DrawThreadLine(cell, background, flags);
@@ -1335,6 +1505,13 @@ static void RefreshOnScreen(void) {
         for (UIWindow* window in ((UIWindowScene*)scene).windows) {
             RefreshViews(window, 0);
         }
+    }
+    // The gap and the inner room are part of each row's height: the lists
+    // that show cards measure their rows again, on screen or not (the home
+    // timeline is under the settings page while the sliders are moved).
+    for (UITableView* table in gCardTables.allObjects) {
+        UpdateListMetrics(table);
+        [table reloadData];
     }
 }
 
@@ -1373,6 +1550,43 @@ static BOOL PressReply(UIView* button) {
     return NO;
 }
 
+// Sets a layer's sublayer transform, at once or with an animation of its own.
+// The pull used to set the content view's transform and each card piece's
+// transform; in 7.3.97 the reply mark showed and nothing moved: X lays the
+// row out again while it is touched and puts those views back. A sublayer
+// transform is not part of that layout, and ApplyCard keeps the pull in it.
+static void MoveSublayers(CALayer* layer, CATransform3D to, CFTimeInterval duration, BOOL spring) {
+    if (!layer) {
+        return;
+    }
+    CALayer* shown = layer.presentationLayer;
+    CATransform3D from = ([layer animationForKey:@"nfbSwipe"] && shown) ? shown.sublayerTransform : layer.sublayerTransform;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.sublayerTransform = to;
+    [CATransaction commit];
+    [layer removeAnimationForKey:@"nfbSwipe"];
+    if (duration <= 0 || CATransform3DEqualToTransform(from, to)) {
+        return;
+    }
+    CABasicAnimation* animation = nil;
+    if (spring) {
+        CASpringAnimation* bounce = [CASpringAnimation animationWithKeyPath:@"sublayerTransform"];
+        bounce.mass = 1;
+        bounce.stiffness = 300;
+        bounce.damping = 26;
+        bounce.duration = bounce.settlingDuration;
+        animation = bounce;
+    } else {
+        animation = [CABasicAnimation animationWithKeyPath:@"sublayerTransform"];
+        animation.duration = duration;
+        animation.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    }
+    animation.fromValue = [NSValue valueWithCATransform3D:from];
+    animation.toValue = [NSValue valueWithCATransform3D:to];
+    [layer addAnimation:animation forKey:@"nfbSwipe"];
+}
+
 @interface NFBReplySwipe : UIPanGestureRecognizer
 @property (nonatomic, weak) UITableViewCell* cell;
 @property (nonatomic, strong) UIView* mark;
@@ -1385,20 +1599,7 @@ static BOOL PressReply(UIView* button) {
 
 @implementation NFBReplySwipe
 
-- (void)setOffset:(CGFloat)offset {
-    UITableViewCell* cell = self.cell;
-    CGAffineTransform move = CGAffineTransformMakeTranslation(offset, 0);
-    cell.contentView.transform = move;
-    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
-    if (memory.active) {
-        for (UIView* piece in memory.background.subviews) {
-            piece.transform = move;
-        }
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        memory.background.threadLayer.affineTransform = move;
-        [CATransaction commit];
-    }
+- (void)showMark:(CGFloat)offset {
     UIView* mark = self.mark;
     CGFloat progress = MIN(1.0, -offset / kReplyPull);
     mark.alpha = progress;
@@ -1406,6 +1607,28 @@ static BOOL PressReply(UIView* button) {
     // The mark rides a little behind the card's edge until it is fully shown.
     mark.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(scale, scale),
                                              CGAffineTransformMakeTranslation((1 - progress) * 24, 0));
+}
+
+- (void)setOffset:(CGFloat)offset duration:(CFTimeInterval)duration spring:(BOOL)spring {
+    UITableViewCell* cell = self.cell;
+    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
+    CATransform3D move = CATransform3DMakeTranslation(offset, 0, 0);
+    if (memory.active) {
+        memory.swipeOffset = offset;
+        MoveSublayers(cell.contentView.layer, CATransform3DConcat(memory.baseTransform, move), duration, spring);
+        MoveSublayers(memory.background.layer, move, duration, spring);
+        MoveSublayers(memory.highlight.layer, move, duration, spring);
+    } else {
+        MoveSublayers(cell.contentView.layer, move, duration, spring);
+    }
+    if (duration > 0) {
+        [UIView animateWithDuration:MIN(duration, 0.25)
+                         animations:^{
+                             [self showMark:offset];
+                         }];
+    } else {
+        [self showMark:offset];
+    }
 }
 
 - (void)beginTracking {
@@ -1453,13 +1676,10 @@ static BOOL PressReply(UIView* button) {
                                                                     : UIImpactFeedbackStyleLight]
                 impactOccurredWithIntensity:armed ? 0.8 : 0.4];
         }
-        [UIView animateWithDuration:0.18
-                         animations:^{
-                             [self setOffset:shown];
-                         }];
+        [self setOffset:shown duration:0.18 spring:NO];
         return;
     }
-    [self setOffset:shown];
+    [self setOffset:shown duration:0 spring:NO];
 }
 
 - (void)endTracking:(BOOL)lifted {
@@ -1471,20 +1691,12 @@ static BOOL PressReply(UIView* button) {
     self.armed = NO;
     UIView* mark = self.mark;
     UITableViewCell* cell = self.cell;
-    [UIView animateWithDuration:0.42
-        delay:0
-        usingSpringWithDamping:0.78
-        initialSpringVelocity:0.4
-        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
-        animations:^{
-            [self setOffset:0];
-            mark.alpha = 0;
+    [self setOffset:0 duration:0.42 spring:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!self.tracking) {
+            [mark removeFromSuperview];
         }
-        completion:^(BOOL finished) {
-            if (finished) {
-                [mark removeFromSuperview];
-            }
-        }];
+    });
     if (answer && cell) {
         UIView* button = ReplyButton(cell);
         BOOL pressed = PressReply(button);
@@ -1711,6 +1923,15 @@ static void LayoutCard(UITableViewCell* cell) {
 
 - (void)layoutSubviews {
     %orig;
+    // X's own rows get their card after X's part of the layout (below).
+    static Class tfnCell = Nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        tfnCell = objc_getClass("TFNTableViewCell");
+    });
+    if (gCellHooked && tfnCell && [self isKindOfClass:tfnCell]) {
+        return;
+    }
     LayoutCard((UITableViewCell*)self);
 }
 
@@ -1739,7 +1960,29 @@ static void LayoutCard(UITableViewCell* cell) {
 
 - (void)layoutSubviews {
     %orig;
-    LayoutCard((UITableViewCell*)self);
+    // The room added above and below a card (see GiveCardRoom): the content
+    // sits that much lower, before the tweet is laid out inside it.
+    UITableViewCell* cell = (UITableViewCell*)self;
+    CGRect frame = cell.contentView.frame;
+    CGRect wanted = FrameWithRoom(cell, frame);
+    if (!CGRectEqualToRect(frame, wanted)) {
+        cell.contentView.frame = wanted;
+        gRoomInsets++;
+    }
+    LayoutCard(cell);
+}
+
+%end
+
+%end
+
+// Where X takes the content's place in a row from, if it does.
+%group TFNFrame
+
+%hook TFNTableViewCell
+
+- (CGRect)contentFrame {
+    return FrameWithRoom((UITableViewCell*)self, %orig);
 }
 
 %end
@@ -1749,6 +1992,11 @@ static void LayoutCard(UITableViewCell* cell) {
 // The margin of a list with cards, as part of X's own layout metrics.
 %hook TFNDataViewController
 
+// X asks for these all the time while it lays a screen out. 7.3.97 made a new
+// copy of the metrics, and a line for the dump, on every call, and handed X a
+// different object each time: slow, and X may take a different object for
+// changed metrics and lay the list out again. The same question now gets the
+// same object back, and off the main thread only what was worked out before.
 - (id)calculatedLayoutMetrics {
     id metrics = %orig;
     if (!gSwitchesRead) {
@@ -1758,13 +2006,30 @@ static void LayoutCard(UITableViewCell* cell) {
         return metrics;
     }
     UIViewController* controller = (UIViewController*)self;
-    CGFloat extra = CardsOnFor(KindOfController(controller)) ? kCardSide + gStyle.inner : 0;
-    id inset = extra > 0 ? MetricsWithMargin(metrics, extra) : nil;
-    NSNumber* was = objc_getAssociatedObject(controller, kListInsetKey);
-    if ((inset != nil) != (was != nil) || (inset && fabs(was.doubleValue - extra) > 0.01)) {
-        objc_setAssociatedObject(controller, kListInsetKey, inset ? @(extra) : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NFBMetricsNote* note = objc_getAssociatedObject(controller, kMetricsNoteKey);
+    if (![NSThread isMainThread]) {
+        BOOL same = note.result && (note.source == metrics || [note.source isEqual:metrics]);
+        return same ? note.result : metrics;
     }
     gMetricsCalls++;
+    CGFloat extra = CardsOnFor(KindOfController(controller)) ? kCardSide + gStyle.inner : 0;
+    if (extra <= 0) {
+        if (note) {
+            objc_setAssociatedObject(controller, kMetricsNoteKey, nil, OBJC_ASSOCIATION_RETAIN);
+            objc_setAssociatedObject(controller, kListInsetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        return metrics;
+    }
+    if (note && fabs(note.extra - extra) < 0.01 && (note.source == metrics || [note.source isEqual:metrics])) {
+        return note.result ?: metrics;
+    }
+    id inset = MetricsWithMargin(metrics, extra);
+    NFBMetricsNote* fresh = [NFBMetricsNote new];
+    fresh.source = metrics;
+    fresh.result = inset;
+    fresh.extra = extra;
+    objc_setAssociatedObject(controller, kMetricsNoteKey, fresh, OBJC_ASSOCIATION_RETAIN);
+    objc_setAssociatedObject(controller, kListInsetKey, inset ? @(extra) : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return inset ?: metrics;
 }
 
@@ -1802,11 +2067,12 @@ static void LayoutCard(UITableViewCell* cell) {
                      account:(id)account
                layoutMetrics:(id)layoutMetrics
           withPreviousLayout:(id)previousLayout {
-    id indented = MetricsForReply(viewModel, options, layoutMetrics);
-    if (indented) {
-        return %orig(viewModel, options, account, indented, previousLayout);
-    }
-    return %orig;
+    BOOL cards = AreCardMetrics(layoutMetrics);
+    NSUInteger connector = cards ? ConnectorFor(viewModel, options) : 0;
+    id indented = (cards && gCardsOn) ? MetricsForReply(layoutMetrics, connector) : nil;
+    id layout = indented ? %orig(viewModel, options, account, indented, previousLayout) : %orig;
+    GiveCardRoom(layout, cards, connector);
+    return layout;
 }
 
 %end
@@ -1955,6 +2221,24 @@ static BOOL InNestedReply(UITableViewCell* cell) {
     return memory.active && memory.background.nested;
 }
 
+// X gives the small pieces at the right end of the name line (the "..."
+// button) the row's own colour as a solid background, so they draw faster. On
+// a reply's tinted inner box that is a white square behind the button.
+static void ClearSolid(UIView* view, int depth) {
+    if (depth > 3 || [view isKindOfClass:[UIImageView class]]) {
+        return;
+    }
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    [[view.backgroundColor resolvedColorWithTraitCollection:view.traitCollection] getRed:&r green:&g blue:&b alpha:&a];
+    if (a > 0.5) {
+        view.backgroundColor = [UIColor clearColor];
+        view.opaque = NO;
+    }
+    for (UIView* sub in view.subviews) {
+        ClearSolid(sub, depth + 1);
+    }
+}
+
 // The first few characters of a text as code points, for the dump.
 static NSString* CodePoints(NSString* text) {
     NSMutableString* out = [NSMutableString string];
@@ -2030,6 +2314,7 @@ static void ArrangeNameLine(UIView* line) {
         if (![sub isKindOfClass:[UILabel class]] && !sub.hidden && CGRectGetWidth(sub.frame) > 0 &&
             CGRectGetMinX(sub.frame) > CGRectGetWidth(line.bounds) * 0.6) {
             limit = MIN(limit, CGRectGetMinX(sub.frame));
+            ClearSolid(sub, 0);
         }
     }
 
@@ -2669,6 +2954,9 @@ void NFBNotePullStatus(UIView* control, unsigned long long status) {
         class_getInstanceMethod(tfnCell, @selector(layoutSubviews))) {
         %init(TFNCell);
         gCellHooked = YES;
+        if (class_getInstanceMethod(tfnCell, NSSelectorFromString(@"contentFrame"))) {
+            %init(TFNFrame);
+        }
     }
     Class statusCell = objc_getClass("T1StatusCell");
     Class rowAdapter = objc_getClass("T1StatusTableRowAdapter");

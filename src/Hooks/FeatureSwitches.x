@@ -37,6 +37,8 @@ static BOOL AccountIsGenuinelyPremium(void) {
 
 // MARK: - Feature switch overrides
 
+static NSInteger gPullAnimationAsked = 0;
+
 static NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
     if (![key isKindOfClass:[NSString class]]) {
         return nil;
@@ -107,6 +109,20 @@ static NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
         [key isEqualToString:
                  @"grok_translations_immersive_auto_translate_is_enabled"]) {
         return [BHTSettings boolForKey:@"disable_auto_translate"] ? @NO : nil;
+    }
+
+    // X's own "pull to refresh animation" on the home timeline, which its
+    // server switches on for some accounts and not others: while the list is
+    // pulled the top bar (tabs and logo) comes down with it, an animated X logo
+    // takes the place of the logo, and the usual spinner does not show. That is
+    // what 7.3.96-7.3.97 reported on one account of several ("the tabs move
+    // with the pull, the logo is X's, no refresh icon"). With
+    // "kemo_plain_refresh" on, the default, the switch and its variants
+    // (foreground, latest, navigate) read as off, so every account refreshes the
+    // way it always did. Only the value read on the device changes.
+    if ([key hasPrefix:@"home_timeline_pull_to_refresh_animation"]) {
+        gPullAnimationAsked++;
+        return [BHTSettings boolForKey:@"kemo_plain_refresh"] ? @NO : nil;
     }
 
     // Grok buttons
@@ -446,6 +462,12 @@ static NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
 // Every feature switch facade bottoms out in TFSFeatureSwitches, but instances
 // can be wrapped in TFSInstrumentedFeatureSwitches, which implements its own
 // typed getters, so both classes need the same hooks.
+
+// For the shake dump: was X's pull to refresh animation asked about at all?
+NSString* NFBPullAnimationDebugText(void) {
+    return [NSString stringWithFormat:@"plainRefresh=%d pullAnimationAsked=%ld", [BHTSettings boolForKey:@"kemo_plain_refresh"],
+                                      (long)gPullAnimationAsked];
+}
 
 %hook TFSFeatureSwitches
 

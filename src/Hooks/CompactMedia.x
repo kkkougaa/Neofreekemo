@@ -344,14 +344,23 @@ static UIView* SmallSquare(UIView* view, int depth) {
 // short the text: most of that line was empty. With "kemo_corner_media" it
 // sits at the top right, beside the name line and the first lines of text:
 //
-//  - where X makes the row's layout, the tweet's column is made narrower on the
+//  - where X makes the row's layout, the tweet's text is made narrower on the
 //    right by the photo and a gap (Readability.x does that, with the reply
-//    indent, in its hook on +[T1StatusCell cellLayoutForViewModel:...]), so the
-//    name line and the text wrap before the photo;
-//  - the row is made shorter by the room the photo no longer takes under the
-//    text (never shorter than the photo needs), noted on the layout;
-//  - after X has laid the tweet out, the photo's container is moved up into the
-//    freed strip and everything X had put below it moves up by what was noted.
+//    indent, in its hook on +[T1StatusCell cellLayoutForViewModel:...]);
+//  - X's layout for the row is read (its TFNVerticalLayout items): where the
+//    photo's place is, and what sits between the name line and the photo. The
+//    photo goes up beside the first of those, the row loses what that saves
+//    (never more than leaves room for the photo), and both are noted on the
+//    layout;
+//  - after X has laid the tweet out, the photo's container moves up by what
+//    was noted, to the right end of the column, and everything X had put below
+//    it moves up by what the row lost.
+//
+// 7.3.100 put the photo after the right end of the name line, taking the name
+// line to be narrower too. X only narrows the text (the dump: text 280 wide,
+// name line still 344), so every photo sat past the card's edge, and it would
+// have covered the time and the "..." button had it been further left. It now
+// sits beside the text, under the name line.
 //
 // X's text view cannot wrap around a shape, so the text is narrower all the
 // way down, not just beside the photo.
@@ -359,6 +368,7 @@ static UIView* SmallSquare(UIView* view, int depth) {
 static const void* kCornerNoteKey = &kCornerNoteKey; // on a row's layout: {side, taken off the height}
 static BOOL gPlacingCorner = NO;
 static NSInteger gCornerPlaced = 0, gCornerSkipped = 0;
+static NSString* gCornerLog = @"-";
 
 // The side of the photo that goes beside the text for this tweet, or 0.
 CGFloat NFBCornerThumbFor(id viewModel) {
@@ -372,15 +382,59 @@ CGFloat NFBCornerGap(void) {
     return kCornerGap;
 }
 
-// Takes the photo's old place under the text off the row's height. Safe to
-// call again on a layout X hands out a second time.
+static CGRect ItemFrame(id item) {
+    SEL selector = NSSelectorFromString(@"frame");
+    return [item respondsToSelector:selector] ? ((CGRect (*)(id, SEL))objc_msgSend)(item, selector) : CGRectNull;
+}
+
+static BOOL ItemVisible(id item) {
+    SEL selector = NSSelectorFromString(@"isVisible");
+    return [item respondsToSelector:selector] ? ((BOOL (*)(id, SEL))objc_msgSend)(item, selector) : NO;
+}
+
+static id ItemObject(id item, NSString* name) {
+    SEL selector = NSSelectorFromString(name);
+    return [item respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(item, selector) : nil;
+}
+
+// The item of X's layout that is the small photo: visible, and a square of
+// the photo's side. Layouts nest (an item can stand for a layout of its own).
+static id FindThumbItem(id layout, CGFloat thumb, int depth) {
+    if (depth > 4) {
+        return nil;
+    }
+    NSArray* items = ItemObject(layout, @"items");
+    if (![items isKindOfClass:[NSArray class]]) {
+        return nil;
+    }
+    for (id item in items) {
+        if (!ItemVisible(item)) {
+            continue;
+        }
+        CGRect frame = ItemFrame(item);
+        if (!CGRectIsNull(frame) && fabs(CGRectGetWidth(frame) - thumb) <= 1 && fabs(CGRectGetHeight(frame) - thumb) <= 1) {
+            return item;
+        }
+        id inner = ItemObject(item, @"representedLayout");
+        id found = inner ? FindThumbItem(inner, thumb, depth + 1) : nil;
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+// Reads X's layout of the row and takes off its height what moving the photo
+// up beside the text saves. Safe to call again on a layout X hands out a
+// second time. The note on the layout is {side, taken off the height, how far
+// up the photo goes}.
 void NFBCornerAdjustLayout(id layout, CGFloat thumb) {
     if (!layout) {
         return;
     }
     NSValue* was = objc_getAssociatedObject(layout, kCornerNoteKey);
-    CGPoint old = was ? was.CGPointValue : CGPointZero;
-    if (fabs(old.x - thumb) < 0.01) {
+    CGRect old = was ? was.CGRectValue : CGRectZero;
+    if (fabs(CGRectGetMinX(old) - thumb) < 0.01) {
         return;
     }
     SEL getter = NSSelectorFromString(@"size"), setter = NSSelectorFromString(@"setSize:");
@@ -391,12 +445,43 @@ void NFBCornerAdjustLayout(id layout, CGFloat thumb) {
     if (size.height <= 0) {
         return;
     }
-    CGFloat natural = size.height + old.y;
-    CGFloat reduction = thumb > 0 ? MAX(0, MIN(thumb, natural - (thumb + 26))) : 0;
-    size.height = natural - reduction;
+    CGFloat natural = size.height + CGRectGetMinY(old);
+    CGFloat saved = 0, lift = 0;
+    if (thumb > 0) {
+        id state = ItemObject(layout, @"statusViewLayoutState");
+        id vertical = ItemObject(state, @"verticalLayout");
+        SEL avatarSelector = NSSelectorFromString(@"avatarFrame");
+        CGFloat nameLine = [state respondsToSelector:avatarSelector]
+                               ? ((CGRect (*)(id, SEL))objc_msgSend)(state, avatarSelector).origin.y + 5
+                               : 16;
+        id photo = vertical ? FindThumbItem(vertical, thumb, 0) : nil;
+        CGRect place = photo ? ItemFrame(photo) : CGRectNull;
+        // What sits between the name line and the photo: the text, and any
+        // line X adds around it (a translation note).
+        CGFloat top = CGFLOAT_MAX, bottom = -CGFLOAT_MAX;
+        int steps = 0;
+        for (id item = ItemObject(photo, @"previousVisibleItem"); item && steps < 8;
+             item = ItemObject(item, @"previousVisibleItem"), steps++) {
+            CGRect frame = ItemFrame(item);
+            if (CGRectIsNull(frame) || CGRectGetMinY(frame) <= nameLine) {
+                break; // the name line, or what is above it
+            }
+            top = MIN(top, CGRectGetMinY(frame));
+            bottom = MAX(bottom, CGRectGetMaxY(frame));
+        }
+        if (!CGRectIsNull(place) && top < CGFLOAT_MAX && top < CGRectGetMinY(place)) {
+            lift = CGRectGetMinY(place) - top;
+            saved = MAX(0, MIN(thumb + 16, CGRectGetMaxY(place) - MAX(bottom, top + thumb)));
+        }
+        gCornerLog = [NSString stringWithFormat:@"photo=%@ between=%.0f..%.0f nameLine<=%.0f lift=%.1f saved=%.1f",
+                                                CGRectIsNull(place) ? @"(not found)" : NSStringFromCGRect(place),
+                                                top < CGFLOAT_MAX ? top : -1, bottom > -CGFLOAT_MAX ? bottom : -1,
+                                                nameLine, lift, saved];
+    }
+    size.height = natural - saved;
     ((void (*)(id, SEL, CGSize))objc_msgSend)(layout, setter, size);
     objc_setAssociatedObject(layout, kCornerNoteKey,
-                             thumb > 0 ? [NSValue valueWithCGPoint:CGPointMake(thumb, reduction)] : nil,
+                             thumb > 0 ? [NSValue valueWithCGRect:CGRectMake(thumb, saved, lift, 0)] : nil,
                              OBJC_ASSOCIATION_RETAIN);
 }
 
@@ -441,7 +526,8 @@ void NFBPlaceCornerMedia(UIView* status) {
     if (!note) {
         return;
     }
-    CGFloat thumb = note.CGPointValue.x, reduction = note.CGPointValue.y;
+    CGRect noted = note.CGRectValue;
+    CGFloat thumb = CGRectGetMinX(noted), saved = CGRectGetMinY(noted), lift = CGRectGetWidth(noted);
     SEL sizeSelector = NSSelectorFromString(@"size");
     CGFloat layoutHeight = [layout respondsToSelector:sizeSelector]
                                ? ((CGSize (*)(id, SEL))objc_msgSend)(layout, sizeSelector).height
@@ -461,18 +547,24 @@ void NFBPlaceCornerMedia(UIView* status) {
     }
     CGRect name = [author.superview convertRect:author.frame toView:host];
     CGRect old = container.frame;
-    CGRect target = CGRectMake(CGRectGetMaxX(name) + kCornerGap, CGRectGetMinY(name), CGRectGetWidth(old),
-                               CGRectGetHeight(old));
-    if (fabs(CGRectGetMinX(old) - CGRectGetMinX(target)) < 0.5 && fabs(CGRectGetMinY(old) - CGRectGetMinY(target)) < 0.5) {
+    // The right end of the tweet's column: where the name line ends (X leaves
+    // the name line its full width). Never past the row's own edge.
+    CGFloat right = MIN(CGRectGetMaxX(name), CGRectGetWidth(host.bounds));
+    CGFloat x = MAX(CGRectGetMinX(old), right - CGRectGetWidth(old));
+    // Up beside the text, but never onto the name line.
+    CGFloat y = MAX(CGRectGetMaxY(name) + 1, CGRectGetMinY(old) - lift);
+    CGRect target = CGRectMake(x, y, CGRectGetWidth(old), CGRectGetHeight(old));
+    if (fabs(CGRectGetMinX(old) - x) < 0.5 && fabs(CGRectGetMinY(old) - y) < 0.5) {
         return; // already there, and what was below it already moved
     }
-    if (CGRectGetMinY(old) <= CGRectGetMaxY(name)) {
-        gCornerSkipped++;
-        return; // not where X puts media (under the text)
+    if (lift > 0.5 && CGRectGetMinY(old) < CGRectGetMaxY(name) + lift - 1) {
+        return; // moved up already (X did not lay the tweet out again)
     }
-    for (UIView* view in host.subviews) {
-        if (view != container && CGRectGetMinY(view.frame) >= CGRectGetMaxY(old) - 0.5) {
-            view.frame = CGRectOffset(view.frame, 0, -reduction);
+    if (saved > 0.5) {
+        for (UIView* view in host.subviews) {
+            if (view != container && CGRectGetMinY(view.frame) >= CGRectGetMaxY(old) - 0.5) {
+                view.frame = CGRectOffset(view.frame, 0, -saved);
+            }
         }
     }
     gPlacingCorner = YES;
@@ -679,14 +771,14 @@ NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
                                       @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld "
                                       @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) side=%.0f corner=%d "
-                                      @"cornerPlaced=%ld cornerSkipped=%ld lastViewModel=%@",
+                                      @"cornerPlaced=%ld cornerSkipped=%ld (%@) lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
                                       (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gVerticalVideos,
                                       gVerticalVideoHooked, (long)gRightContainers, (long)gRightAligned, gRightLog,
                                       ThumbSide(), [BHTSettings boolForKey:kCornerKey], (long)gCornerPlaced,
-                                      (long)gCornerSkipped, gLastViewModelClass ?: @"-"];
+                                      (long)gCornerSkipped, gCornerLog, gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

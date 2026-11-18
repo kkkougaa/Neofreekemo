@@ -55,7 +55,7 @@ static const CGFloat kReplyPull = 80.0;  // pull this far to answer
 // Switches and the card style, read once and refreshed when settings change
 // (the cell hook runs a lot). gStamp changes whenever the style does, so cells
 // know to redo their colours.
-static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn, gPressOn;
+static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn;
 static NFBCardStyle gStyle;
 static NSInteger gStamp = 0;
 
@@ -82,7 +82,6 @@ static void ReadSwitches(void) {
     BOOL cards = [BHTSettings boolForKey:kCardsKey];
     BOOL notes = [BHTSettings boolForKey:kNoteCardsKey];
     BOOL dim = [BHTSettings boolForKey:kDimKey];
-    gPressOn = [BHTSettings boolForKey:@"kemo_card_press"];
     gCompactOn = [BHTSettings boolForKey:@"kemo_compact_media"] &&
                  ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
     NFBCardStyle style = NFBCardStyleCurrent();
@@ -1335,44 +1334,6 @@ static CGRect FrameWithRoom(UITableViewCell* cell, CGRect frame) {
     return frame;
 }
 
-// MARK: A pressed card
-// A card that is pressed goes in a little (0.98, 140 ms), like something that
-// can be pressed. It follows the row's own highlight, which UIKit only sets
-// when the touch is not a scroll, and not when the finger is on a picture, a
-// link preview, a quoted tweet, the avatar or a button. The row's sublayer
-// transform is used, so nothing X lays out is touched.
-static void MoveSublayers(CALayer* layer, CATransform3D to, CFTimeInterval duration, BOOL spring);
-
-static void PressCard(UITableViewCell* cell, BOOL down) {
-    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
-    BOOL press = down && gPressOn && memory.active;
-    if (press) {
-        UITableView* table = TableOf(cell);
-        if (table.isDragging || table.isDecelerating) {
-            press = NO;
-        } else {
-            CGPoint point = [table.panGestureRecognizer locationInView:cell];
-            UIView* hit = CGRectContainsPoint(cell.bounds, point) ? [cell hitTest:point withEvent:nil] : nil;
-            for (UIView* view = hit; view && view != cell; view = view.superview) {
-                NSString* name = NSStringFromClass(view.class);
-                if ([view isKindOfClass:[UIControl class]] || [name containsString:@"Media"] ||
-                    [name containsString:@"Photo"] || [name containsString:@"Video"] ||
-                    [name containsString:@"Attachment"] || [name containsString:@"Card"] ||
-                    [name containsString:@"Quoted"] || [name containsString:@"Avatar"] ||
-                    [name containsString:@"FleetLine"]) {
-                    press = NO;
-                    break;
-                }
-            }
-        }
-    }
-    CATransform3D target = press ? CATransform3DMakeScale(0.98, 0.98, 1) : CATransform3DIdentity;
-    if (CATransform3DEqualToTransform(cell.layer.sublayerTransform, target)) {
-        return;
-    }
-    MoveSublayers(cell.layer, target, press ? 0.14 : 0.2, NO);
-}
-
 // MARK: Putting a card on a row
 
 static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
@@ -2064,17 +2025,11 @@ static void LayoutCard(UITableViewCell* cell) {
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     %orig;
     KeepCardCleanSoon((UITableViewCell*)self);
-    PressCard((UITableViewCell*)self, highlighted);
 }
 
 - (void)setSelected:(BOOL)selected animated:(BOOL)animated {
     %orig;
     KeepCardCleanSoon((UITableViewCell*)self);
-}
-
-- (void)prepareForReuse {
-    %orig;
-    PressCard((UITableViewCell*)self, NO);
 }
 
 - (void)layoutSubviews {
@@ -2987,6 +2942,12 @@ static void DimActions(UIView* actions) {
                             NFBCardMemory* later = row ? objc_getAssociatedObject(row, kCardMemoryKey) : nil;
                             if (later.active && later.thread) {
                                 SetThreadLinesHidden(row, later, YES);
+                                // The "..." button gets its white backing back
+                                // after this pass too (7.3.100 dump).
+                                UIView* line = FindView(row.contentView, @"StatusAuthorView", 0);
+                                if (line) {
+                                    ArrangeNameLine(line);
+                                }
                             }
                         });
                     }

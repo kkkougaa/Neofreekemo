@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.87",
+      "subtitle": "NeoFreeBird version 7.3.88",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.88",
+          "buildVersion": "88",
+          "date": "2026-11-18T06:50:02Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.88/NeoFreeBird-Twitter-sideloaded_7.3.88_12.44.ipa",
+          "size": 270799168,
+          "minOSVersion": "15.0",
+          "localizedDescription": "앱 기본 글꼴을 프리텐다드 JP로 교체 (한글·일본어·한자·영문 통일). 앱 안의 글꼴 바꾸기는 꺼두세요."
+        },
         {
           "version": "7.3.87",
           "buildVersion": "87",

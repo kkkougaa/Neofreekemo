@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.98",
+      "subtitle": "NeoFreeBird version 7.3.100",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.100",
+          "buildVersion": "100",
+          "date": "2026-11-18T11:53:21Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.100/NeoFreeBird-Twitter-sideloaded_7.3.100_12.44.ipa",
+          "size": 270905334,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 새로고침·로고를 원래대로(12.44의 실제 스위치 이름으로 끔). 트윗을 시트로 열기. 사진 한 장은 글 옆(작은 사진 크기 조절 가능). 카드 눌림. 안쪽 여백을 좌우/위아래 따로. 재게시 카드 위쪽 여백 줄임. 카드 뒤 바탕 선택(기본·옅게·테마색·없음). 세로 동영상도 작게. 메인 트윗 프로필 사진에서 내려오는 선 숨김. 액션 줄 흐림 0.6."
+        },
         {
           "version": "7.3.98",
           "buildVersion": "98",

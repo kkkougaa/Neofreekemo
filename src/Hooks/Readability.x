@@ -1039,6 +1039,160 @@ static void ScaleNameLine(UIView* line, CGFloat scale) {
     }
 }
 
+// MARK: The faded action row
+// The row is faded button by button, and a like or a repost the reader has
+// made keeps its full colour (X paints it pink or green), so it still shows.
+// A tap on the row looks again shortly after, once X has recoloured it.
+
+// The theme colour, which untouched icons could inherit; never taken as "done".
+static CGFloat gAccentHue = -1;
+
+static BOOL IsDoneColor(UIColor* color, UITraitCollection* traits) {
+    if (!color) {
+        return NO;
+    }
+    CGFloat h = 0, sat = 0, b = 0, a = 0;
+    UIColor* resolved = traits ? [color resolvedColorWithTraitCollection:traits] : color;
+    if (![resolved getHue:&h saturation:&sat brightness:&b alpha:&a]) {
+        return NO;
+    }
+    if (sat < 0.4 || b < 0.3 || a < 0.3) {
+        return NO;
+    }
+    if (gAccentHue >= 0 && fabs(h - gAccentHue) < 0.015) {
+        return NO;
+    }
+    BOOL pink = h > 0.85 || h < 0.02;   // like
+    BOOL green = h > 0.30 && h < 0.48;  // repost
+    return pink || green;
+}
+
+static BOOL LayerIsDone(CALayer* layer, int depth) {
+    if (depth > 6) {
+        return NO;
+    }
+    if ([layer isKindOfClass:[CAShapeLayer class]]) {
+        CAShapeLayer* shape = (CAShapeLayer*)layer;
+        for (id cg in @[ (__bridge id)shape.fillColor ?: [NSNull null], (__bridge id)shape.strokeColor ?: [NSNull null] ]) {
+            if (cg != [NSNull null] && IsDoneColor([UIColor colorWithCGColor:(__bridge CGColorRef)cg], nil)) {
+                return YES;
+            }
+        }
+    }
+    for (CALayer* sub in layer.sublayers) {
+        if (LayerIsDone(sub, depth + 1)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL ActionIsDone(UIView* view, int depth) {
+    if (depth > 6 || view.hidden) {
+        return NO;
+    }
+    UITraitCollection* traits = view.traitCollection;
+    if ([view isKindOfClass:[UILabel class]] && IsDoneColor(((UILabel*)view).textColor, traits)) {
+        return YES;
+    }
+    if ([view isKindOfClass:[UIImageView class]] && ((UIImageView*)view).image &&
+        IsDoneColor(view.tintColor, traits) &&
+        ((UIImageView*)view).image.renderingMode != UIImageRenderingModeAlwaysOriginal) {
+        return YES;
+    }
+    if ([view isKindOfClass:[UIButton class]] && IsDoneColor([(UIButton*)view titleColorForState:UIControlStateNormal], traits)) {
+        return YES;
+    }
+    // Lottie and other drawn icons.
+    if (view.subviews.count == 0 && LayerIsDone(view.layer, 0)) {
+        return YES;
+    }
+    for (UIView* sub in view.subviews) {
+        if (ActionIsDone(sub, depth + 1)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void DimActions(UIView* actions);
+
+@interface NFBActionTapWatcher : NSObject <UIGestureRecognizerDelegate>
++ (instancetype)shared;
+@end
+
+@implementation NFBActionTapWatcher
+
++ (instancetype)shared {
+    static NFBActionTapWatcher* watcher;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        watcher = [NFBActionTapWatcher new];
+    });
+    return watcher;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
+    return YES;
+}
+
+- (void)tapped:(UITapGestureRecognizer*)tap {
+    __weak UIView* actions = tap.view;
+    for (NSNumber* delay in @[ @0.15, @0.6, @1.2 ]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           if (actions) {
+                               DimActions(actions);
+                           }
+                       });
+    }
+}
+
+@end
+
+static const void* kTapWatcherKey = &kTapWatcherKey;
+
+static void DimActions(UIView* actions) {
+    // The buttons: below any single-child wrappers, the views side by side.
+    UIView* row = actions;
+    for (int i = 0; i < 4 && row.subviews.count == 1; i++) {
+        row = row.subviews.firstObject;
+    }
+    if (gDimOn) {
+        CGFloat h = 0, sat = 0, b = 0, a = 0;
+        gAccentHue = [CurrentAccentColor() getHue:&h saturation:&sat brightness:&b alpha:&a] ? h : -1;
+        if (actions.alpha < 1) {
+            actions.alpha = 1.0; // 7.3.86-7.3.91 faded the whole row
+        }
+        for (UIView* button in row.subviews) {
+            CGFloat alpha = ActionIsDone(button, 0) ? 1.0 : kDimAlpha;
+            if (button.alpha != alpha) {
+                button.alpha = alpha;
+            }
+        }
+        objc_setAssociatedObject(actions, kDimmedKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!objc_getAssociatedObject(actions, kTapWatcherKey)) {
+            UITapGestureRecognizer* tap = [[UITapGestureRecognizer alloc] initWithTarget:[NFBActionTapWatcher shared]
+                                                                                  action:@selector(tapped:)];
+            tap.cancelsTouchesInView = NO;
+            tap.delaysTouchesEnded = NO;
+            tap.delegate = [NFBActionTapWatcher shared];
+            [actions addGestureRecognizer:tap];
+            objc_setAssociatedObject(actions, kTapWatcherKey, tap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    } else {
+        UIView* dimmed = objc_getAssociatedObject(actions, kDimmedKey);
+        if (dimmed) {
+            for (UIView* button in dimmed.subviews) {
+                button.alpha = 1.0;
+            }
+            actions.alpha = 1.0;
+            objc_setAssociatedObject(actions, kDimmedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    }
+}
+
 %hook T1StandardStatusView
 
 - (void)layoutSubviews {
@@ -1067,13 +1221,7 @@ static void ScaleNameLine(UIView* line, CGFloat scale) {
     if (!actions) {
         return;
     }
-    if (gDimOn) {
-        actions.alpha = kDimAlpha;
-        objc_setAssociatedObject(actions, kDimmedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else if (objc_getAssociatedObject(actions, kDimmedKey)) {
-        actions.alpha = 1.0;
-        objc_setAssociatedObject(actions, kDimmedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    DimActions(actions);
 }
 
 %end

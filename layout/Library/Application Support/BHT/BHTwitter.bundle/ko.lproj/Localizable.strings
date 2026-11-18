@@ -490,6 +490,7 @@
 "KEMO_LOGO_LOADING_TITLE" = "로고 로딩 점 애니메이션";
 "KEMO_PLAIN_REFRESH_TITLE" = "홈 새로고침을 원래 모양으로";
 "KEMO_SHEET_OPEN_TITLE" = "트윗을 시트로 열기";
+"KEMO_HIDE_PARODY_LABEL_TITLE" = "패러디 계정 라벨 숨기기";
 "KEMO_CARD_PRESS_TITLE" = "카드 눌림 효과";
 "KEMO_CORNER_MEDIA_TITLE" = "사진 한 장은 글 옆에";
 "KEMO_THUMB_SIDE" = "작은 사진 크기";
@@ -543,7 +544,8 @@
 "KEMO_TIMELINE_CARDS_TITLE" = "홈 타임라인 카드형";
 "KEMO_TIMELINE_CARDS_DETAIL" = "트윗마다 둥근 카드에 담고 카드 사이에 틈을 둬서 트윗끼리 구분이 잘 되게 해요.";
 "KEMO_NOTIFICATION_CARDS_TITLE" = "알림 카드형";
-"KEMO_NOTIFICATION_CARDS_DETAIL" = "알림을 카드로 보여주고, 여러 명이 모인 알림은 카드 더미처럼 보여줘요. 답글·멘션 카드를 오른쪽에서 왼쪽으로 밀면 답글을 쓸 수 있어요.";
+"KEMO_NOTIFICATION_CARDS_DETAIL" = "알림을 카드로 보여주고, 여러 명이 모인 알림은 카드 더미처럼 보여줘요.";
+"KEMO_NOTIFICATION_SWIPE_REPLY_TITLE" = "알림 밀어서 답글";
 "KEMO_DIM_ACTIONS_TITLE" = "트윗 아래 숫자 줄 흐리게";
 "KEMO_DIM_ACTIONS_DETAIL" = "답글·재게시·마음에 들어요·조회수 줄을 흐리게 해서 글이 먼저 읽히게 해요.";
 "KEMO_BIGGER_TEXT_TITLE" = "트윗 글자 조금 크게";

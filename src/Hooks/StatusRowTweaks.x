@@ -162,3 +162,53 @@ UILabel* NFBAliasLabelOf(UIView* author) {
 }
 
 %end
+
+// MARK: - No parody label in the name line
+// X puts a small mark after the name of an account labelled parody,
+// commentary or fan (-[TTAStatusAuthorView parodyBadge], a
+// TUIUserDesignatorView). With "kemo_hide_parody_label" on, the name line's
+// layout is told there is none (X 12.44:
+// -[TTAStatusAuthorViewLayoutDelegate _t1_shouldShowParodyLabelForViewModel:
+// options:account:]), so no room is kept for it either. The other marks (the
+// verified check, an organisation's badge, a community moderator's) are made
+// elsewhere and stay.
+
+@interface TTAStatusAuthorViewLayoutDelegate : NSObject
+@end
+
+static NSString* const kHideParodyKey = @"kemo_hide_parody_label";
+static BOOL gParodyHooked = NO;
+static NSInteger gParodyAsked = 0, gParodyHidden = 0;
+
+NSString* NFBParodyLabelDebugText(void) {
+    return [NSString stringWithFormat:@"on=%d hook=%d asked=%ld hidden=%ld", [BHTSettings boolForKey:kHideParodyKey], gParodyHooked,
+                                      (long)gParodyAsked, (long)gParodyHidden];
+}
+
+%group ParodyLabel
+
+%hook TTAStatusAuthorViewLayoutDelegate
+
+- (BOOL)_t1_shouldShowParodyLabelForViewModel:(id)viewModel options:(NSUInteger)options account:(id)account {
+    BOOL shown = %orig;
+    gParodyAsked++;
+    if (shown && [BHTSettings boolForKey:kHideParodyKey]) {
+        gParodyHidden++;
+        return NO;
+    }
+    return shown;
+}
+
+%end
+
+%end
+
+%ctor {
+    %init;
+    Class delegate = objc_getClass("TTAStatusAuthorViewLayoutDelegate");
+    if (delegate &&
+        class_getInstanceMethod(delegate, NSSelectorFromString(@"_t1_shouldShowParodyLabelForViewModel:options:account:"))) {
+        %init(ParodyLabel);
+        gParodyHooked = YES;
+    }
+}

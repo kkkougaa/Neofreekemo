@@ -14,8 +14,10 @@
 //
 //  - kemo_timeline_cards: every home timeline row sits on a rounded card with a
 //    gap of page colour around it, so tweets read as separate pieces.
-//  - kemo_notification_cards: the same for the notifications list. Replies
-//    and mentions there can be pulled from right to left to answer them.
+//  - kemo_notification_cards: the same for the notifications list.
+//  - kemo_notification_swipe_reply: replies and mentions in the notifications
+//    list can be pulled from right to left to answer them, with cards or
+//    without (it came with the cards until 7.3.104).
 //  - kemo_dim_actions: the reply / repost / like / views row is faded, so the
 //    numbers no longer pull the eye away from the text.
 //
@@ -45,6 +47,7 @@
 static NSString* const kCardsKey = @"kemo_timeline_cards";
 static NSString* const kNoteCardsKey = @"kemo_notification_cards";
 static NSString* const kDimKey = @"kemo_dim_actions";
+static NSString* const kNoteSwipeKey = @"kemo_notification_swipe_reply";
 
 static const CGFloat kCardSide = 8.0;    // page colour left and right of a card
 static const CGFloat kPileStep = 3.5;    // how far each card edge under a pile peeks out
@@ -55,7 +58,7 @@ static const CGFloat kReplyPull = 80.0;  // pull this far to answer
 // Switches and the card style, read once and refreshed when settings change
 // (the cell hook runs a lot). gStamp changes whenever the style does, so cells
 // know to redo their colours.
-static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn;
+static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn, gNoteSwipeOn;
 static NFBCardStyle gStyle;
 static NSInteger gStamp = 0;
 
@@ -103,6 +106,7 @@ static void ReadSwitches(void) {
     }
     gCardsOn = cards;
     gNoteCardsOn = notes;
+    gNoteSwipeOn = [BHTSettings boolForKey:kNoteSwipeKey];
     gDimOn = dim;
     gStyle = style;
     lastRGB = rgb;
@@ -1732,7 +1736,15 @@ static void MoveSublayers(CALayer* layer, CATransform3D to, CFTimeInterval durat
     self.mark.center = CGPointMake(CGRectGetWidth(cell.bounds) - kCardSide - kReplyPull / 2,
                                    CGRectGetMidY(cell.bounds));
     self.mark.alpha = 0;
-    [cell insertSubview:self.mark belowSubview:cell.contentView];
+    // Behind the card; without cards the row's content has a colour of its
+    // own that stays where it is, so the mark goes over it, where the pulled
+    // content has made room.
+    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
+    if (memory.active) {
+        [cell insertSubview:self.mark belowSubview:cell.contentView];
+    } else {
+        [cell insertSubview:self.mark aboveSubview:cell.contentView];
+    }
     // Stop the list scrolling up and down while the card is pulled.
     UITableView* table = TableOf(cell);
     if (table.panGestureRecognizer.enabled) {
@@ -1815,7 +1827,7 @@ static void MoveSublayers(CALayer* layer, CATransform3D to, CFTimeInterval durat
         }
         self.decided = YES;
         BOOL sideways = dx < 0 && fabs(dx) > fabs(dy) * 1.3;
-        if (sideways && gNoteCardsOn && ListKind(TableOf(cell)) == NFBListNotifications && ReplyButton(cell)) {
+        if (sideways && gNoteSwipeOn && ListKind(TableOf(cell)) == NFBListNotifications && ReplyButton(cell)) {
             [self beginTracking];
         } else {
             if (self.state == UIGestureRecognizerStatePossible) {
@@ -1966,12 +1978,16 @@ static void KeepCardCleanSoon(UITableViewCell* cell) {
 }
 
 static void LayoutCard(UITableViewCell* cell) {
-    if (!gCardsOn && !gNoteCardsOn && !objc_getAssociatedObject(cell, kCardMemoryKey)) {
+    BOOL cards = gCardsOn || gNoteCardsOn || objc_getAssociatedObject(cell, kCardMemoryKey);
+    if (!cards && !gNoteSwipeOn) {
         return;
     }
     NFBListKind kind = ListKind(TableOf(cell));
-    ApplyCard(cell, kind);
-    if (kind == NFBListNotifications && gNoteCardsOn) {
+    if (cards) {
+        ApplyCard(cell, kind);
+    }
+    // The pull to answer does not need a card.
+    if (kind == NFBListNotifications && gNoteSwipeOn) {
         AttachReplySwipe(cell);
     }
 }

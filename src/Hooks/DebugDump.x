@@ -30,6 +30,7 @@ extern NSArray<NSString*>* NFBRowLayoutClasses(void);
 extern CGFloat NFBLastMediaWidth(void);
 extern NSString* NFBPullAnimationDebugText(void);
 extern NSString* NFBTweetSheetDebugText(void);
+extern NSString* NFBParodyLabelDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -555,8 +556,8 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
-    [out appendFormat:@"== HEADER ==%c%@%c%@%csheet: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(), 10,
-                      NFBTweetSheetDebugText(), 10];
+    [out appendFormat:@"== HEADER ==%c%@%c%@%csheet: %@%cparodyLabel: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(),
+                      10, NFBTweetSheetDebugText(), 10, NFBParodyLabelDebugText(), 10];
     // The top navigation bar (where the logo is), hidden pieces included, with
     // which picture each image view shows.
     UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);

@@ -535,6 +535,7 @@
 "KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
 "KEMO_PLAIN_REFRESH_TITLE" = "Plain pull to refresh on Home";
 "KEMO_SHEET_OPEN_TITLE" = "Open a tweet as a sheet";
+"KEMO_HIDE_PARODY_LABEL_TITLE" = "Hide parody account labels";
 "KEMO_CARD_PRESS_TITLE" = "Cards press in";
 "KEMO_CORNER_MEDIA_TITLE" = "A single photo beside the text";
 "KEMO_THUMB_SIDE" = "Small photo size";
@@ -591,7 +592,8 @@
 "KEMO_TIMELINE_CARDS_TITLE" = "Home timeline cards";
 "KEMO_TIMELINE_CARDS_DETAIL" = "Puts every tweet on its own rounded card with a gap around it, so tweets are easier to tell apart.";
 "KEMO_NOTIFICATION_CARDS_TITLE" = "Notification cards";
-"KEMO_NOTIFICATION_CARDS_DETAIL" = "Shows notifications as cards, with grouped ones drawn as a small pile. Pull a reply or mention from right to left to answer it.";
+"KEMO_NOTIFICATION_CARDS_DETAIL" = "Shows notifications as cards, with grouped ones drawn as a small pile.";
+"KEMO_NOTIFICATION_SWIPE_REPLY_TITLE" = "Pull a notification to reply";
 "KEMO_DIM_ACTIONS_TITLE" = "Fade the row under tweets";
 "KEMO_DIM_ACTIONS_DETAIL" = "Fades the reply, repost, like and view counts so the text is read first.";
 "KEMO_BIGGER_TEXT_TITLE" = "Slightly bigger tweet text";

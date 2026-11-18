@@ -476,6 +476,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_hide_parody_label",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_paw_loading",
                         @"default": @YES,
                         @"type": @"toggle"
@@ -525,6 +530,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{
                         @"key": @"kemo_notification_cards",
                         @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_notification_swipe_reply",
+                        @"default": @YES,
                         @"type": @"toggle"
                     },
                     @{

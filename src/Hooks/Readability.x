@@ -54,7 +54,7 @@ static const CGFloat kReplyPull = 80.0;  // pull this far to answer
 // Switches and the card style, read once and refreshed when settings change
 // (the cell hook runs a lot). gStamp changes whenever the style does, so cells
 // know to redo their colours.
-static BOOL gCardsOn, gNoteCardsOn, gDimOn;
+static BOOL gCardsOn, gNoteCardsOn, gDimOn, gCompactOn;
 static NFBCardStyle gStyle;
 static NSInteger gStamp = 0;
 
@@ -70,6 +70,8 @@ static void ReadSwitches(void) {
     BOOL cards = [BHTSettings boolForKey:kCardsKey];
     BOOL notes = [BHTSettings boolForKey:kNoteCardsKey];
     BOOL dim = [BHTSettings boolForKey:kDimKey];
+    gCompactOn = [BHTSettings boolForKey:@"kemo_compact_media"] &&
+                 ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
     NFBCardStyle style = NFBCardStyleCurrent();
     static NSArray* lastRGB;
     NSArray* rgb = [[NSUserDefaults standardUserDefaults] arrayForKey:NFBCardPaperRGBKey];
@@ -92,16 +94,17 @@ static void ReadSwitches(void) {
 static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0,
                  gPills = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
+static NSInteger gAvatarShrinksKept = 0;
 static NSString* gPillLog = @"(no pull yet)";
 
 NSString* NFBReadabilityDebugText(void) {
     return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
-                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@ pill: %@",
+                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@ pill: %@",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
-                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog,
+                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, (long)gAvatarShrinksKept, gSwipeLog,
                                       gPillLog];
 }
 
@@ -1298,6 +1301,7 @@ static const void* kDimmedKey = &kDimmedKey;
 // left middle. Before X lays the row out again the scale is taken off, so X
 // never sets a frame on a scaled view.
 static const void* kScaledKey = &kScaledKey;
+static BOOL gOwnTransform = NO;
 
 static void ScaleFrom(UIView* view, CGFloat scale, CGPoint anchor) {
     if (!view) {
@@ -1307,13 +1311,17 @@ static void ScaleFrom(UIView* view, CGFloat scale, CGPoint anchor) {
     CGSize size = view.bounds.size;
     CGFloat tx = (anchor.x - 0.5) * size.width * (1 - scale);
     CGFloat ty = (anchor.y - 0.5) * size.height * (1 - scale);
+    gOwnTransform = YES;
     view.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(tx, ty), scale, scale);
+    gOwnTransform = NO;
     objc_setAssociatedObject(view, kScaledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static void Unscale(UIView* view) {
     if (view && objc_getAssociatedObject(view, kScaledKey)) {
+        gOwnTransform = YES;
         view.transform = CGAffineTransformIdentity;
+        gOwnTransform = NO;
         objc_setAssociatedObject(view, kScaledKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
@@ -1340,6 +1348,120 @@ static void UnscaleNameLine(UIView* line) {
     Unscale(line);
 }
 
+// 7.3.95: the time goes to the right end of the line (just left of the "..."
+// button), the @handle follows the name, and a name too long for what is left
+// fades out at its end. The line's pieces are UILabels (name semibold, then the
+// handle, then the time; 7.3.90 dump). `limit` is where the trailing pieces
+// start as seen on screen, in the line's unscaled coordinates.
+static BOOL IsBoldFont(UIFont* font) {
+    NSString* name = font.fontName;
+    return (font.fontDescriptor.symbolicTraits & UIFontDescriptorTraitBold) || [name containsString:@"Semibold"] ||
+           [name containsString:@"Bold"] || [name containsString:@"Heavy"];
+}
+
+static void FadeEnd(UIView* view, BOOL fade) {
+    if (!fade) {
+        if ([view.layer.mask isKindOfClass:[CAGradientLayer class]]) {
+            view.layer.mask = nil;
+        }
+        return;
+    }
+    CGFloat width = CGRectGetWidth(view.bounds);
+    CAGradientLayer* mask = [view.layer.mask isKindOfClass:[CAGradientLayer class]] ? (CAGradientLayer*)view.layer.mask
+                                                                                    : [CAGradientLayer layer];
+    mask.frame = CGRectMake(0, -4, width, CGRectGetHeight(view.bounds) + 8);
+    mask.startPoint = CGPointMake(0, 0.5);
+    mask.endPoint = CGPointMake(1, 0.5);
+    mask.colors = @[ (__bridge id)[UIColor blackColor].CGColor, (__bridge id)[UIColor blackColor].CGColor,
+                     (__bridge id)[UIColor clearColor].CGColor ];
+    CGFloat fadeWidth = MIN(18, width / 2);
+    mask.locations = @[ @0, @(MAX(0, (width - fadeWidth) / MAX(1, width))), @1 ];
+    view.layer.mask = mask;
+}
+
+static void ArrangeNameLine(UIView* line, CGFloat scale, CGFloat limit) {
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    for (UIView* sub in line.subviews) {
+        if ([sub isKindOfClass:[UILabel class]] && !sub.hidden && ((UILabel*)sub).text.length > 0 &&
+            CGRectGetWidth(sub.frame) > 0) {
+            [labels addObject:(UILabel*)sub];
+        }
+    }
+    if (labels.count < 2) {
+        return; // drawn some other way: leave it to X
+    }
+    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
+        return CGRectGetMinX(a.frame) < CGRectGetMinX(b.frame) ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    UILabel* name = nil;
+    for (UILabel* label in labels) {
+        if (IsBoldFont(label.font)) {
+            name = label;
+            break;
+        }
+    }
+    UILabel* time = labels.lastObject;
+    if (!name || name == time) {
+        return;
+    }
+    UILabel* handle = nil;
+    for (UILabel* label in labels) {
+        if (label != name && label != time && CGRectGetMinX(label.frame) > CGRectGetMinX(name.frame)) {
+            handle = label;
+            break;
+        }
+    }
+    CGRect nameFrame = name.frame, timeFrame = time.frame, handleFrame = handle ? handle.frame : CGRectNull;
+    CGFloat afterName = CGRectGetMaxX(nameFrame);
+    CGFloat gapToHandle = handle ? MAX(2, CGRectGetMinX(handleFrame) - afterName) : 0;
+    CGFloat gapToTime = MAX(4, CGRectGetMinX(timeFrame) - (handle ? CGRectGetMaxX(handleFrame) : afterName));
+
+    CGFloat timeWasAt = CGRectGetMinX(timeFrame);
+    // The time: right-aligned to the end of the line as seen on screen.
+    CGFloat right = (MIN(limit, CGRectGetWidth(line.bounds)) - 4) / MAX(scale, 0.01);
+    timeFrame.origin.x = right - CGRectGetWidth(timeFrame);
+    time.frame = timeFrame;
+
+    // The name gets what is left after the handle.
+    CGFloat handleWidth = handle ? [handle sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGRectGetHeight(handleFrame))].width : 0;
+    CGFloat nameWidth = [name sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGRectGetHeight(nameFrame))].width;
+    CGFloat room = CGRectGetMinX(timeFrame) - gapToTime - (handle ? handleWidth + gapToHandle : 0) - CGRectGetMinX(nameFrame);
+    CGFloat minimumName = 28;
+    if (room < minimumName && handle) {
+        // Not even a bit of the name fits: the handle gives way (X truncates it).
+        handleWidth = MAX(0, handleWidth - (minimumName - room));
+        room = minimumName;
+    }
+    CGFloat shownName = MAX(0, MIN(nameWidth, room));
+    BOOL cut = shownName < nameWidth - 0.5;
+    nameFrame.size.width = shownName;
+    name.lineBreakMode = cut ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
+    name.frame = nameFrame;
+    FadeEnd(name, cut);
+
+    // Badges between the name and the handle, and the handle, follow the name.
+    CGFloat shift = CGRectGetMaxX(nameFrame) - afterName;
+    if (fabs(shift) > 0.25) {
+        NSHashTable* trailing = objc_getAssociatedObject(line, kScaledPiecesKey);
+        CGFloat stop = handle ? CGRectGetMaxX(handleFrame) - 0.5 : timeWasAt;
+        for (UIView* sub in line.subviews) {
+            if (sub == name || sub == time || sub.hidden || [trailing containsObject:sub]) {
+                continue;
+            }
+            CGRect frame = sub.frame;
+            if (CGRectGetMinX(frame) >= afterName - 1 && CGRectGetMinX(frame) < stop) {
+                frame.origin.x += shift;
+                sub.frame = frame;
+            }
+        }
+    }
+    if (handle) {
+        CGRect frame = handle.frame;
+        frame.size.width = handleWidth;
+        handle.frame = frame;
+    }
+}
+
 static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
     CGSize size = line.bounds.size;
     if (size.width <= 0 || size.height <= 0) {
@@ -1360,7 +1482,8 @@ static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
     CGFloat midY = size.height / 2;
     for (UIView* piece in line.subviews) {
         CGRect frame = piece.frame;
-        if (piece.hidden || CGRectGetWidth(frame) <= 0 || CGRectGetMinX(frame) < size.width * 0.6) {
+        if (piece.hidden || CGRectGetWidth(frame) <= 0 || CGRectGetMinX(frame) < size.width * 0.6 ||
+            [piece isKindOfClass:[UILabel class]]) {
             continue;
         }
         limit = MIN(limit, CGRectGetMinX(frame));
@@ -1374,6 +1497,7 @@ static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
     // 7.3.93-7.3.94 faded the text out before those pieces with a mask, which
     // also hid the "..." button: no mask any more.
     line.layer.mask = nil;
+    ArrangeNameLine(line, scale, limit);
 }
 
 // MARK: The faded action row
@@ -1529,6 +1653,41 @@ static void DimActions(UIView* actions) {
         }
     }
 }
+
+// With small media on, a scrolled photo strip never makes X shrink the avatar
+// (X does that so wide carousels can pass under it; the strip is short and
+// never reaches the avatar here). X's own transforms on the avatar are let
+// through only when small media is off.
+%hook T1TappableStatusFleetLineItemView
+
+- (void)setTransform:(CGAffineTransform)transform {
+    if (gOwnTransform || !gCompactOn) {
+        %orig;
+        return;
+    }
+    gAvatarShrinksKept++;
+}
+
+%end
+
+// X can lay the name line out again on its own; arrange it again then.
+%hook TTAStatusAuthorView
+
+- (void)layoutSubviews {
+    %orig;
+    UIView* line = (UIView*)self;
+    if (!objc_getAssociatedObject(line, kScaledKey)) {
+        return;
+    }
+    CGFloat limit = CGRectGetWidth(line.bounds);
+    NSHashTable<UIView*>* trailing = objc_getAssociatedObject(line, kScaledPiecesKey);
+    for (UIView* piece in trailing.allObjects) {
+        limit = MIN(limit, piece.center.x - CGRectGetWidth(piece.bounds) / 2);
+    }
+    ArrangeNameLine(line, gStyle.nameScale, limit);
+}
+
+%end
 
 %hook T1StandardStatusView
 

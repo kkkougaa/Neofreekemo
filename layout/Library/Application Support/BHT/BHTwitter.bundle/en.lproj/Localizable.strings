@@ -582,3 +582,12 @@
 
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "Welcome!";
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "Make sure that you installed NeoFreeBird from our official GitHub. We can't help with issues from other iPAs, and you may not know whether your version is free from harmful code. If you have any questions, please make a GitHub issue.";
+
+"KEMO_TIMELINE_CARDS_TITLE" = "Home timeline cards";
+"KEMO_TIMELINE_CARDS_DETAIL" = "Puts every tweet on its own rounded card with a gap around it, so tweets are easier to tell apart.";
+"KEMO_NOTIFICATION_CARDS_TITLE" = "Notification cards";
+"KEMO_NOTIFICATION_CARDS_DETAIL" = "Shows notifications as cards, with grouped ones drawn as a small pile. Pull a reply or mention from right to left to answer it.";
+"KEMO_DIM_ACTIONS_TITLE" = "Fade the row under tweets";
+"KEMO_DIM_ACTIONS_DETAIL" = "Fades the reply, repost, like and view counts so the text is read first.";
+"KEMO_BIGGER_TEXT_TITLE" = "Slightly bigger tweet text";
+"KEMO_BIGGER_TEXT_DETAIL" = "Makes tweet text a little larger. Reopen the app for it to apply to every tweet.";

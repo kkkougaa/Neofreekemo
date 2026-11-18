@@ -34,6 +34,12 @@ static const void* kLayoutModeKey = &kLayoutModeKey;
 // Probe for the debug dump: how often each path ran, and the last view model class.
 static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0;
 static NSString* gLastViewModelClass = nil;
+// Where X lays a row out, for working out how to put the media beside the text.
+// Class pointers, not strings: these are set while rows are laid out, which can be
+// off the main thread, and a Class needs no retain.
+static Class gLayoutStateClass = Nil;
+static Class gLayoutMetricsClass = Nil;
+static CGFloat gLastMediaWidth = 0;
 
 static BOOL NFBCompactMedia(void) {
     return [BHTSettings boolForKey:kCompactKey] && ![BHTSettings boolForKey:kSensitiveKey];
@@ -88,6 +94,10 @@ static BOOL NFBIsPreviewCard(id viewModel) {
     CGSize size = %orig;
     gSizeCalls++;
     gLastViewModelClass = NSStringFromClass([viewModel class]);
+    if (layoutMetrics) {
+        gLayoutMetricsClass = [layoutMetrics class];
+    }
+    gLastMediaWidth = width;
     if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
         return size;
     }
@@ -124,6 +134,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 - (id)layoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
     id state = %orig;
     if (state) {
+        gLayoutStateClass = [state class];
         objc_setAssociatedObject(state, kLayoutModeKey, @(NFBCompactMedia()),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -212,6 +223,23 @@ NSString* NFBCompactMediaDebugText(void) {
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
                                       (long)gCardCalls, gLastViewModelClass ?: @"-"];
+}
+
+// Classes the shake dump describes, to find where the text column's width is set.
+NSArray<NSString*>* NFBRowLayoutClasses(void) {
+    NSMutableArray* names = [NSMutableArray array];
+    Class state = gLayoutStateClass, metrics = gLayoutMetricsClass;
+    if (state) {
+        [names addObject:NSStringFromClass(state)];
+    }
+    if (metrics) {
+        [names addObject:NSStringFromClass(metrics)];
+    }
+    return names;
+}
+
+CGFloat NFBLastMediaWidth(void) {
+    return gLastMediaWidth;
 }
 
 // MARK: - Leftovers of the AI blur

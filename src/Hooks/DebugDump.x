@@ -25,6 +25,9 @@ extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
 extern NSString* NFBLocalSearchDebugText(void);
+extern NSString* NFBReadabilityDebugText(void);
+extern NSArray<NSString*>* NFBRowLayoutClasses(void);
+extern CGFloat NFBLastMediaWidth(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -277,7 +280,7 @@ static void DumpControllers(UIViewController* controller, int depth, NSMutableSt
 
 // The inside of a class: its properties, instance variables and (the telling) methods. For
 // finding out how a screen keeps its list of pages and tabs.
-static void DumpClassInfo(Class cls, NSMutableString* out) {
+static void DumpClassInfoMatching(Class cls, NSMutableString* out, NSArray<NSString*>* words, unsigned int limit) {
     [out appendFormat:@"-- %@", NSStringFromClass(cls)];
     for (Class parent = class_getSuperclass(cls); parent && parent != [NSObject class] &&
                                                   parent != [UIViewController class] &&
@@ -289,24 +292,21 @@ static void DumpClassInfo(Class cls, NSMutableString* out) {
 
     unsigned int count = 0;
     objc_property_t* properties = class_copyPropertyList(cls, &count);
-    for (unsigned int i = 0; i < count && i < 60; i++) {
+    for (unsigned int i = 0; i < count && i < limit; i++) {
         [out appendFormat:@"  prop %s %s%c", property_getName(properties[i]),
                           property_getAttributes(properties[i]), 10];
     }
     free(properties);
 
     Ivar* ivars = class_copyIvarList(cls, &count);
-    for (unsigned int i = 0; i < count && i < 60; i++) {
+    for (unsigned int i = 0; i < count && i < limit; i++) {
         [out appendFormat:@"  ivar %s %s%c", ivar_getName(ivars[i]), ivar_getTypeEncoding(ivars[i]), 10];
     }
     free(ivars);
 
-    NSArray* words = @[ @"page", @"tab", @"title", @"item", @"segment", @"content", @"child", @"select",
-                        @"reload", @"update", @"data", @"source", @"controller", @"index", @"setup", @"make",
-                        @"configure", @"build", @"create" ];
     Method* methods = class_copyMethodList(cls, &count);
-    int printed = 0;
-    for (unsigned int i = 0; i < count && printed < 90; i++) {
+    unsigned int printed = 0;
+    for (unsigned int i = 0; i < count && printed < limit + 30; i++) {
         NSString* name = NSStringFromSelector(method_getName(methods[i]));
         for (NSString* word in words) {
             if ([name localizedCaseInsensitiveContainsString:word]) {
@@ -317,6 +317,88 @@ static void DumpClassInfo(Class cls, NSMutableString* out) {
         }
     }
     free(methods);
+    // Class methods too (X computes row sizes in some of these).
+    methods = class_copyMethodList(object_getClass(cls), &count);
+    printed = 0;
+    for (unsigned int i = 0; i < count && printed < 25; i++) {
+        NSString* name = NSStringFromSelector(method_getName(methods[i]));
+        for (NSString* word in words) {
+            if ([name localizedCaseInsensitiveContainsString:word]) {
+                [out appendFormat:@"  +method %@%c", name, 10];
+                printed++;
+                break;
+            }
+        }
+    }
+    free(methods);
+}
+
+static void DumpClassInfo(Class cls, NSMutableString* out) {
+    DumpClassInfoMatching(cls, out,
+                          @[ @"page", @"tab", @"title", @"item", @"segment", @"content", @"child", @"select",
+                             @"reload", @"update", @"data", @"source", @"controller", @"index", @"setup",
+                             @"make", @"configure", @"build", @"create" ],
+                          60);
+}
+
+// MARK: Row probes (cards, media beside the text, notification piles)
+
+static UITableViewCell* FindPileCell(UIView* view, int depth) {
+    if (depth > 30 || view.hidden) {
+        return nil;
+    }
+    if ([view isKindOfClass:[UITableViewCell class]] && view.window) {
+        NSUInteger avatars = 0;
+        NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:view];
+        NSUInteger budget = 400;
+        while (queue.count > 0 && budget-- > 0) {
+            UIView* inner = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if ([NSStringFromClass(inner.class) isEqualToString:@"TFNAvatarHeaderView"]) {
+                avatars++;
+            }
+            [queue addObjectsFromArray:inner.subviews];
+        }
+        return avatars >= 2 ? (UITableViewCell*)view : nil;
+    }
+    for (UIView* sub in view.subviews) {
+        UITableViewCell* found = FindPileCell(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
+    [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
+    [out appendFormat:@"== ROW LAYOUT PROBE == mediaWidth=%.1f%c", NFBLastMediaWidth(), 10];
+    NSArray* layoutWords = @[ @"width", @"layout", @"size", @"frame", @"text", @"attach", @"media", @"column",
+                              @"inset", @"margin", @"height" ];
+    NSMutableArray<NSString*>* names = [NSMutableArray
+        arrayWithArray:@[ @"T1StandardStatusView", @"TTAStatusBodyAttributedTextView",
+                          @"T1StatusViewAttachmentContainerView", @"T1StandardStatusAttachmentViewAdapter" ]];
+    [names addObjectsFromArray:NFBRowLayoutClasses()];
+    for (NSString* name in names) {
+        Class cls = NSClassFromString(name);
+        if (cls) {
+            DumpClassInfoMatching(cls, out, layoutWords, 25);
+        } else {
+            [out appendFormat:@"-- %@ (not found)%c", name, 10];
+        }
+    }
+    UITableViewCell* pile = FindPileCell(window, 0);
+    [out appendFormat:@"== NOTIFICATION PILE ROW %@ ==%c", pile ? NSStringFromClass(pile.class) : @"(none)", 10];
+    if (pile) {
+        NSUInteger lines = 0;
+        DumpView(pile, 0, out, &lines);
+        NSArray* peopleWords = @[ @"user", @"model", @"avatar", @"facepile", @"name", @"item", @"tap", @"select" ];
+        DumpClassInfoMatching(pile.class, out, peopleWords, 25);
+        Class avatar = NSClassFromString(@"TFNAvatarHeaderView");
+        if (avatar) {
+            DumpClassInfoMatching(avatar, out, peopleWords, 15);
+        }
+    }
 }
 
 // Builds the outline of what's on screen and puts it on the pasteboard.
@@ -324,6 +406,8 @@ static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(window.frame)];
     NSUInteger mediaCount = 0;
+    // First, so it survives a paste that gets cut short.
+    DumpRowProbe(window, out);
     // How the screen is put together: view controllers, and everything in the top part of the
     // screen (where a row of tabs lives) with its text.
     {
@@ -337,8 +421,7 @@ static void PerformDump(UIWindow* window) {
         NSMutableSet<NSString*>* described = [NSMutableSet set];
         for (UIViewController* controller in gOnScreenControllers) {
             NSString* name = NSStringFromClass(controller.class);
-            if (([name containsString:@"ActivityHistory"] || [name containsString:@"Segmented"] ||
-                 [name containsString:@"Paging"] || [name containsString:@"Bookmarks"]) &&
+            if (([name containsString:@"ActivityHistory"] || [name containsString:@"Bookmarks"]) &&
                 ![described containsObject:name] && described.count < 6) {
                 [described addObject:name];
                 DumpClassInfo(controller.class, out);

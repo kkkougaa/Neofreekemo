@@ -488,6 +488,26 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_image_reveal",
                         @"default": @YES,
                         @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_timeline_cards",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_notification_cards",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_dim_actions",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_bigger_text",
+                        @"default": @NO,
+                        @"type": @"toggle"
                     }
                 ]
             },

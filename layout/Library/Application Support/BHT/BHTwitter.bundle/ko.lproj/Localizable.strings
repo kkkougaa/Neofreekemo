@@ -513,7 +513,7 @@
 "OPEN_ORIGINAL_X_TITLE" = "X로 이동";
 
 "KEMO_MEDIA_PAGE_TITLE" = "미디어";
-"KEMO_MEDIA_PAGE_SUBTITLE" = "가림막, 미디어만, 장수 배지";
+"KEMO_MEDIA_PAGE_SUBTITLE" = "가림막, 미디어만, 장수 배지, 카드형";
 "KEMO_HISTORY_PAGE_TITLE" = "기록";
 "KEMO_HISTORY_PAGE_SUBTITLE" = "이전내역과 새로고침 위치";
 "KEMO_HISTORY_TAB_TITLE" = "이전내역";
@@ -534,3 +534,12 @@
 "SETTINGS_CODE_TOO_BIG" = "클립보드에 복사했어요. 백업이 길어 QR은 만들지 못했어요.";
 "SETTINGS_CODE_EMPTY" = "클립보드에 설정 코드가 없어요.";
 "SETTINGS_CODE_RESTORED" = "%ld개 설정을 복원했어요";
+
+"KEMO_TIMELINE_CARDS_TITLE" = "홈 타임라인 카드형";
+"KEMO_TIMELINE_CARDS_DETAIL" = "트윗마다 둥근 카드에 담고 카드 사이에 틈을 둬서 트윗끼리 구분이 잘 되게 해요.";
+"KEMO_NOTIFICATION_CARDS_TITLE" = "알림 카드형";
+"KEMO_NOTIFICATION_CARDS_DETAIL" = "알림을 카드로 보여주고, 여러 명이 모인 알림은 카드 더미처럼 보여줘요. 답글·멘션 카드를 오른쪽에서 왼쪽으로 밀면 답글을 쓸 수 있어요.";
+"KEMO_DIM_ACTIONS_TITLE" = "트윗 아래 숫자 줄 흐리게";
+"KEMO_DIM_ACTIONS_DETAIL" = "답글·재게시·마음에 들어요·조회수 줄을 흐리게 해서 글이 먼저 읽히게 해요.";
+"KEMO_BIGGER_TEXT_TITLE" = "트윗 글자 조금 크게";
+"KEMO_BIGGER_TEXT_DETAIL" = "트윗 본문 글자를 조금 키워요. 앱을 다시 열면 모든 트윗에 적용돼요.";

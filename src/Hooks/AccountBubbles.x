@@ -107,6 +107,11 @@
 //  7.3.81: the pull that brought them out no longer counts as turning the
 //  dial. The row goes back to the account it was on, and the drag is counted
 //  from that moment.
+//
+//  7.3.83: holding the Home tab opens the dock too (X's own account sheet is
+//  caught, as the circles do for the top left avatar). When the hidden
+//  accounts pop out the row stays exactly where the pull left it and keeps
+//  following the finger, instead of jumping back to the account it was on.
 
 #import <QuartzCore/QuartzCore.h>
 #import <string.h>
@@ -1832,6 +1837,7 @@ static NSTimeInterval gTouchEnd = 0;
 static CGPoint gTouchStartPoint;
 static BOOL gTouchDown = NO;
 static __weak UITouch* gTrackedTouch = nil;
+static __weak UIView* gTouchStartView = nil;
 static NFBAccountFan* gCaughtFan = nil;
 static BOOL gCaughtMoved = NO;
 static NSString* gBubbleLog = @"(no account sheet seen)";
@@ -1900,6 +1906,23 @@ static BOOL FingerHeld(NSTimeInterval grace) {
         return NO;
     }
     return (gTouchDown ? now : gTouchEnd) - gTouchStart >= 0.25;
+}
+
+// The held finger came down on the tab bar (the Home tab's long press), not
+// on the avatar at the top.
+static BOOL TouchStartedOnTabBar(UIWindow* window) {
+    for (UIView* view = gTouchStartView; view && ![view isKindOfClass:[UIWindow class]]; view = view.superview) {
+        NSString* name = NSStringFromClass(view.class);
+        if ([view isKindOfClass:[UITabBar class]] || [name isEqualToString:@"T1TabView"] ||
+            [name containsString:@"TabBar"]) {
+            return YES;
+        }
+    }
+    if (!window) {
+        return NO;
+    }
+    CGFloat bottom = CGRectGetHeight(window.bounds) - window.safeAreaInsets.bottom - 64.0;
+    return gTouchStartPoint.y >= bottom;
 }
 
 static BOOL FanIsUp(void) {
@@ -1979,6 +2002,7 @@ static void TrackTouches(UIWindow* window, UIEvent* event) {
             gTouchDown = YES;
             gTouchStart = touch.timestamp;
             gTouchStartPoint = [touch locationInView:nil];
+            gTouchStartView = touch.view;
             continue;
         }
         if (touch != gTrackedTouch) {
@@ -2091,6 +2115,9 @@ static const CGFloat kDockRevealStretch = 72.0;
 @property (nonatomic, assign) NSInteger pullStep;
 // Where the row was when the finger started dragging it.
 @property (nonatomic, assign) CGFloat dragStartX;
+// The drag that popped the hidden ones out, and where the row was then.
+@property (nonatomic, assign) BOOL revealDrag;
+@property (nonatomic, assign) CGFloat revealX;
 // The lifted screen's shadow, drawn on the drawer underneath (the screen
 // itself clips to its rounded corners, so it cannot carry one).
 @property (nonatomic, strong) UIView* cardShadow;
@@ -2611,14 +2638,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     self.strip.contentInset = UIEdgeInsetsZero;
     // Until now the row only stretched a little for a long pull. With the left
     // end opened up, the scroll view would apply the whole pull at once and land
-    // on the leftmost account. Count the drag from here instead: the row rests
-    // on the account it was on, and only what the finger does next turns it.
+    // on the leftmost account. Count the drag from here instead, keeping the
+    // row exactly where the stretch left it (no jump back to the account it
+    // was on), so it simply carries on under the finger.
     if (self.strip.isTracking) {
-        CGFloat rest = self.hiddenCount * self.pitch;
+        CGFloat here = self.strip.contentOffset.x;
         UIPanGestureRecognizer* pan = self.strip.panGestureRecognizer;
         CGPoint moved = [pan translationInView:self.strip];
-        [pan setTranslation:CGPointMake(self.dragStartX - rest, moved.y) inView:self.strip];
-        self.strip.contentOffset = CGPointMake(rest, 0);
+        [pan setTranslation:CGPointMake(self.dragStartX - here, moved.y) inView:self.strip];
+        self.strip.contentOffset = CGPointMake(here, 0);
+        self.revealDrag = YES;
+        self.revealX = here;
     }
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         UIImpactFeedbackGenerator* pop = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
@@ -2854,6 +2884,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
     self.settleGeneration++;
     self.dragStartX = scrollView.contentOffset.x;
+    self.revealDrag = NO;
     if (!NSProcessInfo.processInfo.isLowPowerModeEnabled) {
         [self prepareClicks];
     }
@@ -2865,6 +2896,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
               targetContentOffset:(inout CGPoint*)target {
     if (self.accountCount == 0) {
         return;
+    }
+    // Let go just after the pop without pulling on: glide back to the account
+    // in use rather than switching to the hidden one that came out near the
+    // middle. Pulling on (or flicking) turns to the hidden ones as usual.
+    if (self.revealDrag) {
+        self.revealDrag = NO;
+        CGFloat further = self.revealX - scrollView.contentOffset.x;
+        if (further < self.pitch * 0.5 && velocity.x > -0.5) {
+            target->x = self.hiddenCount * self.pitch;
+            return;
+        }
     }
     target->x = [self indexAtOffset:target->x] * self.pitch;
 }
@@ -3170,7 +3212,7 @@ static void AttachDockSwipe(UIView* bar) {
 %hook UIWindow
 
 - (void)sendEvent:(UIEvent*)event {
-    if (event.type == UIEventTypeTouches && BubblesOn()) {
+    if (event.type == UIEventTypeTouches && (BubblesOn() || DockOn())) {
         TrackTouches(self, event);
     }
     %orig;
@@ -3183,13 +3225,23 @@ static void AttachDockSwipe(UIView* bar) {
 - (void)presentViewController:(UIViewController*)controller
                      animated:(BOOL)animated
                    completion:(void (^)(void))completion {
-    if (BubblesOn() && IsAccountSheet(controller, 0)) {
+    if ((BubblesOn() || DockOn()) && IsAccountSheet(controller, 0)) {
         BOOL held = FingerHeld(0.6);
         if (FanIsUp()) {
             gBubbleLog = @"sheet skipped, circles already up";
             return;
         }
-        if (held) {
+        UIWindow* here = self.view.window ?: UIApplication.sharedApplication.keyWindow;
+        // Holding the Home tab: the dock comes up instead of X's sheet.
+        if (held && DockOn() && TouchStartedOnTabBar(here)) {
+            if ([NFBAccountDock openInWindow:here]) {
+                ReadCountsOffscreen(controller, here.bounds);
+                gBubbleLog = [NSString stringWithFormat:@"sheet replaced by dock (from %@)",
+                                                        NSStringFromClass(self.class)];
+                return;
+            }
+        }
+        if (held && BubblesOn()) {
             UIWindow* window = self.view.window ?: UIApplication.sharedApplication.keyWindow;
             if (OpenCaughtFan(window)) {
                 ReadCountsOffscreen(controller, window.bounds);
@@ -3214,7 +3266,13 @@ static void AttachDockSwipe(UIView* bar) {
     // Whenever X's list is on screen, remember its unread numbers (the dock
     // shows them too).
     HarvestSheetCounts(self.view);
-    if (!BubblesOn() || FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
+    UIViewController* sheetTop = self;
+    while (sheetTop.parentViewController) {
+        sheetTop = sheetTop.parentViewController;
+    }
+    UIWindow* sheetWindow = sheetTop.presentingViewController.view.window ?: self.view.window;
+    BOOL fromTabBar = DockOn() && TouchStartedOnTabBar(sheetWindow);
+    if (!(BubblesOn() || fromTabBar) || FanIsUp() || !FingerHeld(1.0) || TwitterAccounts().count < 2) {
         __weak UIView* weakView = self.view;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             HarvestSheetCounts(weakView);
@@ -3222,11 +3280,21 @@ static void AttachDockSwipe(UIView* bar) {
         });
         return;
     }
-    UIViewController* top = self;
-    while (top.parentViewController) {
-        top = top.parentViewController;
+    UIViewController* top = sheetTop;
+    UIWindow* window = sheetWindow;
+    if (fromTabBar) {
+        void (^openDock)(void) = ^{
+            if ([NFBAccountDock openInWindow:window]) {
+                gBubbleLog = @"sheet closed after appearing, dock opened";
+            }
+        };
+        if (top.presentingViewController) {
+            [top dismissViewControllerAnimated:NO completion:openDock];
+        } else {
+            openDock();
+        }
+        return;
     }
-    UIWindow* window = top.presentingViewController.view.window ?: self.view.window;
     if (top.presentingViewController) {
         [top dismissViewControllerAnimated:NO completion:nil];
     }

@@ -593,10 +593,16 @@ static const void* kDimmedKey = &kDimmedKey;
 %end
 
 %ctor {
-    ReadSwitches();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ReadSwitches();
+    });
+    // Never the main queue here (7.3.86 hung on the splash screen, as 7.3.79 did):
+    // X changes defaults from background threads during launch while the main
+    // thread waits on them, and a main-queue observer makes that thread wait for
+    // the main thread in turn. Reading four switches is safe on any thread.
     [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification
                                                       object:nil
-                                                       queue:[NSOperationQueue mainQueue]
+                                                       queue:nil
                                                   usingBlock:^(NSNotification* note) {
                                                       ReadSwitches();
                                                   }];

@@ -29,3 +29,4 @@
 
 - 이 환경에서는 iOS 빌드를 돌릴 수 없다. 컴파일 확인은 CI 빌드로 한다.
 - 실기기 디버깅은 앱의 흔들기 덤프(`src/Hooks/DebugDump.x`)를 사용자에게 받아서 한다.
+- `NSUserDefaultsDidChangeNotification`을 `queue:[NSOperationQueue mainQueue]`로 받으면 실행 중 스플래시에서 멈춘다(7.3.79, 7.3.86). 항상 `queue:nil`로 받고, 필요할 때만 메인으로 넘긴다.

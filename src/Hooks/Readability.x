@@ -209,6 +209,7 @@ static BOOL IsDivider(UIView* view) {
 @property (nonatomic, assign) BOOL openBottom;  // joined to the row below
 @property (nonatomic, assign) BOOL nested;      // a reply inside a thread: draw the inner box
 @property (nonatomic, assign) BOOL nestOpenTop; // the inner box goes on from the row above
+@property (nonatomic, assign) CGFloat nestLeft;  // > 0: where the inner box starts, in row coordinates
 @property (nonatomic, strong) UIColor* paper;
 @property (nonatomic, strong) UIColor* page;
 @property (nonatomic, strong) CAShapeLayer* threadLayer; // the reply line of a thread
@@ -286,7 +287,7 @@ static BOOL IsDivider(UIView* view) {
     }
     self.nest.hidden = !self.nested;
     if (self.nested) {
-        CGFloat left = CGRectGetMinX(card) + kNestIndent;
+        CGFloat left = self.nestLeft > 0 ? self.nestLeft : CGRectGetMinX(card) + kNestIndent;
         CGFloat right = CGRectGetMaxX(card) - 8;
         CGFloat nestTop = self.nestOpenTop ? 0 : top + 2;
         CGFloat nestBottom = self.openBottom ? CGRectGetHeight(bounds) : bottom - 8;
@@ -356,8 +357,8 @@ static void FindDividers(UIView* view, UITableViewCell* cell, int depth, NSMutab
             continue;
         }
         CGRect frame = [sub convertRect:sub.bounds toView:cell];
-        BOOL hairline = CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.6 &&
-                        (CGRectGetMinY(frame) < 2 || CGRectGetMaxY(frame) > height - 2) && sub.subviews.count == 0;
+        BOOL hairline = CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.4 &&
+                        (CGRectGetMinY(frame) < 3 || CGRectGetMaxY(frame) > height - 3) && sub.subviews.count == 0;
         if (hairline) {
             [found addObject:sub];
             continue;
@@ -381,6 +382,21 @@ static void SetDividersHidden(UITableViewCell* cell, BOOL hidden) {
             if (!view.hidden) {
                 view.hidden = YES;
                 [done addObject:view];
+            }
+        }
+        // Lines drawn as bare layers (no view of their own), as the
+        // notifications list's rows have between them.
+        CGFloat width = CGRectGetWidth(cell.bounds), height = CGRectGetHeight(cell.bounds);
+        for (CALayer* host in @[ cell.layer, cell.contentView.layer ]) {
+            for (CALayer* layer in host.sublayers) {
+                if ([layer.delegate isKindOfClass:[UIView class]] || layer.hidden) {
+                    continue;
+                }
+                CGRect frame = [host convertRect:layer.frame toLayer:cell.layer];
+                if (CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.4 &&
+                    (CGRectGetMinY(frame) < 3 || CGRectGetMaxY(frame) > height - 3)) {
+                    layer.hidden = YES;
+                }
             }
         }
         UITableView* table = TableOf(cell);
@@ -437,8 +453,12 @@ static void FindThreadLines(UIView* view, UIView* row, int depth, NSMutableArray
         // X's line is a TFNRoundedCornerView about 2pt wide (7.3.90 dump).
         BOOL rounded = [NSStringFromClass(sub.class) isEqualToString:@"TFNRoundedCornerView"] &&
                        CGRectGetWidth(frame) <= 3;
-        if (rounded || (a > 0.3 && CGRectGetWidth(frame) <= 3 && CGRectGetHeight(frame) >= 6 &&
-                        CGRectGetMinX(frame) < 80 && sub.subviews.count == 0 && !IsDivider(sub))) {
+        // The dots of "show more replies" too: anything that thin near the left,
+        // coloured or an image.
+        BOOL thin = CGRectGetWidth(frame) <= 3 && CGRectGetHeight(frame) >= 2 && CGRectGetMinX(frame) < 110 &&
+                    sub.subviews.count == 0 && !IsDivider(sub) &&
+                    (a > 0.3 || [sub isKindOfClass:[UIImageView class]] || sub.layer.sublayers.count > 0);
+        if (rounded || thin) {
             [found addObject:sub];
             continue;
         }
@@ -614,15 +634,40 @@ static NFBThreadFlags ThreadFlags(UITableView* table, UITableViewCell* cell) {
     return flags;
 }
 
-// MARK: The reply line
-// Inside a thread card the line runs down from the first tweet's avatar along
-// the left of the inner box and bends right into each reply's avatar, like a
-// reply arrow. X's own straight line is hidden there.
+// MARK: Where things are, without our transforms
 
-static CGFloat gThreadX = -1; // centre of a first tweet's avatar, in row coordinates
+// A view's rectangle in its row, as X laid it out: the view's own transform
+// (the avatar's and the name line's scale) and the content view's sublayer
+// transform are both left out.
+static CGRect PlainRectInCell(UIView* view, UITableViewCell* cell) {
+    if (!view) {
+        return CGRectNull;
+    }
+    CGSize size = view.bounds.size;
+    CGRect rect = CGRectMake(view.center.x - size.width / 2, view.center.y - size.height / 2, size.width, size.height);
+    for (UIView* parent = view.superview; parent && parent != cell; parent = parent.superview) {
+        rect.origin.x += parent.center.x - CGRectGetWidth(parent.bounds) / 2 - parent.bounds.origin.x;
+        rect.origin.y += parent.center.y - CGRectGetHeight(parent.bounds) / 2 - parent.bounds.origin.y;
+    }
+    return rect;
+}
+
+// MARK: The reply line
+// 7.3.94 (from the 7.3.93 screenshots): the line of a thread card starts under
+// the first tweet's reply button and runs straight down; the replies are moved
+// so their avatars sit on that line, and it stops just above and goes on just
+// below each of them. "Show more replies" rows carry it straight through.
+// X's own lines (and the dotted one of "show more") are hidden there.
+
+static CGFloat gThreadX = -1; // the line, in row coordinates
+static CGFloat gNestAvatarX = -1; // a reply's avatar centre as X lays it out (content view coordinates)
 
 static UIView* AvatarOf(UITableViewCell* cell) {
     return FindView(cell.contentView, @"StatusFleetLineItemView", 0) ?: FindView(cell.contentView, @"AvatarHeaderView", 0);
+}
+
+static CGFloat ThreadX(void) {
+    return gThreadX > 0 ? gThreadX : kCardSide + gStyle.inner + 78;
 }
 
 static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background, NFBThreadFlags flags) {
@@ -636,34 +681,99 @@ static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background,
     UIBezierPath* path = [UIBezierPath bezierPath];
     BOOL up = (flags & NFBThreadUp) != 0, down = (flags & NFBThreadDown) != 0;
     if (!up) {
-        // The first tweet: down from under its avatar.
-        if (CGRectIsNull(face)) {
+        // The first tweet: down from under its reply button.
+        UIView* reply = FindView(cell.contentView, @"InlineReplyButton", 0);
+        CGRect button = reply ? [reply convertRect:reply.bounds toView:cell] : CGRectNull;
+        if (CGRectIsNull(button) && CGRectIsNull(face)) {
             background.threadLayer.path = nil;
             return;
         }
-        gThreadX = CGRectGetMidX(face);
-        [path moveToPoint:CGPointMake(gThreadX, CGRectGetMaxY(face) + 4)];
-        [path addLineToPoint:CGPointMake(gThreadX, height)];
+        CGRect from = CGRectIsNull(button) ? face : button;
+        gThreadX = CGRectGetMidX(from);
+        if (down) {
+            [path moveToPoint:CGPointMake(gThreadX, CGRectGetMaxY(from) + 3)];
+            [path addLineToPoint:CGPointMake(gThreadX, height)];
+        }
     } else {
-        CGFloat x = gThreadX > 0 ? gThreadX : kCardSide + gStyle.inner + 26;
-        if (!CGRectIsNull(face) && CGRectGetMinX(face) > x + 12) {
-            // A reply: bend into its avatar.
-            CGFloat y = CGRectGetMidY(face), bend = 12;
+        CGFloat x = ThreadX();
+        if (!CGRectIsNull(face) && fabs(CGRectGetMidX(face) - x) < 8) {
+            // A reply: stop above its avatar, go on below it.
+            [path moveToPoint:CGPointMake(x, 0)];
+            [path addLineToPoint:CGPointMake(x, MAX(0, CGRectGetMinY(face) - 3))];
+            if (down) {
+                [path moveToPoint:CGPointMake(x, CGRectGetMaxY(face) + 3)];
+                [path addLineToPoint:CGPointMake(x, height)];
+            }
+        } else if (!CGRectIsNull(face)) {
+            // The avatar could not be put on the line: bend into it.
+            CGFloat y = CGRectGetMidY(face), bend = 10;
+            BOOL right = CGRectGetMidX(face) > x;
+            CGFloat edge = right ? CGRectGetMinX(face) - 3 : CGRectGetMaxX(face) + 3;
             [path moveToPoint:CGPointMake(x, 0)];
             [path addLineToPoint:CGPointMake(x, y - bend)];
-            [path addQuadCurveToPoint:CGPointMake(x + bend, y) controlPoint:CGPointMake(x, y)];
-            [path addLineToPoint:CGPointMake(CGRectGetMinX(face) - 4, y)];
+            [path addQuadCurveToPoint:CGPointMake(x + (right ? bend : -bend), y) controlPoint:CGPointMake(x, y)];
+            [path addLineToPoint:CGPointMake(edge, y)];
             if (down) {
                 [path moveToPoint:CGPointMake(x, y - bend)];
                 [path addLineToPoint:CGPointMake(x, height)];
             }
         } else {
-            // "Show this thread" and the like: straight through.
+            // "Show more replies": straight through.
             [path moveToPoint:CGPointMake(x, 0)];
             [path addLineToPoint:CGPointMake(x, down ? height : height / 2)];
         }
     }
     background.threadLayer.path = path.CGPath;
+}
+
+// MARK: Room around the content
+// 7.3.86-7.3.93 drew every row smaller about its middle to fit inside its card,
+// so the room above and below the content grew with the row's height (a tall
+// tweet had a wide margin, a short one almost none). Now the list itself is
+// told it has a margin on each side (its controller's additional safe area),
+// which X lays its rows out within, so the content keeps X's own spacing and
+// size. A row X did not lay out narrower (seen from its avatar) is still drawn
+// smaller as before.
+
+static const void* kOldSafeInsetsKey = &kOldSafeInsetsKey;
+
+static UIViewController* OwnerOf(UIView* view) {
+    for (UIResponder* responder = view.nextResponder; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            return (UIViewController*)responder;
+        }
+    }
+    return nil;
+}
+
+static void SetListMargin(UITableView* table, BOOL on) {
+    UIViewController* owner = OwnerOf(table);
+    if (!owner) {
+        return;
+    }
+    NSValue* old = objc_getAssociatedObject(owner, kOldSafeInsetsKey);
+    UIEdgeInsets base = old ? old.UIEdgeInsetsValue : owner.additionalSafeAreaInsets;
+    UIEdgeInsets wanted = base;
+    if (on) {
+        CGFloat margin = kCardSide + gStyle.inner;
+        wanted.left += margin;
+        wanted.right += margin;
+    }
+    if (UIEdgeInsetsEqualToEdgeInsets(owner.additionalSafeAreaInsets, wanted)) {
+        return;
+    }
+    if (on && !old) {
+        objc_setAssociatedObject(owner, kOldSafeInsetsKey, [NSValue valueWithUIEdgeInsets:base],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (!on) {
+        objc_setAssociatedObject(owner, kOldSafeInsetsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    // Not from inside a row's layout pass.
+    __weak UIViewController* weakOwner = owner;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        weakOwner.additionalSafeAreaInsets = wanted;
+    });
 }
 
 // MARK: Putting a card on a row
@@ -679,6 +789,7 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         RemoveCard(cell, memory);
         if (!listOn && kind != NFBListOther) {
             SetTablePage(table, nil);
+            SetListMargin(table, NO);
         }
         return;
     }
@@ -761,18 +872,42 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     if (width <= 0 || height <= 0) {
         return;
     }
-    CATransform3D transform;
+    SetListMargin(table, YES);
+    UIView* contentView = cell.contentView;
+    CGFloat cellWidth = CGRectGetWidth(cell.bounds);
+    CGFloat originX = CGRectGetMinX(contentView.frame);
+    CGFloat margin = kCardSide + gStyle.inner;
+    // Did X lay this row out inside the margin? Its avatar (or, for a row
+    // without one, the content view itself) tells.
+    UIView* avatar = AvatarOf(cell);
+    CGRect face = PlainRectInCell(avatar, cell);
+    BOOL fits = originX >= margin - 1 ||
+                (!CGRectIsNull(face) && CGRectGetMinX(face) >= margin + (kind == NFBListHome ? 12 : 50));
+    CATransform3D transform = CATransform3DIdentity;
     if (nested) {
-        CGFloat left = kCardSide + kNestIndent;
-        CGFloat right = width - kCardSide - 8;
-        CGFloat scale = MAX(0.7, (right - left - 4) / width);
-        CGFloat shift = (left + right) / 2 - width / 2;
+        // Move the reply so its avatar sits on the thread line, and make it
+        // small enough to fit the inner box. All in content view coordinates.
+        CGFloat lineX = ThreadX() - originX;
+        CGFloat avatarX = !CGRectIsNull(face) ? CGRectGetMidX(face) - originX
+                                               : (gNestAvatarX > 0 ? gNestAvatarX : (fits ? 36 : margin + 36));
+        if (!CGRectIsNull(face)) {
+            gNestAvatarX = avatarX;
+        }
+        CGFloat leftRoom = MAX(16, avatarX - 20);
+        CGFloat contentRight = width - leftRoom;
+        CGFloat boxRight = cellWidth - kCardSide - 8 - originX;
+        CGFloat scale = MAX(0.6, MIN(1, (boxRight - 6 - lineX) / MAX(1, contentRight - avatarX)));
+        CGFloat shift = lineX - width / 2 - scale * (avatarX - width / 2);
         transform = CATransform3DScale(CATransform3DMakeTranslation(shift, 0, 0), scale, scale, 1);
-    } else {
-        CGFloat scale = MAX(0.8, (width - (kCardSide + gStyle.inner) * 2) / width);
+        background.nestLeft = ThreadX() - 22 * scale - 8;
+    } else if (!fits) {
+        CGFloat scale = MAX(0.8, (cellWidth - margin * 2) / MAX(1, width));
         transform = CATransform3DMakeScale(scale, scale, 1);
     }
-    cell.contentView.layer.sublayerTransform = transform;
+    if (!CATransform3DEqualToTransform(contentView.layer.sublayerTransform, transform)) {
+        contentView.layer.sublayerTransform = transform;
+        [background setNeedsLayout];
+    }
     DrawThreadLine(cell, background, flags);
 }
 
@@ -1726,10 +1861,7 @@ static void LayoutPill(UIView* control) {
     }
     NFBCardView* card = (NFBCardView*)pill;
     card.hidden = NO;
-    // The control's own background would show as a block above the first card.
-    if (control.backgroundColor && control.backgroundColor != [UIColor clearColor]) {
-        control.backgroundColor = [UIColor clearColor];
-    }
+
     NFBCardStyle style = gStyle;
     card.style = style;
     // Room for the paws (84 x 36) when they run, else for the spinner alone.
@@ -1780,27 +1912,10 @@ static void LayoutPill(UIView* control) {
 
 %end
 
-// 7.3.90 never showed the pill (the control is not laid out again while the
-// list is pulled), so the pull itself places it too.
-%hook UITableView
-
-- (void)setContentOffset:(CGPoint)offset {
-    %orig;
-    if (!(gCardsOn || gNoteCardsOn)) {
-        return;
-    }
-    UITableView* table = (UITableView*)self;
-    if (offset.y < -table.adjustedContentInset.top - 1) {
-        UIView* control = RefreshControlIn(table);
-        if (control) {
-            LayoutPill(control);
-        } else if (offset.y < -table.adjustedContentInset.top - 20) {
-            gPillLog = @"pulled, but no refresh control in the list";
-        }
-    }
-}
-
-%end
+// 7.3.93 also hooked -[UITableView setContentOffset:] to place the pill while
+// pulling. UITableView does not implement that method itself, so the hook
+// added one that skipped later hooks on UIScrollView's (Timeline.x keeps the
+// reading position with one): it is gone.
 
 %ctor {
     dispatch_async(dispatch_get_main_queue(), ^{

@@ -441,6 +441,23 @@ static NSString* FirstText(UIView* view, int depth) {
     return nil;
 }
 
+// Thin lines still showing in a row (views and bare layers), to find what draws
+// the line between cards.
+static void CountLines(CALayer* layer, CALayer* root, CGFloat width, int depth, NSMutableArray<NSString*>* found) {
+    if (depth > 8 || layer.hidden || layer.opacity < 0.05 || found.count >= 3) {
+        return;
+    }
+    CGRect frame = [layer.superlayer convertRect:layer.frame toLayer:root];
+    if (depth > 0 && CGRectGetHeight(frame) <= 1.5 && CGRectGetWidth(frame) > width * 0.3) {
+        id owner = layer.delegate;
+        [found addObject:[NSString stringWithFormat:@"%@%@", owner ? NSStringFromClass([owner class]) : NSStringFromClass(layer.class),
+                                                    NSStringFromCGRect(frame)]];
+    }
+    for (CALayer* sub in layer.sublayers) {
+        CountLines(sub, root, width, depth + 1, found);
+    }
+}
+
 static void DumpCardRows(UIWindow* window, NSMutableString* out) {
     UITableView* table = FindMainTable(window, 0, nil);
     if (!table) {
@@ -487,6 +504,11 @@ static void DumpCardRows(UIWindow* window, NSMutableString* out) {
                           [NSStringFromClass(cell.backgroundView.class) hasPrefix:@"NFBCard"] ? @"Y" : @"n",
                           cell.backgroundView ? NSStringFromClass(cell.backgroundView.class) : @"nil", connector,
                           ColorText(cell.backgroundColor, cell.traitCollection), texts, 10];
+        NSMutableArray<NSString*>* thin = [NSMutableArray array];
+        CountLines(cell.layer, cell.layer, CGRectGetWidth(cell.bounds), 0, thin);
+        if (thin.count) {
+            [out appendFormat:@"     lines: %@%c", [thin componentsJoinedByString:@" "], 10];
+        }
         NSUInteger lines = 0;
         for (UIView* sub in cell.subviews) {
             if (sub == cell.backgroundView) {

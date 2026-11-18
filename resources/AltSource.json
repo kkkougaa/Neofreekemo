@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.94",
+      "subtitle": "NeoFreeBird version 7.3.95",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.95",
+          "buildVersion": "95",
+          "date": "2026-11-18T08:14:30Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.95/NeoFreeBird-Twitter-sideloaded_7.3.95_12.44.ipa",
+          "size": 270860288,
+          "minOSVersion": "15.0",
+          "localizedDescription": "카드 안 여백 통일. 스레드 선을 답글 아이콘 아래에서 곧게, 답글 사진을 선 위에. 카드 사이 선 숨김(알림 포함), 눌렀다 돌아올 때 깜빡임 제거. … 버튼 복구, 시간은 오른쪽 끝, 긴 닉네임만 흐리게. 세로로 긴 사진도 작게, 작은 사진은 오른쪽 끝. 사진 띠 넘길 때 프로필 사진 유지. 여러 명 알림 목록 시트 제거. 당겨서 새로고침 수정."
+        },
         {
           "version": "7.3.94",
           "buildVersion": "94",

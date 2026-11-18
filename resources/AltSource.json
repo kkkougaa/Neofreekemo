@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.104",
+      "subtitle": "NeoFreeBird version 7.3.105",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.105",
+          "buildVersion": "105",
+          "date": "2026-11-18T14:55:54Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.105/NeoFreeBird-Twitter-sideloaded_7.3.105_12.44.ipa",
+          "size": 270962699,
+          "minOSVersion": "15.0",
+          "localizedDescription": "글 옆 사진이 글을 가리거나, 사진이 아래로 내려가면서 버튼이 다음 카드를 침범하던 문제 수정(트윗이 스스로 다시 배치될 때도 같은 폭으로 줄바꿈). 재게시 카드는 카드 안 위쪽 여백을 8pt 줄임(카드 사이 간격은 그대로)."
+        },
         {
           "version": "7.3.104",
           "buildVersion": "104",

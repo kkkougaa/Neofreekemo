@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.88",
+      "subtitle": "NeoFreeBird version 7.3.89",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.89",
+          "buildVersion": "89",
+          "date": "2026-11-18T07:02:32Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.89/NeoFreeBird-Twitter-sideloaded_7.3.89_12.44.ipa",
+          "size": 270808263,
+          "minOSVersion": "15.0",
+          "localizedDescription": "알림 카드 밀어서 답글: 카드가 손가락을 따라 움직임. 알림 더미 모양 정리, 모든 카드 안쪽 여백 통일. 당겨서 새로고침 바탕을 카드 사이 색으로. 글자 크게 켜면 프로필 사진·이름도 조금 커짐. 흔들기 덤프 앞부분 짧게 정리."
+        },
         {
           "version": "7.3.88",
           "buildVersion": "88",

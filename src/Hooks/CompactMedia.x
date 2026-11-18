@@ -507,6 +507,20 @@ static UIView* ThumbContainer(UIView* view, int depth) {
     return nil;
 }
 
+static const void* kPlacedKey = &kPlacedKey;       // on a view we moved: the frame we gave it
+static const void* kNaturalKey = &kNaturalKey;     // on the photo's container: the frame X gave it
+static const void* kPlacedForKey = &kPlacedForKey; // on the tweet: the row layout its views were moved for
+
+static BOOL StillPlaced(UIView* view) {
+    NSValue* note = objc_getAssociatedObject(view, kPlacedKey);
+    if (!note) {
+        return NO;
+    }
+    CGRect given = note.CGRectValue, now = view.frame;
+    return fabs(CGRectGetMinX(given) - CGRectGetMinX(now)) < 0.5 && fabs(CGRectGetMinY(given) - CGRectGetMinY(now)) < 0.5 &&
+           fabs(CGRectGetWidth(given) - CGRectGetWidth(now)) < 0.5 && fabs(CGRectGetHeight(given) - CGRectGetHeight(now)) < 0.5;
+}
+
 // Called by Readability.x right after X has laid a tweet out.
 void NFBPlaceCornerMedia(UIView* status) {
     UITableViewCell* cell = nil;
@@ -545,8 +559,23 @@ void NFBPlaceCornerMedia(UIView* status) {
         gCornerSkipped++;
         return;
     }
+    // 7.3.105: whether a view is where we put it is no longer guessed from
+    // where it is (7.3.102 took a photo for "moved up already" when it sat
+    // higher than expected, and then left it and everything below it down).
+    // Each view we move carries the frame we gave it; one that X has laid out
+    // again has another frame and is moved again. A row's new layout starts
+    // afresh.
+    if (objc_getAssociatedObject(status, kPlacedForKey) != layout) {
+        for (UIView* view in host.subviews) {
+            objc_setAssociatedObject(view, kPlacedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        objc_setAssociatedObject(status, kPlacedForKey, layout, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    BOOL placed = StillPlaced(container);
+    NSValue* was = placed ? objc_getAssociatedObject(container, kNaturalKey) : nil;
+    // Where X put the photo.
+    CGRect old = was ? was.CGRectValue : container.frame;
     CGRect name = [author.superview convertRect:author.frame toView:host];
-    CGRect old = container.frame;
     // The right end of the tweet's column: where the name line ends (X leaves
     // the name line its full width). Never past the row's own edge.
     CGFloat right = MIN(CGRectGetMaxX(name), CGRectGetWidth(host.bounds));
@@ -554,23 +583,28 @@ void NFBPlaceCornerMedia(UIView* status) {
     // Up beside the text, but never onto the name line.
     CGFloat y = MAX(CGRectGetMaxY(name) + 1, CGRectGetMinY(old) - lift);
     CGRect target = CGRectMake(x, y, CGRectGetWidth(old), CGRectGetHeight(old));
-    if (fabs(CGRectGetMinX(old) - x) < 0.5 && fabs(CGRectGetMinY(old) - y) < 0.5) {
-        return; // already there, and what was below it already moved
-    }
-    if (lift > 0.5 && CGRectGetMinY(old) < CGRectGetMaxY(name) + lift - 1) {
-        return; // moved up already (X did not lay the tweet out again)
-    }
+    BOOL moved = NO;
     if (saved > 0.5) {
         for (UIView* view in host.subviews) {
-            if (view != container && CGRectGetMinY(view.frame) >= CGRectGetMaxY(old) - 0.5) {
-                view.frame = CGRectOffset(view.frame, 0, -saved);
+            if (view != container && !StillPlaced(view) && CGRectGetMinY(view.frame) >= CGRectGetMaxY(old) - 0.5) {
+                CGRect lower = CGRectOffset(view.frame, 0, -saved);
+                view.frame = lower;
+                objc_setAssociatedObject(view, kPlacedKey, [NSValue valueWithCGRect:lower], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                moved = YES;
             }
         }
     }
-    gPlacingCorner = YES;
-    container.frame = target;
-    gPlacingCorner = NO;
-    gCornerPlaced++;
+    if (!placed) {
+        objc_setAssociatedObject(container, kNaturalKey, [NSValue valueWithCGRect:old], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        gPlacingCorner = YES;
+        container.frame = target;
+        gPlacingCorner = NO;
+        objc_setAssociatedObject(container, kPlacedKey, [NSValue valueWithCGRect:target], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        moved = YES;
+    }
+    if (moved) {
+        gCornerPlaced++;
+    }
 }
 
 %hook T1StatusViewAttachmentContainerView

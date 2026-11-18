@@ -126,6 +126,9 @@ static NSInteger gAvatarShrinksKept = 0;
 // 7.3.103, small media off: how often X asked for the avatar at full size and
 // shrunk, and the last shrink it asked for.
 static NSInteger gAvatarXPlain = 0, gAvatarXShrinks = 0;
+// 7.3.105: a tweet's own layout updates, and how many got the row's metrics.
+static NSInteger gStateUpdates = 0, gStateNarrowed = 0;
+static BOOL gStateHooked = NO;
 static CGAffineTransform gAvatarXLast = {1, 0, 0, 1, 0, 0};
 // 7.3.97: what X answered when asked to lay rows out inside the card margin,
 // how the name line's labels were told apart, and what a pull looked like.
@@ -143,7 +146,8 @@ NSString* NFBReadabilityDebugText(void) {
                                       @"threadRows=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@\n"
                                       @"metrics: calls=%ld misses=%ld fitRows=%ld scaledRows=%ld indentedRows=%ld roomRows=%ld roomInsets=%ld indent=%.1f "
                                       @"indentHook=%d cellHook=%d %@\nnameLine: %@\npull: %@\n"
-                                      @"avatar: xPlain=%ld xShrinks=%ld lastShrink=[%.2f %.2f %.1f %.1f]",
+                                      @"avatar: xPlain=%ld xShrinks=%ld lastShrink=[%.2f %.2f %.1f %.1f] "
+                                      @"stateUpdates=%ld(hook=%d) stateNarrowed=%ld",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
@@ -151,7 +155,8 @@ NSString* NFBReadabilityDebugText(void) {
                                       (long)gMetricsCalls, (long)gMetricsMisses, (long)gFitRows, (long)gScaledRows,
                                       (long)gIndentedRows, (long)gRoomRows, (long)gRoomInsets, gReplyIndent, gIndentHooked, gCellHooked, gMetricsLog,
                                       gNameLineLog, gPullLog, (long)gAvatarXPlain, (long)gAvatarXShrinks, gAvatarXLast.a,
-                                      gAvatarXLast.d, gAvatarXLast.tx, gAvatarXLast.ty];
+                                      gAvatarXLast.d, gAvatarXLast.tx, gAvatarXLast.ty, (long)gStateUpdates, gStateHooked,
+                                      (long)gStateNarrowed];
 }
 
 // MARK: Which list a cell is in
@@ -1262,6 +1267,65 @@ static id MetricsForRow(id metrics, CGFloat left, CGFloat right) {
     return result;
 }
 
+// 7.3.105: a tweet on screen works its layout out again by itself when its
+// view model changes (a like count, a view count), from the list's metrics
+// and not from the row's: the text went back to its full width, under the
+// photo that sits beside it, or lost a line, and then the photo was no longer
+// moved up while the row stayed as short as if it had been, so the buttons
+// ran into the next card (7.3.102). What a row's layout was narrowed by is
+// kept on it ({left, right, the list's own content left, right}), and the
+// tweet's own update gets the same metrics.
+static const void* kRowInsetsKey = &kRowInsetsKey;
+
+static id RowMetricsFor(UIView* status, id metrics) {
+    gStateUpdates++;
+    if (!metrics) {
+        return metrics;
+    }
+    UITableViewCell* cell = nil;
+    int depth = 0;
+    for (UIView* up = status.superview; up && depth < 8; up = up.superview, depth++) {
+        if ([NSStringFromClass(up.class) containsString:@"Quoted"]) {
+            return metrics;
+        }
+        if ([up isKindOfClass:[UITableViewCell class]]) {
+            cell = (UITableViewCell*)up;
+            break;
+        }
+    }
+    SEL layoutSelector = NSSelectorFromString(@"cellLayout");
+    if (!cell || ![cell respondsToSelector:layoutSelector]) {
+        return metrics;
+    }
+    id layout = ((id (*)(id, SEL))objc_msgSend)(cell, layoutSelector);
+    NSValue* note = layout ? objc_getAssociatedObject(layout, kRowInsetsKey) : nil;
+    if (!note) {
+        return metrics;
+    }
+    CGRect noted = note.CGRectValue;
+    CGFloat left = noted.origin.x, right = noted.origin.y, listLeft = noted.size.width, listRight = noted.size.height;
+    // The row's layout must be this tweet's: while a row is taken into use
+    // again the tweet may be set before the row's layout is. The tweet itself
+    // says whether it has a photo beside its text.
+    SEL modelSelector = NSSelectorFromString(@"viewModel");
+    id viewModel = [status respondsToSelector:modelSelector] ? ((id (*)(id, SEL))objc_msgSend)(status, modelSelector) : nil;
+    if (viewModel) {
+        CGFloat thumb = NFBCornerThumbFor(viewModel);
+        if (fabs((thumb > 0 ? thumb + NFBCornerGap() : 0) - right) > 0.5) {
+            return metrics;
+        }
+    }
+    UIEdgeInsets content = MetricInsets(metrics, @"contentEdgeInsets");
+    if (content.left >= listLeft + left - 0.5 && content.right >= listRight + right - 0.5) {
+        return metrics; // the row's metrics already
+    }
+    id narrowed = MetricsForRow(metrics, left, right);
+    if (narrowed) {
+        gStateNarrowed++;
+    }
+    return narrowed ?: metrics;
+}
+
 // MARK: Room above and below a card
 // Until 7.3.97 a card was drawn inside the row X had measured: half the gap
 // was taken off its top and bottom. So a wider gap did not move the cards
@@ -1292,14 +1356,20 @@ static void GiveCardRoom(id layout, BOOL cards, NSUInteger connector) {
     CGFloat bottom = (cards && !(connector & 2)) ? edge : 0;
     // A tweet with a line above it ("... reposted") starts its name and avatar
     // about 19 points lower, and the line is small and grey, so the card looks
-    // as if it had a wide margin on top. Such a row gets up to 8 points less
-    // room above. X's layout says where the avatar is.
+    // as if it had a wide margin on top, inside the card. Such a row's content
+    // sits 8 points higher in its card. X's layout says where the avatar is.
+    //
+    // 7.3.100-7.3.104 took the 8 points off the room and stopped at none, so
+    // with a small gap and little inner room (0 and 3: 3 points) next to
+    // nothing changed. The room may now be less than none: the content then
+    // starts above the card's edge, where it only has X's own empty margin
+    // (11 points), and the gap between cards is never touched.
     SEL stateSelector = NSSelectorFromString(@"statusViewLayoutState"), avatarSelector = NSSelectorFromString(@"avatarFrame");
-    if (top > 0 && [layout respondsToSelector:stateSelector]) {
+    if (cards && !(connector & 1) && [layout respondsToSelector:stateSelector]) {
         id state = ((id (*)(id, SEL))objc_msgSend)(layout, stateSelector);
         if ([state respondsToSelector:avatarSelector] &&
             ((CGRect (*)(id, SEL))objc_msgSend)(state, avatarSelector).origin.y > 22) {
-            top = MAX(0, top - 8);
+            top -= 8;
         }
     }
     UIEdgeInsets old = was ? was.UIEdgeInsetsValue : UIEdgeInsetsZero;
@@ -1335,13 +1405,16 @@ static CGRect FrameWithRoom(UITableViewCell* cell, CGRect frame) {
     }
     UIEdgeInsets room = note.UIEdgeInsetsValue;
     SEL sizeSelector = NSSelectorFromString(@"size");
-    if (room.top + room.bottom < 0.5 || ![layout respondsToSelector:sizeSelector]) {
+    if (fabs(room.top) + fabs(room.bottom) < 0.5 || ![layout respondsToSelector:sizeSelector]) {
         return frame;
     }
     CGFloat layoutHeight = ((CGSize (*)(id, SEL))objc_msgSend)(layout, sizeSelector).height;
     CGFloat rowHeight = CGRectGetHeight(cell.bounds);
-    if (fabs(rowHeight - layoutHeight) > 2 || CGRectGetHeight(frame) < rowHeight - 2 || CGRectGetMinY(frame) > 0.5) {
-        return frame; // the row did not get the room, or the frame has it taken off already
+    // Only the whole row is changed: a frame that starts elsewhere or has
+    // another height has the room taken off already (the room above can be
+    // less than none, so "shorter than the row" no longer tells).
+    if (fabs(rowHeight - layoutHeight) > 2 || fabs(CGRectGetHeight(frame) - rowHeight) > 1 || fabs(CGRectGetMinY(frame)) > 0.25) {
+        return frame;
     }
     frame.origin.y += room.top;
     frame.size.height -= room.top + room.bottom;
@@ -2199,9 +2272,36 @@ static void LayoutCard(UITableViewCell* cell) {
     CGFloat right = thumb > 0 ? thumb + NFBCornerGap() : 0;
     id narrowed = (layoutMetrics && (left > 0 || right > 0)) ? MetricsForRow(layoutMetrics, left, right) : nil;
     id layout = narrowed ? %orig(viewModel, options, account, narrowed, previousLayout) : %orig;
+    if (layout) {
+        NSValue* insets = nil;
+        if (narrowed) {
+            UIEdgeInsets content = MetricInsets(layoutMetrics, @"contentEdgeInsets");
+            insets = [NSValue valueWithCGRect:CGRectMake(left, right, content.left, content.right)];
+        }
+        if (insets || objc_getAssociatedObject(layout, kRowInsetsKey)) {
+            objc_setAssociatedObject(layout, kRowInsetsKey, insets, OBJC_ASSOCIATION_RETAIN);
+        }
+    }
     NFBCornerAdjustLayout(layout, (narrowed && right > 0) ? thumb : 0);
     GiveCardRoom(layout, cards, connector);
     return layout;
+}
+
+%end
+
+%end
+
+// A tweet's own layout update (see RowMetricsFor). Only a tweet's own view,
+// not a quoted tweet's or another kind's.
+%group StatusState
+
+%hook T1StandardStatusView
+
+- (id)_t1_updateLayoutStateWithLayoutMetrics:(id)metrics {
+    if (![NSStringFromClass(object_getClass(self)) isEqualToString:@"T1StandardStatusView"]) {
+        return %orig;
+    }
+    return %orig(RowMetricsFor((UIView*)self, metrics));
 }
 
 %end
@@ -3201,5 +3301,10 @@ void NFBNotePullStatus(UIView* control, unsigned long long status) {
         class_getClassMethod(connectors, NSSelectorFromString(@"connectorTypeForViewModel:anatomyFeatures:statusOptions:"))) {
         %init(ReplyIndent);
         gIndentHooked = YES;
+    }
+    Class statusView = objc_getClass("T1StandardStatusView");
+    if (statusView && class_getInstanceMethod(statusView, NSSelectorFromString(@"_t1_updateLayoutStateWithLayoutMetrics:"))) {
+        %init(StatusState);
+        gStateHooked = YES;
     }
 }

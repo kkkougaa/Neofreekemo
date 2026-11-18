@@ -71,6 +71,10 @@ static NSString* const kReplyIndentKey = @"kemo_thread_indent_measured";
 
 // Set on an avatar while it carries our own scale (see ScaleFrom).
 static const void* kScaledKey = &kScaledKey;
+// On an avatar: it is one we give our size (a plain tweet's), and the shrink X
+// last asked for (an NSValue, nil when X wants it at full size).
+static const void* kOurAvatarKey = &kOurAvatarKey;
+static const void* kXTransformKey = &kXTransformKey;
 
 static BOOL SameStyle(NFBCardStyle a, NFBCardStyle b) {
     return a.look == b.look && a.radius == b.radius && a.gap == b.gap && a.inner == b.inner &&
@@ -115,6 +119,10 @@ static void ReadSwitches(void) {
 static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
 static NSInteger gAvatarShrinksKept = 0;
+// 7.3.103, small media off: how often X asked for the avatar at full size and
+// shrunk, and the last shrink it asked for.
+static NSInteger gAvatarXPlain = 0, gAvatarXShrinks = 0;
+static CGAffineTransform gAvatarXLast = {1, 0, 0, 1, 0, 0};
 // 7.3.97: what X answered when asked to lay rows out inside the card margin,
 // how the name line's labels were told apart, and what a pull looked like.
 static NSString* gMetricsLog = @"(not asked yet)";
@@ -130,14 +138,16 @@ NSString* NFBReadabilityDebugText(void) {
                                       @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
                                       @"threadRows=%ld contentFontCalls=%ld swipes=%ld avatarShrinksKept=%ld last=%@\n"
                                       @"metrics: calls=%ld misses=%ld fitRows=%ld scaledRows=%ld indentedRows=%ld roomRows=%ld roomInsets=%ld indent=%.1f "
-                                      @"indentHook=%d cellHook=%d %@\nnameLine: %@\npull: %@",
+                                      @"indentHook=%d cellHook=%d %@\nnameLine: %@\npull: %@\n"
+                                      @"avatar: xPlain=%ld xShrinks=%ld lastShrink=[%.2f %.2f %.1f %.1f]",
                                       gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
                                       gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
                                       (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
                                       (long)gThreadRows, (long)gFontCalls, (long)gSwipeBegins, (long)gAvatarShrinksKept, gSwipeLog,
                                       (long)gMetricsCalls, (long)gMetricsMisses, (long)gFitRows, (long)gScaledRows,
                                       (long)gIndentedRows, (long)gRoomRows, (long)gRoomInsets, gReplyIndent, gIndentHooked, gCellHooked, gMetricsLog,
-                                      gNameLineLog, gPullLog];
+                                      gNameLineLog, gPullLog, (long)gAvatarXPlain, (long)gAvatarXShrinks, gAvatarXLast.a,
+                                      gAvatarXLast.d, gAvatarXLast.tx, gAvatarXLast.ty];
 }
 
 // MARK: Which list a cell is in
@@ -2215,6 +2225,22 @@ static void Unscale(UIView* view) {
     }
 }
 
+static BOOL AvatarTakesOurSize(UIView* avatar) {
+    return fabs(gStyle.avatarScale - 1) > 0.005 && CGRectGetWidth(avatar.bounds) > 20 && CGRectGetWidth(avatar.bounds) < 80;
+}
+
+// Our size for a tweet's avatar, with X's shrink (a strip of photos passing
+// under it) on top of it when X asked for one.
+static void ApplyAvatarScale(UIView* avatar) {
+    ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
+    NSValue* shrink = objc_getAssociatedObject(avatar, kXTransformKey);
+    if (shrink) {
+        gOwnTransform = YES;
+        avatar.transform = CGAffineTransformConcat(avatar.transform, shrink.CGAffineTransformValue);
+        gOwnTransform = NO;
+    }
+}
+
 // MARK: The name line
 // TTAStatusAuthorView lays out separate UILabels: the name ("StatusFullname",
 // semibold), the @handle ("StatusUsername"), a "·", and the time
@@ -2844,12 +2870,38 @@ static void DimActions(UIView* actions) {
 // through only when small media is off.
 %hook T1TappableStatusFleetLineItemView
 
+// 7.3.103: with small media off X's transforms were let through as they
+// came. X also says "not shrunk" (the identity) over and over while a strip of
+// photos is on screen, even one too short to scroll, and that put the avatar
+// back to X's size until the tweet was next laid out and our size came back:
+// the avatar grew and shrank. What X asks for is now remembered and put on
+// top of our size: "not shrunk" is our size, and a real shrink starts from it.
 - (void)setTransform:(CGAffineTransform)transform {
-    if (gOwnTransform || !gCompactOn) {
+    if (gOwnTransform) {
         %orig;
         return;
     }
-    gAvatarShrinksKept++;
+    if (gCompactOn) {
+        gAvatarShrinksKept++;
+        return;
+    }
+    UIView* avatar = (UIView*)self;
+    BOOL plain = CGAffineTransformIsIdentity(transform);
+    objc_setAssociatedObject(avatar, kXTransformKey, plain ? nil : [NSValue valueWithCGAffineTransform:transform],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (plain) {
+        gAvatarXPlain++;
+    } else {
+        gAvatarXShrinks++;
+        gAvatarXLast = transform;
+    }
+    // Not while the tweet is being laid out (the mark is off then): X sets
+    // frames on it, and the tweet's hook gives it its size afterwards.
+    if (objc_getAssociatedObject(avatar, kOurAvatarKey) && AvatarTakesOurSize(avatar)) {
+        ApplyAvatarScale(avatar);
+        return;
+    }
+    %orig;
 }
 
 %end
@@ -2904,6 +2956,9 @@ static void DimActions(UIView* actions) {
     UIView* avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
     UIView* author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
     Unscale(avatar);
+    if (avatar) {
+        objc_setAssociatedObject(avatar, kOurAvatarKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     %orig;
     // Quoted tweets and other kinds keep X's sizes.
     if (plain) {
@@ -2911,9 +2966,13 @@ static void DimActions(UIView* actions) {
         NFBPlaceCornerMedia((UIView*)status);
         avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
         author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
-        if (fabs(gStyle.avatarScale - 1) > 0.005 && CGRectGetWidth(avatar.bounds) > 20 &&
-            CGRectGetWidth(avatar.bounds) < 80) {
-            ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
+        if (avatar && AvatarTakesOurSize(avatar)) {
+            // With small media on X's shrinks are not taken at all.
+            if (gCompactOn) {
+                objc_setAssociatedObject(avatar, kXTransformKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            ApplyAvatarScale(avatar);
+            objc_setAssociatedObject(avatar, kOurAvatarKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         if (author) {
             ArrangeNameLine(author);

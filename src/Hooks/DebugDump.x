@@ -402,7 +402,7 @@ static NSString* ColorText(UIColor* color, UITraitCollection* traits) {
 
 // Views inside a row that paint a solid colour or round their corners.
 static void DumpPainted(UIView* view, UIView* cell, int depth, NSMutableString* out, NSUInteger* lines) {
-    if (depth > 6 || *lines > 6) {
+    if (depth > 6 || *lines > 4) {
         return;
     }
     if ([NSStringFromClass(view.class) hasPrefix:@"NFBCard"]) {
@@ -469,7 +469,7 @@ static void DumpCardRows(UIWindow* window, NSMutableString* out) {
     }];
     NSUInteger shown = 0;
     for (UITableViewCell* cell in cells) {
-        if (shown++ >= 8) {
+        if (shown++ >= 5) {
             break;
         }
         NSString* connector = @"-";
@@ -529,18 +529,6 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
         NSUInteger lines = 0;
         if (author) {
             DumpAuthorFonts(author, 0, out, &lines);
-        }
-    }
-    UITableViewCell* pile = FindPileCell(window, 0);
-    [out appendFormat:@"== NOTIFICATION PILE ROW %@ ==%c", pile ? NSStringFromClass(pile.class) : @"(none)", 10];
-    if (pile) {
-        NSUInteger lines = 0;
-        DumpView(pile, 0, out, &lines);
-        NSArray* peopleWords = @[ @"user", @"model", @"avatar", @"facepile", @"name", @"item", @"tap", @"select" ];
-        DumpClassInfoMatching(pile.class, out, peopleWords, 25);
-        Class avatar = NSClassFromString(@"TFNAvatarHeaderView");
-        if (avatar) {
-            DumpClassInfoMatching(avatar, out, peopleWords, 15);
         }
     }
     // Where X sets the width of a row's text column (for media beside the text).

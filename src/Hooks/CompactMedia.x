@@ -32,7 +32,7 @@ static const CGFloat kCardWidth = 190.0;
 static const void* kLayoutModeKey = &kLayoutModeKey;
 
 // Probe for the debug dump: how often each path ran, and the last view model class.
-static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0;
+static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0, gAdaptiveOff = 0;
 static NSString* gLastViewModelClass = nil;
 // Where X lays a row out, for working out how to put the media beside the text.
 // Class pointers, not strings: these are set while rows are laid out, which can be
@@ -86,6 +86,19 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 }
 
 %hook T1StandardStatusAttachmentViewAdapter
+
+// Tall single photos (7.3.90 dump: 328 x 438 while every size call returned a
+// square) go through X's "adaptive" media layout, which sizes them on its own
+// and never asks the size method below. With small media on, that layout is
+// turned off so every photo takes the size path that is shrunk.
+- (BOOL)_t1_useAdaptiveMediaLayoutForAttachmentType:(NSUInteger)attachmentType {
+    BOOL adaptive = %orig;
+    if (adaptive && NFBCompactMedia()) {
+        gAdaptiveOff++;
+        return NO;
+    }
+    return adaptive;
+}
 
 - (CGSize)_t1_photoVideoForwardViewSizeForViewModel:(id)viewModel
                                       layoutMetrics:(id)layoutMetrics
@@ -218,11 +231,11 @@ static void NFBWatchMode(void) {
 // Read by Hooks/DebugDump.x.
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
-                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld lastViewModel=%@",
+                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
-                                      (long)gCardCalls, gLastViewModelClass ?: @"-"];
+                                      (long)gCardCalls, (long)gAdaptiveOff, gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

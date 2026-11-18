@@ -13,10 +13,8 @@
 //
 //  - kemo_timeline_cards: every home timeline row sits on a rounded card with a
 //    gap of page colour around it, so tweets read as separate pieces.
-//  - kemo_notification_cards: the same for the notifications list. A
-//    notification that gathers several people ("A and 6 others liked") gets two
-//    more card edges peeking out under it, like a small pile. Replies and
-//    mentions there can be pulled from right to left to answer them.
+//  - kemo_notification_cards: the same for the notifications list. Replies
+//    and mentions there can be pulled from right to left to answer them.
 //  - kemo_dim_actions: the reply / repost / like / views row is faded, so the
 //    numbers no longer pull the eye away from the text.
 //
@@ -716,13 +714,11 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     SetDividersHidden(cell, YES);
     SetBackingCleared(cell, memory, YES);
 
-    // A notification that gathers several people is drawn as a little pile.
+    // 7.3.86-7.3.93 drew a notification that gathers several people as a
+    // little pile; it meant nothing (there is nothing to open), so every
+    // notification is a plain card again.
     BOOL pile = NO;
     if (kind == NFBListNotifications) {
-        pile = CountViews(cell.contentView, @"TFNAvatarHeaderView", 2, 0) >= 2;
-        if (pile) {
-            gPiles++;
-        }
         gNoteCards++;
     } else {
         gHomeCards++;

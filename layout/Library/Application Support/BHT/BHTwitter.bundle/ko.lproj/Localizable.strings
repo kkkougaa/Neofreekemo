@@ -543,3 +543,27 @@
 "KEMO_DIM_ACTIONS_DETAIL" = "답글·재게시·마음에 들어요·조회수 줄을 흐리게 해서 글이 먼저 읽히게 해요.";
 "KEMO_BIGGER_TEXT_TITLE" = "트윗 글자 조금 크게";
 "KEMO_BIGGER_TEXT_DETAIL" = "트윗 본문 글자를 조금 키우고, 프로필 사진과 이름·아이디도 함께 조금 키워 본문과 구분되게 해요. 앱을 다시 열면 모든 트윗에 적용돼요.";
+
+/* Cards and text (7.3.90) */
+"KEMO_CARD_STYLE_TITLE" = "카드·글자 꾸미기";
+"KEMO_CARD_SECTION_CARD" = "카드";
+"KEMO_CARD_SECTION_TEXT" = "글자와 프로필 사진";
+"KEMO_CARD_LOOK_OUTLINED" = "테두리";
+"KEMO_CARD_LOOK_FLOATING" = "떠 있는 카드";
+"KEMO_CARD_RADIUS" = "모서리 곡률";
+"KEMO_CARD_GAP" = "카드 간격";
+"KEMO_CARD_INNER" = "카드 안쪽 여백";
+"KEMO_CARD_PAPER" = "카드 바탕색";
+"KEMO_CARD_PAPER_DEFAULT" = "기본";
+"KEMO_CARD_PAPER_GRAY" = "회색";
+"KEMO_CARD_PAPER_WARM" = "따뜻한";
+"KEMO_CARD_PAPER_TINT" = "테마색";
+"KEMO_CARD_PAPER_CUSTOM" = "직접";
+"KEMO_CARD_BODY" = "본문 글자 크기";
+"KEMO_CARD_NAME" = "이름·아이디 크기";
+"KEMO_CARD_AVATAR" = "프로필 사진 크기";
+"KEMO_CARD_BODY_NOTE" = "본문 글자 크기는 앱을 다시 열면 모든 트윗에 적용돼요. 나머지는 바로 바뀌어요.";
+"KEMO_CARD_RESET" = "처음 값으로 되돌리기";
+"KEMO_CARD_PREVIEW_BODY1" = "카드 모양을 바꾸면 여기 미리보기가 바로 바뀌어요.";
+"KEMO_CARD_PREVIEW_BODY2" = "이어진 트윗은 한 카드로 묶여요.";
+"KEMO_CARD_PREVIEW_BODY3" = "답글은 안쪽 상자에 들어가요.";

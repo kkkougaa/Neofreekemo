@@ -6,9 +6,10 @@
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIGestureRecognizerSubclass.h>
 #import "HookHelpers.h"
+#import "Core/NFBCardStyle.h"
 
 // MARK: - Easier reading in the home timeline and notifications
-// Each has its own switch:
+// Switches:
 //
 //  - kemo_timeline_cards: every home timeline row sits on a rounded card with a
 //    gap of page colour around it, so tweets read as separate pieces.
@@ -18,21 +19,21 @@
 //    mentions there can be pulled from right to left to answer them.
 //  - kemo_dim_actions: the reply / repost / like / views row is faded, so the
 //    numbers no longer pull the eye away from the text.
-//  - kemo_bigger_text: tweet text is set a little larger; since 7.3.89 the
-//    avatar and the name line grow a little with it, so names stand out.
 //
-// 7.3.89: the swipe follows the finger as it moves, a pile's edges peek into
-// the gap under the card (so every card keeps the same room around its
-// content), and the list behind the cards is page coloured, which also colours
-// the area that opens when pulling to refresh.
+// How the cards look (outlined or floating, corner radius, gap, inner room,
+// card colour) and the sizes of tweet text, the name line and the avatar are
+// chosen on the "Cards and text" settings page (Core/NFBCardStyle). Changes
+// show at once on the rows on screen, except the tweet text size, which X
+// measures when it lays a row out.
 //
-// Added in 7.3.86. Not yet done: media beside the text and the short list of
-// people when a pile is tapped (the shake dump now probes for both).
+// 7.3.90: a thread in the home timeline is drawn as one card: the first tweet
+// on top, and the replies under it (with "show more replies") nested in an
+// inner box. The spinner of pull to refresh sits on a small card-coloured pill.
 //
 // The cards never change X's layout (moving views after X has laid them out
 // made 7.3.76's small media jump back and forth). The row's content is only
-// drawn a little smaller inside its card (the content view's sublayer
-// transform), and the card itself is the cell's background view.
+// drawn smaller inside its card (the content view's sublayer transform), and
+// the card itself is the cell's background view.
 //
 // The swipe only exists in the notifications list. On the home timeline a
 // sideways drag stays X's (it changes tabs).
@@ -40,37 +41,63 @@
 static NSString* const kCardsKey = @"kemo_timeline_cards";
 static NSString* const kNoteCardsKey = @"kemo_notification_cards";
 static NSString* const kDimKey = @"kemo_dim_actions";
-static NSString* const kBiggerKey = @"kemo_bigger_text";
 
 static const CGFloat kCardSide = 8.0;    // page colour left and right of a card
-static const CGFloat kCardGap = 5.0;     // page colour above and below (half the gap between cards)
-static const CGFloat kCardInner = 6.0;   // extra room between the card edge and the row's content
-static const CGFloat kCardRadius = 16.0;
 static const CGFloat kPileStep = 3.5;    // how far each card edge under a pile peeks out
+static const CGFloat kNestIndent = 46.0; // where a thread's inner box starts, from the card's left edge
 static const CGFloat kDimAlpha = 0.45;
-static const CGFloat kBiggerTextStep = 1.5;
 static const CGFloat kReplyPull = 80.0;  // pull this far to answer
 
-// Switches, read once and refreshed when settings change (the cell hook runs a lot).
-static BOOL gCardsOn, gNoteCardsOn, gDimOn, gBiggerOn;
+// Switches and the card style, read once and refreshed when settings change
+// (the cell hook runs a lot). gStamp changes whenever the style does, so cells
+// know to redo their colours.
+static BOOL gCardsOn, gNoteCardsOn, gDimOn;
+static NFBCardStyle gStyle;
+static NSInteger gStamp = 0;
+
+static void RefreshOnScreen(void);
+
+static BOOL SameStyle(NFBCardStyle a, NFBCardStyle b) {
+    return a.look == b.look && a.radius == b.radius && a.gap == b.gap && a.inner == b.inner &&
+           a.bodyStep == b.bodyStep && a.nameScale == b.nameScale && a.avatarScale == b.avatarScale &&
+           a.paper == b.paper;
+}
 
 static void ReadSwitches(void) {
-    gCardsOn = [BHTSettings boolForKey:kCardsKey];
-    gNoteCardsOn = [BHTSettings boolForKey:kNoteCardsKey];
-    gDimOn = [BHTSettings boolForKey:kDimKey];
-    gBiggerOn = [BHTSettings boolForKey:kBiggerKey];
+    BOOL cards = [BHTSettings boolForKey:kCardsKey];
+    BOOL notes = [BHTSettings boolForKey:kNoteCardsKey];
+    BOOL dim = [BHTSettings boolForKey:kDimKey];
+    NFBCardStyle style = NFBCardStyleCurrent();
+    static NSArray* lastRGB;
+    NSArray* rgb = [[NSUserDefaults standardUserDefaults] arrayForKey:NFBCardPaperRGBKey];
+    BOOL changed = cards != gCardsOn || notes != gNoteCardsOn || dim != gDimOn || !SameStyle(style, gStyle) ||
+                   !((rgb == nil && lastRGB == nil) || [rgb isEqual:lastRGB]);
+    gCardsOn = cards;
+    gNoteCardsOn = notes;
+    gDimOn = dim;
+    gStyle = style;
+    lastRGB = rgb;
+    if (changed) {
+        gStamp++;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            RefreshOnScreen();
+        });
+    }
 }
 
 // For the shake dump.
-static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gFontCalls = 0, gSwipeBegins = 0;
+static NSInteger gHomeCards = 0, gNoteCards = 0, gPiles = 0, gThreadRows = 0, gFontCalls = 0, gSwipeBegins = 0,
+                 gPills = 0;
 static NSString* gSwipeLog = @"(no swipe yet)";
 
 NSString* NFBReadabilityDebugText(void) {
-    return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d bigger=%d homeCards=%ld noteCards=%ld "
-                                      @"piles=%ld contentFontCalls=%ld swipes=%ld last=%@",
-                                      gCardsOn, gNoteCardsOn, gDimOn, gBiggerOn, (long)gHomeCards,
-                                      (long)gNoteCards, (long)gPiles, (long)gFontCalls, (long)gSwipeBegins,
-                                      gSwipeLog];
+    return [NSString stringWithFormat:@"cards=%d noteCards=%d dim=%d look=%ld r=%.0f gap=%.0f inner=%.0f body=%+.1f "
+                                      @"name=%.2f avatar=%.2f paper=%ld homeCards=%ld noteCards=%ld piles=%ld "
+                                      @"threadRows=%ld pills=%ld contentFontCalls=%ld swipes=%ld last=%@",
+                                      gCardsOn, gNoteCardsOn, gDimOn, (long)gStyle.look, gStyle.radius, gStyle.gap,
+                                      gStyle.inner, gStyle.bodyStep, gStyle.nameScale, gStyle.avatarScale,
+                                      (long)gStyle.paper, (long)gHomeCards, (long)gNoteCards, (long)gPiles,
+                                      (long)gThreadRows, (long)gPills, (long)gFontCalls, (long)gSwipeBegins, gSwipeLog];
 }
 
 // MARK: Which list a cell is in
@@ -123,6 +150,10 @@ static NFBListKind ListKind(UITableView* table) {
     return kind;
 }
 
+static BOOL CardsOnFor(NFBListKind kind) {
+    return (kind == NFBListHome && gCardsOn) || (kind == NFBListNotifications && gNoteCardsOn);
+}
+
 // MARK: Finding things in a row
 
 static NSUInteger CountViews(UIView* view, NSString* className, NSUInteger limit, int depth) {
@@ -163,92 +194,86 @@ static BOOL IsDivider(UIView* view) {
 // MARK: The card
 
 @interface NFBCardBackground : UIView
-@property (nonatomic, strong) UIView* card;
-@property (nonatomic, strong) UIView* edge1;
-@property (nonatomic, strong) UIView* edge2;
+@property (nonatomic, strong) NFBCardView* edge2;
+@property (nonatomic, strong) NFBCardView* edge1;
+@property (nonatomic, strong) NFBCardView* card;
+@property (nonatomic, strong) NFBCardView* nest; // the inner box of a thread's replies
 @property (nonatomic, assign) BOOL pile;
+@property (nonatomic, assign) BOOL openTop;     // joined to the row above (one thread)
+@property (nonatomic, assign) BOOL openBottom;  // joined to the row below
+@property (nonatomic, assign) BOOL nested;      // a reply inside a thread: draw the inner box
+@property (nonatomic, assign) BOOL nestOpenTop; // the inner box goes on from the row above
+@property (nonatomic, strong) UIColor* paper;
 @property (nonatomic, strong) UIColor* page;
 @end
 
 @implementation NFBCardBackground
 
-- (UIView*)makeCard {
-    UIView* view = [UIView new];
-    view.userInteractionEnabled = NO;
-    view.layer.cornerRadius = kCardRadius;
-    view.layer.cornerCurve = kCACornerCurveContinuous;
-    view.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
-    return view;
-}
-
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.userInteractionEnabled = NO;
         self.clipsToBounds = NO;
-        _edge2 = [self makeCard];
-        _edge1 = [self makeCard];
-        _card = [self makeCard];
-        [self addSubview:_edge2];
-        [self addSubview:_edge1];
-        [self addSubview:_card];
+        self.backgroundColor = [UIColor clearColor];
+        _edge2 = [NFBCardView new];
+        _edge1 = [NFBCardView new];
+        _card = [NFBCardView new];
+        _nest = [NFBCardView new];
+        _nest.plain = YES;
+        for (UIView* view in @[ _edge2, _edge1, _card, _nest ]) {
+            [self addSubview:view];
+        }
     }
     return self;
-}
-
-// paper mixed toward page by `amount` (0 = paper, 1 = page).
-static UIColor* Blend(UIColor* paper, UIColor* page, CGFloat amount) {
-    return [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
-        CGFloat r1 = 0, g1 = 0, b1 = 0, a1 = 0, r2 = 0, g2 = 0, b2 = 0, a2 = 0;
-        [[paper resolvedColorWithTraitCollection:traits] getRed:&r1 green:&g1 blue:&b1 alpha:&a1];
-        [[page resolvedColorWithTraitCollection:traits] getRed:&r2 green:&g2 blue:&b2 alpha:&a2];
-        return [UIColor colorWithRed:r1 + (r2 - r1) * amount
-                               green:g1 + (g2 - g1) * amount
-                                blue:b1 + (b2 - b1) * amount
-                               alpha:1];
-    }];
 }
 
 // The page itself is the list's background (see SetTablePage), so this view is
 // clear outside the card: a pile's edges can then peek into the gap below the
 // row without the next row's background covering them.
 - (void)setPaper:(UIColor*)paper page:(UIColor*)page {
+    self.paper = paper;
     self.page = page;
-    self.backgroundColor = [UIColor clearColor];
-    UIColor* line = [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
-        return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? [UIColor colorWithWhite:1 alpha:0.10]
-                                                                     : [UIColor colorWithWhite:0 alpha:0.07];
-    }];
     self.card.backgroundColor = paper;
     // The cards underneath are solid, a step closer to the page each, so no
     // edge shows through another.
-    self.edge1.backgroundColor = Blend(paper, page, 0.35);
-    self.edge2.backgroundColor = Blend(paper, page, 0.65);
-    for (UIView* view in @[ self.card, self.edge1, self.edge2 ]) {
-        view.layer.borderColor = [line resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+    self.edge1.backgroundColor = NFBCardBlend(paper, page, 0.35);
+    self.edge2.backgroundColor = NFBCardBlend(paper, page, 0.65);
+    self.nest.backgroundColor = NFBCardBlend(paper, page, 0.55);
+    for (NFBCardView* view in @[ self.card, self.edge1, self.edge2, self.nest ]) {
+        view.style = gStyle;
     }
-}
-
-- (void)traitCollectionDidChange:(UITraitCollection*)previous {
-    [super traitCollectionDidChange:previous];
-    if (self.page) {
-        [self setPaper:self.card.backgroundColor page:self.page];
-    }
+    [self setNeedsLayout];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
+    CGFloat half = gStyle.gap / 2;
+    CGFloat top = self.openTop ? 0 : half;
+    CGFloat bottom = self.openBottom ? CGRectGetHeight(bounds) : CGRectGetHeight(bounds) - half;
     // Every card has the same frame rule, piles included, so the room around
     // the content is the same on every card.
-    CGRect card = CGRectMake(kCardSide, kCardGap, CGRectGetWidth(bounds) - kCardSide * 2,
-                             MAX(0, CGRectGetHeight(bounds) - kCardGap * 2));
+    CGRect card = CGRectMake(kCardSide, top, CGRectGetWidth(bounds) - kCardSide * 2, MAX(0, bottom - top));
     self.card.frame = card;
-    self.edge1.hidden = !self.pile;
-    self.edge2.hidden = !self.pile;
-    if (self.pile) {
+    self.card.openTop = self.openTop;
+    self.card.openBottom = self.openBottom;
+    BOOL pile = self.pile && !self.openBottom;
+    self.edge1.hidden = !pile;
+    self.edge2.hidden = !pile;
+    if (pile) {
         // Two narrower cards peek out under the bottom edge, into the gap.
         self.edge1.frame = CGRectOffset(CGRectInset(card, 12, 0), 0, kPileStep);
         self.edge2.frame = CGRectOffset(CGRectInset(card, 24, 0), 0, kPileStep * 2);
+    }
+    self.nest.hidden = !self.nested;
+    if (self.nested) {
+        CGFloat left = CGRectGetMinX(card) + kNestIndent;
+        CGFloat right = CGRectGetMaxX(card) - 8;
+        CGFloat nestTop = self.nestOpenTop ? 0 : top + 2;
+        CGFloat nestBottom = self.openBottom ? CGRectGetHeight(bounds) : bottom - 8;
+        self.nest.frame = CGRectMake(left, nestTop, MAX(0, right - left), MAX(0, nestBottom - nestTop));
+        self.nest.radiusOverride = MAX(4, MIN(14, gStyle.radius * 0.75));
+        self.nest.openTop = self.nestOpenTop;
+        self.nest.openBottom = self.openBottom;
     }
 }
 
@@ -260,7 +285,11 @@ static UIColor* Blend(UIColor* paper, UIColor* page, CGFloat amount) {
 @property (nonatomic, strong) UIView* oldBackgroundView;
 @property (nonatomic, strong) UIColor* oldCellColor;
 @property (nonatomic, strong) UIColor* oldContentColor;
+@property (nonatomic, strong) UIColor* xPaper; // X's own colour for the row
+@property (nonatomic, assign) NSInteger stamp;
 @property (nonatomic, assign) BOOL active;
+@property (nonatomic, assign) NSInteger thread; // last thread flags, to notice changes
+@property (nonatomic, strong) NSHashTable<UIView*>* hiddenLines;
 @end
 
 @implementation NFBCardMemory
@@ -268,23 +297,11 @@ static UIColor* Blend(UIColor* paper, UIColor* page, CGFloat amount) {
 
 static const void* kCardMemoryKey = &kCardMemoryKey;
 
-// The page between cards: a touch darker than the card in light mode, a touch
-// lighter in dark mode.
-static UIColor* PageColor(UIColor* paper) {
-    return [UIColor colorWithDynamicProvider:^UIColor*(UITraitCollection* traits) {
-        if (traits.userInterfaceStyle != UIUserInterfaceStyleDark) {
-            return [UIColor colorWithRed:0.937 green:0.949 blue:0.957 alpha:1];
-        }
-        CGFloat r = 0, g = 0, b = 0, a = 0;
-        [[paper resolvedColorWithTraitCollection:traits] getRed:&r green:&g blue:&b alpha:&a];
-        return [UIColor colorWithRed:MIN(1, r + 0.07) green:MIN(1, g + 0.07) blue:MIN(1, b + 0.08) alpha:1];
-    }];
-}
-
 // The list's own colour from before it showed cards.
 static const void* kOldTableColorKey = &kOldTableColorKey;
+static const void* kTablePageStampKey = &kTablePageStampKey;
 
-static UIColor* PaperColor(UITableViewCell* cell, UITableView* table) {
+static UIColor* XPaperColor(UITableViewCell* cell, UITableView* table) {
     UIColor* tableColor = objc_getAssociatedObject(table, kOldTableColorKey) ?: table.backgroundColor;
     for (UIColor* color in @[ cell.backgroundColor ?: [UIColor clearColor],
                               cell.contentView.backgroundColor ?: [UIColor clearColor],
@@ -323,12 +340,53 @@ static void SetTablePage(UITableView* table, UIColor* page) {
             objc_setAssociatedObject(table, kOldTableColorKey, table.backgroundColor ?: [UIColor clearColor],
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        if (![table.backgroundColor isEqual:page]) {
-            table.backgroundColor = page;
-        }
+        table.backgroundColor = page;
+        objc_setAssociatedObject(table, kTablePageStampKey, @(gStamp), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     } else if (old) {
         table.backgroundColor = old;
         objc_setAssociatedObject(table, kOldTableColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(table, kTablePageStampKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+// X's thread line between avatars: a thin coloured bar near the left edge.
+// Inside a thread card the replies move into the inner box, so the line would
+// point at nothing; it is hidden there and put back otherwise.
+static void FindThreadLines(UIView* view, UIView* row, int depth, NSMutableArray<UIView*>* found) {
+    if (depth > 6) {
+        return;
+    }
+    for (UIView* sub in view.subviews) {
+        CGRect frame = [sub convertRect:sub.bounds toView:row];
+        CGFloat r = 0, g = 0, b = 0, a = 0;
+        [[sub.backgroundColor resolvedColorWithTraitCollection:sub.traitCollection] getRed:&r green:&g blue:&b alpha:&a];
+        if (a > 0.3 && CGRectGetWidth(frame) <= 3 && CGRectGetHeight(frame) >= 6 && CGRectGetMinX(frame) < 80 &&
+            sub.subviews.count == 0 && !IsDivider(sub)) {
+            [found addObject:sub];
+            continue;
+        }
+        FindThreadLines(sub, row, depth + 1, found);
+    }
+}
+
+static void SetThreadLinesHidden(UITableViewCell* cell, NFBCardMemory* memory, BOOL hidden) {
+    if (hidden) {
+        NSMutableArray<UIView*>* lines = [NSMutableArray array];
+        FindThreadLines(cell.contentView, cell.contentView, 0, lines);
+        if (!memory.hiddenLines) {
+            memory.hiddenLines = [NSHashTable weakObjectsHashTable];
+        }
+        for (UIView* line in lines) {
+            if (!line.hidden) {
+                line.hidden = YES;
+                [memory.hiddenLines addObject:line];
+            }
+        }
+    } else if (memory.hiddenLines.count > 0) {
+        for (UIView* line in memory.hiddenLines.allObjects) {
+            line.hidden = NO;
+        }
+        [memory.hiddenLines removeAllObjects];
     }
 }
 
@@ -342,17 +400,96 @@ static void RemoveCard(UITableViewCell* cell, NFBCardMemory* memory) {
     cell.contentView.backgroundColor = memory.oldContentColor;
     cell.contentView.layer.sublayerTransform = CATransform3DIdentity;
     SetDividersHidden(cell, NO);
+    SetThreadLinesHidden(cell, memory, NO);
 }
+
+// MARK: Threads
+// A row belongs to a thread when X draws its conversation line (the status
+// view's conversationConnectorType is set), and X's "show more replies" row (a
+// short row without a tweet) belongs to the thread above it. Rows next to each
+// other that both belong to one are drawn as one card. Only rows on screen can
+// be asked, so a row that finds its neighbour changed asks that neighbour to
+// lay out again.
+
+typedef NS_OPTIONS(NSInteger, NFBThreadFlags) {
+    NFBThreadUp = 1 << 0,       // joined to the row above
+    NFBThreadDown = 1 << 1,     // joined to the row below
+    NFBThreadNestUp = 1 << 2,   // the row above is itself a reply (inner box goes on)
+};
+
+static NSUInteger ConnectorOf(UITableViewCell* cell) {
+    UIView* status = FindView(cell.contentView, @"T1StandardStatusView", 0);
+    SEL selector = NSSelectorFromString(@"conversationConnectorType");
+    if (!status || ![status respondsToSelector:selector]) {
+        return 0;
+    }
+    return ((NSUInteger (*)(id, SEL))objc_msgSend)(status, selector);
+}
+
+static BOOL IsShowMoreRow(UITableViewCell* cell) {
+    return CGRectGetHeight(cell.bounds) <= 64 && !FindView(cell.contentView, @"StatusView", 0);
+}
+
+static UITableViewCell* Neighbour(UITableView* table, UITableViewCell* cell, NSInteger step) {
+    NSIndexPath* path = [table indexPathForCell:cell];
+    if (!path) {
+        return nil;
+    }
+    NSInteger row = path.row + step;
+    if (row < 0 || row >= [table numberOfRowsInSection:path.section]) {
+        return nil;
+    }
+    return [table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:path.section]];
+}
+
+// In a thread: a tweet with X's line, or "show more" right under one.
+static BOOL InThread(UITableView* table, UITableViewCell* cell, int depth) {
+    if (!cell) {
+        return NO;
+    }
+    if (ConnectorOf(cell) != 0) {
+        return YES;
+    }
+    if (depth < 2 && IsShowMoreRow(cell)) {
+        UITableViewCell* above = Neighbour(table, cell, -1);
+        return above && !IsShowMoreRow(above) && ConnectorOf(above) != 0;
+    }
+    return NO;
+}
+
+static NFBThreadFlags ThreadFlags(UITableView* table, UITableViewCell* cell) {
+    if (!table || !InThread(table, cell, 0)) {
+        return 0;
+    }
+    NFBThreadFlags flags = 0;
+    UITableViewCell* above = Neighbour(table, cell, -1);
+    UITableViewCell* below = Neighbour(table, cell, 1);
+    if (InThread(table, above, 1)) {
+        flags |= NFBThreadUp;
+        UITableViewCell* twoUp = Neighbour(table, above, -1);
+        if (InThread(table, twoUp, 1)) {
+            flags |= NFBThreadNestUp;
+        }
+    }
+    if (InThread(table, below, 1)) {
+        flags |= NFBThreadDown;
+    }
+    return flags;
+}
+
+// MARK: Putting a card on a row
 
 static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
-    BOOL want = ((kind == NFBListHome && gCardsOn) || (kind == NFBListNotifications && gNoteCardsOn)) &&
-                CGRectGetHeight(cell.bounds) >= 36 && CGRectGetWidth(cell.bounds) > 120;
+    UITableView* table = TableOf(cell);
+    BOOL listOn = CardsOnFor(kind);
+    NFBThreadFlags flags = (listOn && kind == NFBListHome) ? ThreadFlags(table, cell) : 0;
+    BOOL want = listOn && CGRectGetWidth(cell.bounds) > 120 &&
+                (CGRectGetHeight(cell.bounds) >= 36 || (flags & NFBThreadUp));
     if (!want) {
         RemoveCard(cell, memory);
-        BOOL listOn = (kind == NFBListHome && gCardsOn) || (kind == NFBListNotifications && gNoteCardsOn);
         if (!listOn && kind != NFBListOther) {
-            SetTablePage(TableOf(cell), nil);
+            SetTablePage(table, nil);
         }
         return;
     }
@@ -361,17 +498,25 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         objc_setAssociatedObject(cell, kCardMemoryKey, memory, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (!memory.active) {
-        UITableView* table = TableOf(cell);
-        UIColor* paper = PaperColor(cell, table);
+        memory.xPaper = XPaperColor(cell, table);
         memory.oldBackgroundView = cell.backgroundView;
         memory.oldCellColor = cell.backgroundColor;
         memory.oldContentColor = cell.contentView.backgroundColor;
         if (!memory.background) {
             memory.background = [[NFBCardBackground alloc] initWithFrame:cell.bounds];
         }
-        [memory.background setPaper:paper page:PageColor(paper)];
+        memory.stamp = -1;
         memory.active = YES;
-        SetTablePage(table, memory.background.page);
+    }
+    if (memory.stamp != gStamp) {
+        memory.stamp = gStamp;
+        UIColor* paper = NFBCardPaperColor(gStyle, memory.xPaper, CurrentAccentColor());
+        UIColor* page = NFBCardPageColor(paper);
+        [memory.background setPaper:paper page:page];
+        NSNumber* tableStamp = objc_getAssociatedObject(table, kTablePageStampKey);
+        if (tableStamp.integerValue != gStamp || !tableStamp) {
+            SetTablePage(table, page);
+        }
     }
     if (cell.backgroundView != memory.background) {
         cell.backgroundView = memory.background;
@@ -391,19 +536,83 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
     } else {
         gHomeCards++;
     }
-    if (memory.background.pile != pile) {
-        memory.background.pile = pile;
-        [memory.background setNeedsLayout];
+
+    // A thread: the first tweet keeps the top of the card, the replies go in
+    // the inner box under it.
+    NFBCardBackground* background = memory.background;
+    BOOL nested = (flags & NFBThreadUp) != 0;
+    if (flags) {
+        gThreadRows++;
+    }
+    if (background.pile != pile || background.openTop != !!(flags & NFBThreadUp) ||
+        background.openBottom != !!(flags & NFBThreadDown) || background.nested != nested ||
+        background.nestOpenTop != !!(flags & NFBThreadNestUp)) {
+        background.pile = pile;
+        background.openTop = (flags & NFBThreadUp) != 0;
+        background.openBottom = (flags & NFBThreadDown) != 0;
+        background.nested = nested;
+        background.nestOpenTop = (flags & NFBThreadNestUp) != 0;
+        [background setNeedsLayout];
+    }
+    SetThreadLinesHidden(cell, memory, flags != 0);
+    if (memory.thread != flags) {
+        // The neighbours decide their own edges from this row; let them look again.
+        if ((memory.thread ^ flags) & NFBThreadUp) {
+            [Neighbour(table, cell, -1) setNeedsLayout];
+        }
+        if ((memory.thread ^ flags) & NFBThreadDown) {
+            [Neighbour(table, cell, 1) setNeedsLayout];
+        }
+        memory.thread = flags;
     }
 
-    // Draw the row's content a little smaller so it sits inside the card,
-    // leaving X's own layout untouched.
+    // Draw the row's content smaller so it sits inside the card (or inside the
+    // inner box for a reply), leaving X's own layout untouched.
     CGFloat width = CGRectGetWidth(cell.contentView.bounds);
     CGFloat height = CGRectGetHeight(cell.contentView.bounds);
-    CGFloat scale = MAX(0.85, (width - (kCardSide + kCardInner) * 2) / width);
-    CATransform3D transform = CATransform3DMakeScale(scale, scale, 1);
-    if (height > 0) {
-        cell.contentView.layer.sublayerTransform = transform;
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    CATransform3D transform;
+    if (nested) {
+        CGFloat left = kCardSide + kNestIndent;
+        CGFloat right = width - kCardSide - 8;
+        CGFloat scale = MAX(0.7, (right - left - 4) / width);
+        CGFloat shift = (left + right) / 2 - width / 2;
+        transform = CATransform3DScale(CATransform3DMakeTranslation(shift, 0, 0), scale, scale, 1);
+    } else {
+        CGFloat scale = MAX(0.8, (width - (kCardSide + gStyle.inner) * 2) / width);
+        transform = CATransform3DMakeScale(scale, scale, 1);
+    }
+    cell.contentView.layer.sublayerTransform = transform;
+}
+
+// After a change on the settings page: every row on screen takes the new look.
+static void RefreshViews(UIView* view, int depth) {
+    if (depth > 40) {
+        return;
+    }
+    if ([view isKindOfClass:[UITableViewCell class]]) {
+        [view setNeedsLayout];
+        NFBCardMemory* memory = objc_getAssociatedObject(view, kCardMemoryKey);
+        [memory.background setNeedsLayout];
+    }
+    if ([NSStringFromClass(view.class) isEqualToString:@"T1StandardStatusView"]) {
+        [view setNeedsLayout];
+    }
+    for (UIView* sub in view.subviews) {
+        RefreshViews(sub, depth + 1);
+    }
+}
+
+static void RefreshOnScreen(void) {
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
+            continue;
+        }
+        for (UIWindow* window in ((UIWindowScene*)scene).windows) {
+            RefreshViews(window, 0);
+        }
     }
 }
 
@@ -460,9 +669,9 @@ static BOOL PressReply(UIView* button) {
     cell.contentView.transform = move;
     NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
     if (memory.active) {
-        memory.background.card.transform = move;
-        memory.background.edge1.transform = move;
-        memory.background.edge2.transform = move;
+        for (UIView* piece in memory.background.subviews) {
+            piece.transform = move;
+        }
     }
     UIView* mark = self.mark;
     CGFloat progress = MIN(1.0, -offset / kReplyPull);
@@ -677,6 +886,7 @@ static void AttachReplySwipe(UITableViewCell* cell) {
     objc_setAssociatedObject(cell, kReplySwipeKey, swipe, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+
 // MARK: Hooks
 
 %hook UITableViewCell
@@ -698,14 +908,12 @@ static void AttachReplySwipe(UITableViewCell* cell) {
 
 static const void* kDimmedKey = &kDimmedKey;
 
-// With bigger text the avatar and the name line grow a little too, so the name
-// still stands out from the (bigger) tweet text. X's layout is left as it is:
-// the views are scaled after X has placed them. The avatar grows toward the
-// left margin and down (its top right corner stays put, keeping its distance
-// to the name); the name line grows from its left middle. Before X lays the
-// row out again the scale is taken off, so X never sets a frame on a scaled view.
-static const CGFloat kAvatarScale = 1.12;
-static const CGFloat kAuthorScale = 1.08;
+// The avatar and the name line can be drawn larger (chosen on the settings
+// page). X's layout is left as it is: the views are scaled after X has placed
+// them. The avatar grows toward the left margin and down (its top right corner
+// stays put, keeping its distance to the name); the name line grows from its
+// left middle. Before X lays the row out again the scale is taken off, so X
+// never sets a frame on a scaled view.
 static const void* kScaledKey = &kScaledKey;
 
 static void ScaleFrom(UIView* view, CGFloat scale, CGPoint anchor) {
@@ -738,14 +946,15 @@ static void Unscale(UIView* view) {
     Unscale(author);
     %orig;
     // Quoted tweets and other kinds keep X's sizes.
-    if (gBiggerOn && plain) {
-        avatar = [status visibleAvatarView];
-        author = [status visibleAuthorView];
-        if (CGRectGetWidth(avatar.bounds) > 20 && CGRectGetWidth(avatar.bounds) < 80) {
-            ScaleFrom(avatar, kAvatarScale, CGPointMake(1, 0));
+    if (plain) {
+        avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
+        author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
+        if (fabs(gStyle.avatarScale - 1) > 0.005 && CGRectGetWidth(avatar.bounds) > 20 &&
+            CGRectGetWidth(avatar.bounds) < 80) {
+            ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
         }
-        if (CGRectGetWidth(author.bounds) > 40) {
-            ScaleFrom(author, kAuthorScale, CGPointMake(0, 0.5));
+        if (fabs(gStyle.nameScale - 1) > 0.005 && CGRectGetWidth(author.bounds) > 40) {
+            ScaleFrom(author, gStyle.nameScale, CGPointMake(0, 0.5));
         }
     }
     UIView* actions = [self respondsToSelector:@selector(visibleInlineActionsView)]
@@ -770,11 +979,100 @@ static void Unscale(UIView* view) {
 %hook XFontCatalog
 
 + (UIFont*)contentFontWithOffset:(CGFloat)offset weight:(NSInteger)weight {
-    if (!gBiggerOn) {
+    if (fabs(gStyle.bodyStep) < 0.05) {
         return %orig;
     }
     gFontCalls++;
-    return %orig(offset + kBiggerTextStep, weight);
+    return %orig(offset + gStyle.bodyStep, weight);
+}
+
+%end
+
+// MARK: The pull to refresh pill
+// In a list with cards, X's refresh spinner (or the paws that stand in for it
+// on the home timeline) sits on a small card-coloured pill instead of floating
+// over the page. The pill fades in as the list is pulled.
+
+@interface TFNPullToRefreshControl : UIView
+@end
+
+static const NSInteger kPillTag = 0x4E465050;
+
+static UIActivityIndicatorView* FindSpinner(UIView* view, int depth) {
+    if (depth > 6) {
+        return nil;
+    }
+    for (UIView* sub in view.subviews) {
+        if ([sub isKindOfClass:[UIActivityIndicatorView class]]) {
+            return (UIActivityIndicatorView*)sub;
+        }
+        UIActivityIndicatorView* found = FindSpinner(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void LayoutPill(UIView* control) {
+    UIView* pill = [control viewWithTag:kPillTag];
+    UITableView* table = TableOf(control);
+    NFBListKind kind = ListKind(table);
+    UIActivityIndicatorView* spinner = FindSpinner(control, 0);
+    if (!CardsOnFor(kind) || !spinner) {
+        pill.hidden = YES;
+        return;
+    }
+    if (![pill isKindOfClass:[NFBCardView class]]) {
+        [pill removeFromSuperview];
+        pill = [NFBCardView new];
+        pill.tag = kPillTag;
+        [control insertSubview:pill atIndex:0];
+        gPills++;
+    }
+    NFBCardView* card = (NFBCardView*)pill;
+    card.hidden = NO;
+    // The control's own background would show as a block above the first card.
+    if (control.backgroundColor && control.backgroundColor != [UIColor clearColor]) {
+        control.backgroundColor = [UIColor clearColor];
+    }
+    NFBCardStyle style = gStyle;
+    card.style = style;
+    // Room for the paws (84 x 36) when they run, else for the spinner alone.
+    BOOL paws = NO;
+    for (UIView* sub in spinner.subviews) {
+        if (CGRectGetWidth(sub.bounds) > 60) {
+            paws = YES;
+        }
+    }
+    CGSize size = paws ? CGSizeMake(104, 46) : CGSizeMake(56, 36);
+    card.radiusOverride = size.height / 2;
+    UIColor* xPaper = objc_getAssociatedObject(table, kOldTableColorKey) ?: [UIColor systemBackgroundColor];
+    card.backgroundColor = NFBCardPaperColor(style, xPaper, CurrentAccentColor());
+    CGPoint center = [spinner.superview convertPoint:spinner.center toView:control];
+    card.bounds = CGRectMake(0, 0, size.width, size.height);
+    card.center = center;
+    // Fade in with the pull: fully there once the control shows the whole pill.
+    CGFloat shown = CGRectGetMaxY(control.bounds) - (center.y - size.height / 2);
+    card.alpha = MAX(0, MIN(1, shown / size.height));
+    if (spinner.isAnimating) {
+        card.alpha = 1;
+    }
+    [control sendSubviewToBack:card];
+}
+
+%hook TFNPullToRefreshControl
+
+- (void)layoutSubviews {
+    %orig;
+    LayoutPill(self);
+}
+
+- (void)setFrame:(CGRect)frame {
+    %orig;
+    if ([self viewWithTag:kPillTag] || gCardsOn || gNoteCardsOn) {
+        LayoutPill(self);
+    }
 }
 
 %end
@@ -786,7 +1084,8 @@ static void Unscale(UIView* view) {
     // Never the main queue here (7.3.86 hung on the splash screen, as 7.3.79 did):
     // X changes defaults from background threads during launch while the main
     // thread waits on them, and a main-queue observer makes that thread wait for
-    // the main thread in turn. Reading four switches is safe on any thread.
+    // the main thread in turn. Reading the switches is safe on any thread; a
+    // change hops to the main thread on its own.
     [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification
                                                       object:nil
                                                        queue:nil

@@ -505,9 +505,9 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_bigger_text",
-                        @"default": @NO,
-                        @"type": @"toggle"
+                        @"titleKey": @"KEMO_CARD_STYLE_TITLE",
+                        @"action": @"openCardStyle:",
+                        @"type": @"button"
                     }
                 ]
             },

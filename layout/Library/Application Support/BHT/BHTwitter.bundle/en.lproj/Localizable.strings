@@ -591,3 +591,27 @@
 "KEMO_DIM_ACTIONS_DETAIL" = "Fades the reply, repost, like and view counts so the text is read first.";
 "KEMO_BIGGER_TEXT_TITLE" = "Slightly bigger tweet text";
 "KEMO_BIGGER_TEXT_DETAIL" = "Makes tweet text a little larger, with a slightly bigger avatar and name line so the name still stands out. Reopen the app for it to apply to every tweet.";
+
+/* Cards and text (7.3.90) */
+"KEMO_CARD_STYLE_TITLE" = "Cards and text";
+"KEMO_CARD_SECTION_CARD" = "Cards";
+"KEMO_CARD_SECTION_TEXT" = "Text and avatars";
+"KEMO_CARD_LOOK_OUTLINED" = "Outlined";
+"KEMO_CARD_LOOK_FLOATING" = "Floating";
+"KEMO_CARD_RADIUS" = "Corner radius";
+"KEMO_CARD_GAP" = "Gap between cards";
+"KEMO_CARD_INNER" = "Room inside cards";
+"KEMO_CARD_PAPER" = "Card colour";
+"KEMO_CARD_PAPER_DEFAULT" = "Default";
+"KEMO_CARD_PAPER_GRAY" = "Grey";
+"KEMO_CARD_PAPER_WARM" = "Warm";
+"KEMO_CARD_PAPER_TINT" = "Theme";
+"KEMO_CARD_PAPER_CUSTOM" = "Custom";
+"KEMO_CARD_BODY" = "Tweet text size";
+"KEMO_CARD_NAME" = "Name and handle size";
+"KEMO_CARD_AVATAR" = "Avatar size";
+"KEMO_CARD_BODY_NOTE" = "Tweet text size applies to every tweet after reopening the app. Everything else changes at once.";
+"KEMO_CARD_RESET" = "Reset to defaults";
+"KEMO_CARD_PREVIEW_BODY1" = "This preview changes as you adjust the cards.";
+"KEMO_CARD_PREVIEW_BODY2" = "Tweets in a thread share one card.";
+"KEMO_CARD_PREVIEW_BODY3" = "Replies sit in the inner box.";

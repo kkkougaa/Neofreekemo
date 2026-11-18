@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.96",
+      "subtitle": "NeoFreeBird version 7.3.97",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.97",
+          "buildVersion": "97",
+          "date": "2026-11-18T10:29:31Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.97/NeoFreeBird-Twitter-sideloaded_7.3.97_12.44.ipa",
+          "size": 270885858,
+          "minOSVersion": "15.0",
+          "localizedDescription": "카드 여백을 X 레이아웃에 직접 넣어 위아래 여백 통일. 이름·아이디·시간 순서와 높이 고침. 스레드 선 정렬, 답글은 X가 들여 배치. 돌아올 때 사각형 깜빡임 수정. 작은 사진 오른쪽 정렬, 세로 동영상도 작게. 다크모드 카드 색. 새로고침은 X 기본으로 복구(알약 제거). 카드·글자 꾸미기를 kemo 설정 첫 화면으로, 미리보기는 실제 타임라인."
+        },
         {
           "version": "7.3.96",
           "buildVersion": "96",

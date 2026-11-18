@@ -33,6 +33,8 @@ static const void* kLayoutModeKey = &kLayoutModeKey;
 
 // Probe for the debug dump: how often each path ran, and the last view model class.
 static NSInteger gSizeCalls = 0, gSquares = 0, gStrips = 0, gCarouselCalls = 0, gCardCalls = 0, gAdaptiveOff = 0, gVertical = 0, gRightAligned = 0;
+static NSInteger gVerticalVideos = 0;
+static BOOL gVerticalVideoHooked = NO;
 static NSString* gLastViewModelClass = nil;
 // Where X lays a row out, for working out how to put the media beside the text.
 // Class pointers, not strings: these are set while rows are laid out, which can be
@@ -176,27 +178,106 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 
 %end
 
+// Tall single videos take their size from a method of their own (7.3.96
+// dump: a video row 687 high while every size call above returned a square).
+// Read from X's class list, not seen in a dump of this version, so it is only
+// hooked where it exists (see the constructor).
+%group VerticalVideo
+
+%hook T1StandardStatusAttachmentViewAdapter
+
+- (CGSize)_t1_verticalVideoViewSizeForViewModel:(id)viewModel width:(CGFloat)width anatomyFeatures:(id)anatomyFeatures {
+    CGSize size = %orig;
+    if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
+        return size;
+    }
+    gVerticalVideos++;
+    CGFloat side = MIN(kThumbSide, MIN(size.width, width));
+    return CGSizeMake(side, side);
+}
+
+%end
+
+%end
+
 // A single small photo sits at the right end of the tweet's text column
-// instead of the left. Only its x changes, inside its own container, every
-// time X lays the container out.
+// instead of the left.
+//
+// 7.3.95 moved the photo view inside its container, 7.3.96 the first small
+// square found below the container: neither moved a single photo (the dump
+// only ever showed one hit, a picture inside a carousel). X sizes the
+// attachment container itself to the media, so there is nothing narrower
+// inside it to move; the container is what has to move. Its frame is set by
+// the tweet's layout, so the x is changed right where the frame is set: the
+// container never sits at the left first.
 @interface T1StatusViewAttachmentContainerView : UIView
 @property (readonly, nonatomic) UIView* photoVideoView;
 @property (readonly, nonatomic) UIView* attachmentView;
 @end
 
 static NSString* gRightLog = @"-";
+static NSInteger gRightContainers = 0;
 
-// The small square: the first view, looking down from the container, that is
-// square, thumbnail sized and narrower than its parent. 7.3.95 only looked at
-// the photo view itself, which turned out not to be the square (right=0).
+static BOOL NFBIsThumb(CGSize size) {
+    return size.width >= 40 && size.width <= kThumbSide + 1 && fabs(size.width - size.height) <= 1.5;
+}
+
+// The right edge of the tweet's text column, in `host` coordinates: the right
+// end of the name line of the tweet the container belongs to. 0 if unknown.
+static CGFloat NFBColumnRight(UIView* host) {
+    SEL authorSelector = NSSelectorFromString(@"visibleAuthorView");
+    int depth = 0;
+    for (UIView* up = host; up && depth < 4; up = up.superview, depth++) {
+        if ([NSStringFromClass(up.class) containsString:@"Quoted"]) {
+            return 0;
+        }
+        if (![up respondsToSelector:authorSelector]) {
+            continue;
+        }
+        UIView* author = ((id (*)(id, SEL))objc_msgSend)(up, authorSelector);
+        if (!author || CGRectGetWidth(author.bounds) < 60 || !author.superview) {
+            return 0;
+        }
+        CGRect frame = [author.superview convertRect:author.frame toView:host];
+        return CGRectGetMaxX(frame);
+    }
+    return 0;
+}
+
+// `frame` as X wants it for the container, moved to the right end of the text
+// column when it is one small photo or video.
+static CGRect NFBRightAligned(T1StatusViewAttachmentContainerView* container, CGRect frame) {
+    UIView* host = container.superview;
+    if (!host || !NFBCompactMedia() || !NFBIsThumb(frame.size)) {
+        return frame;
+    }
+    if ([container respondsToSelector:@selector(photoVideoView)] && !container.photoVideoView) {
+        return frame; // a card, a quoted tweet, a poll
+    }
+    CGFloat right = NFBColumnRight(host);
+    CGFloat x = right - CGRectGetWidth(frame);
+    if (right <= 0 || x <= CGRectGetMinX(frame) + 0.5) {
+        return frame;
+    }
+    gRightContainers++;
+    gRightLog = [NSString stringWithFormat:@"container %@ > x %.0f (column ends %.0f) in %@", NSStringFromCGRect(frame),
+                                           x, right, NSStringFromClass(host.class)];
+    frame.origin.x = x;
+    return frame;
+}
+
+// The small square inside a container that is wider than it: the first view,
+// looking down from the container, that is square, thumbnail sized and
+// narrower than its parent.
 static UIView* SmallSquare(UIView* view, int depth) {
     if (depth > 4 || view.hidden) {
         return nil;
     }
     for (UIView* sub in view.subviews) {
         NSString* name = NSStringFromClass(sub.class);
-        // Link previews and quoted tweets keep their own layout.
-        if ([name containsString:@"Card"] || [name containsString:@"Quoted"] || [name containsString:@"Avatar"]) {
+        // Link previews, quoted tweets and the pictures of a carousel keep their own layout.
+        if ([name containsString:@"Card"] || [name containsString:@"Quoted"] || [name containsString:@"Avatar"] ||
+            [name containsString:@"Carousel"] || [sub isKindOfClass:[UIScrollView class]]) {
             continue;
         }
         CGRect frame = sub.frame;
@@ -215,24 +296,39 @@ static UIView* SmallSquare(UIView* view, int depth) {
 
 %hook T1StatusViewAttachmentContainerView
 
+- (void)setFrame:(CGRect)frame {
+    %orig(NFBRightAligned((T1StatusViewAttachmentContainerView*)self, frame));
+}
+
 - (void)layoutSubviews {
     %orig;
     if (!NFBCompactMedia()) {
         return;
     }
-    UIView* container = (UIView*)self;
+    T1StatusViewAttachmentContainerView* container = (T1StatusViewAttachmentContainerView*)self;
+    // Placed by its centre, or before it had a parent: once more.
+    CGRect frame = container.frame;
+    CGRect aligned = NFBRightAligned(container, frame);
+    if (fabs(CGRectGetMinX(aligned) - CGRectGetMinX(frame)) > 0.5) {
+        container.frame = aligned;
+        return;
+    }
+    if (NFBIsThumb(frame.size)) {
+        return;
+    }
+    // A container as wide as the column with the square inside it: every
+    // view from the square up to the container goes to the right edge of its
+    // parent, so the square ends up at the container's right edge.
     UIView* square = SmallSquare(container, 0);
     if (!square) {
         return;
     }
-    // Every view from the square up to the container goes to the right edge
-    // of its parent, so the square ends up at the container's right edge.
     for (UIView* view = square; view && view != container; view = view.superview) {
-        CGRect frame = view.frame;
-        CGFloat x = CGRectGetWidth(view.superview.bounds) - CGRectGetWidth(frame);
-        if (x > 0.5 && fabs(CGRectGetMinX(frame) - x) > 0.5 && CGRectGetWidth(frame) <= kThumbSide + 1) {
-            frame.origin.x = x;
-            view.frame = frame;
+        CGRect inner = view.frame;
+        CGFloat x = CGRectGetWidth(view.superview.bounds) - CGRectGetWidth(inner);
+        if (x > 0.5 && fabs(CGRectGetMinX(inner) - x) > 0.5 && CGRectGetWidth(inner) <= kThumbSide + 1) {
+            inner.origin.x = x;
+            view.frame = inner;
             gRightAligned++;
         }
     }
@@ -310,11 +406,14 @@ static void NFBWatchMode(void) {
 // Read by Hooks/DebugDump.x.
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
-                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld right=%ld (%@) lastViewModel=%@",
+                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld "
+                                      @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
-                                      (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gRightAligned, gRightLog, gLastViewModelClass ?: @"-"];
+                                      (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gVerticalVideos,
+                                      gVerticalVideoHooked, (long)gRightContainers, (long)gRightAligned, gRightLog,
+                                      gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.
@@ -340,6 +439,13 @@ CGFloat NFBLastMediaWidth(void) {
 // a few settings. An app update doesn't clear Caches, so remove them once, off the
 // main thread, a little after launch. 7.3.78 also drops the double-tap-to-like setting.
 %ctor {
+    %init;
+    Class adapter = objc_getClass("T1StandardStatusAttachmentViewAdapter");
+    if (adapter &&
+        class_getInstanceMethod(adapter, NSSelectorFromString(@"_t1_verticalVideoViewSizeForViewModel:width:anatomyFeatures:"))) {
+        %init(VerticalVideo);
+        gVerticalVideoHooked = YES;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         NFBWatchMode();
     });

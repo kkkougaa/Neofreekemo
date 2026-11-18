@@ -105,6 +105,7 @@ static void ApplyAlias(UIView* author) {
         alias.textColor = [[UIColor labelColor] colorWithAlphaComponent:0.55];
         alias.lineBreakMode = NSLineBreakByTruncatingTail;
         alias.userInteractionEnabled = NO;
+        alias.tag = 0x4E46414C; // Readability.x tells it from X's own labels by this
         [author addSubview:alias];
         objc_setAssociatedObject(author, kAliasLabelKey, alias, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -141,11 +142,23 @@ static void ApplyAlias(UIView* author) {
     objc_setAssociatedObject(author, kDeltaKey, @(delta), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+// Readability.x: with cards on, the name line's labels are placed again
+// (larger name and handle, the time at the right end). Called here so the
+// order on every layout is X, then the alias, then that.
+extern void NFBArrangeNameLine(UIView* line);
+
+// The alias label of a name line, if it is showing one.
+UILabel* NFBAliasLabelOf(UIView* author) {
+    UILabel* alias = objc_getAssociatedObject(author, kAliasLabelKey);
+    return (alias && !alias.hidden && alias.text.length > 0) ? alias : nil;
+}
+
 %hook TTAStatusAuthorView
 
 - (void)layoutSubviews {
     %orig;
     ApplyAlias((UIView*)self);
+    NFBArrangeNameLine((UIView*)self);
 }
 
 %end

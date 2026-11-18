@@ -18,6 +18,8 @@
 extern void NFBNoteRefreshStarted(void);
 extern void NFBKeepPositionBegin(UIView* control);
 extern void NFBKeepPositionEnd(void);
+// Readability.x: notes what the pull looked like, for the shake dump.
+extern void NFBNotePullStatus(UIView* control, unsigned long long status);
 
 static const NSInteger kLogoDotsTag = 0x4E464C44;
 static const CGFloat kLogoViewBox = 1024.0;
@@ -230,6 +232,7 @@ static void StopLogoLoading(void) {
     BOOL wasActive = [self loading];
 
     %orig;
+    NFBNotePullStatus(self, status);
 
     if (status == 1 && !wasActive) {
         NFBNoteRefreshStarted();

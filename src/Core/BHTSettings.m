@@ -328,6 +328,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
+                        @"key": @"kemo_card_style_page",
+                        @"titleKey": @"KEMO_CARD_STYLE_TITLE",
+                        @"action": @"openCardStyle:"
+                    },
+                    @{
+                        @"type": @"compactButton",
                         @"key": @"kemo_history_page",
                         @"titleKey": @"KEMO_HISTORY_PAGE_TITLE",
                         @"action": @"openKemoHistory:"
@@ -509,11 +515,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_dim_actions",
                         @"default": @NO,
                         @"type": @"toggle"
-                    },
-                    @{
-                        @"titleKey": @"KEMO_CARD_STYLE_TITLE",
-                        @"action": @"openCardStyle:",
-                        @"type": @"button"
                     }
                 ]
             },

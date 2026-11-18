@@ -39,6 +39,7 @@ static NSString* Trim(NSString* text) {
 
 // While set, hidden and transparent views are listed too (and marked).
 static BOOL gIncludeHidden = NO;
+static BOOL gImageDetails = NO;
 
 static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* lines) {
     BOOL invisible = view.hidden || view.alpha < 0.01;
@@ -75,6 +76,12 @@ static void DumpView(UIView* view, int depth, NSMutableString* out, NSUInteger* 
         UIImage* image = ((UIImageView*)view).image;
         if (image) {
             [out appendFormat:@" image=%@", NSStringFromCGSize(image.size)];
+            if (gImageDetails) {
+                // Which picture it is: an image from an asset catalogue says its name here.
+                NSString* about = image.description;
+                [out appendFormat:@" %@ mode=%ld", about.length > 110 ? [about substringToIndex:110] : about,
+                                  (long)image.renderingMode];
+            }
         }
     } else if ([view isKindOfClass:[UITableView class]] ||
                [view isKindOfClass:[UICollectionView class]]) {
@@ -525,11 +532,12 @@ static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUIn
         return;
     }
     UIFont* font = [view respondsToSelector:@selector(font)] ? ((UILabel*)view).font : nil;
-    [out appendFormat:@"   %*s%@ %@%@%c", depth, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+    [out appendFormat:@"   %*s%@ %@%@%@%@%c", depth, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
                       [font isKindOfClass:[UIFont class]]
                           ? [NSString stringWithFormat:@" font=%@ %.1f", font.fontName, font.pointSize]
                           : @"",
-                      10];
+                      view.accessibilityIdentifier.length ? [@" id=" stringByAppendingString:view.accessibilityIdentifier] : @"",
+                      view.hidden ? @" [hidden]" : @"", 10];
     (*lines)++;
     for (UIView* sub in view.subviews) {
         DumpAuthorFonts(sub, depth + 1, out, lines);
@@ -542,8 +550,21 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
     [out appendFormat:@"== HEADER ==%c%@%c", 10, NFBBubbleDebugText(), 10];
-    // Where the list's controller takes its layout metrics from (to give the
-    // rows a side margin X lays them out within).
+    // The top navigation bar (where the logo is), hidden pieces included, with
+    // which picture each image view shows.
+    UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);
+    if (navBar) {
+        [out appendFormat:@"== NAV BAR %@ %@ ==%c", NSStringFromClass(navBar.class),
+                          NSStringFromCGRect([navBar convertRect:navBar.bounds toView:window]), 10];
+        NSUInteger navLines = kMaxLines - 70;
+        gIncludeHidden = YES;
+        gImageDetails = YES;
+        DumpView(navBar, 0, out, &navLines);
+        gIncludeHidden = NO;
+        gImageDetails = NO;
+    }
+    // What X answers when asked for the list's layout metrics (the card margin
+    // is put in there).
     UITableView* list = FindMainTable(window, 0, nil);
     UIResponder* owner = list.nextResponder;
     while (owner && ![owner isKindOfClass:[UIViewController class]]) {
@@ -551,14 +572,45 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     }
     if (owner) {
         UIViewController* controller = (UIViewController*)owner;
-        [out appendFormat:@"== LIST CONTROLLER == safe=%@ extra=%@ cellContent=%@%c",
-                          NSStringFromUIEdgeInsets(list.safeAreaInsets),
+        [out appendFormat:@"== LIST CONTROLLER == %@ safe=%@ extra=%@ cellContent=%@%c",
+                          NSStringFromClass(controller.class), NSStringFromUIEdgeInsets(list.safeAreaInsets),
                           NSStringFromUIEdgeInsets(controller.additionalSafeAreaInsets),
                           list.visibleCells.count ? NSStringFromCGRect(list.visibleCells.firstObject.contentView.frame) : @"-",
                           10];
-        for (Class cls = controller.class; cls && cls != [UIViewController class]; cls = class_getSuperclass(cls)) {
-            DumpClassInfoMatching(cls, out, @[ @"etrics", @"nset", @"argin", @"idth" ], 0);
+        SEL metricsSel = NSSelectorFromString(@"calculatedLayoutMetrics");
+        id metrics = [controller respondsToSelector:metricsSel] ? ((id (*)(id, SEL))objc_msgSend)(controller, metricsSel) : nil;
+        if (metrics) {
+            [out appendFormat:@"  metrics %@:", NSStringFromClass([metrics class])];
+            for (NSString* name in @[ @"displayAreaEdgeInsets", @"contentEdgeInsets", @"horizontalSafeAreaInsets" ]) {
+                SEL sel = NSSelectorFromString(name);
+                if ([metrics respondsToSelector:sel]) {
+                    UIEdgeInsets insets = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(metrics, sel);
+                    [out appendFormat:@" %@=%@", name, NSStringFromUIEdgeInsets(insets)];
+                }
+            }
+            for (NSString* name in @[ @"canvasWidth", @"displayAreaWidth", @"contentWidth", @"bodyWidth" ]) {
+                SEL sel = NSSelectorFromString(name);
+                if ([metrics respondsToSelector:sel]) {
+                    [out appendFormat:@" %@=%.1f", name, ((CGFloat (*)(id, SEL))objc_msgSend)(metrics, sel)];
+                }
+            }
+            for (NSString* name in @[ @"avatarOrigin", @"bodyOrigin" ]) {
+                SEL sel = NSSelectorFromString(name);
+                if ([metrics respondsToSelector:sel]) {
+                    [out appendFormat:@" %@=%@", name, NSStringFromCGPoint(((CGPoint (*)(id, SEL))objc_msgSend)(metrics, sel))];
+                }
+            }
+            [out appendFormat:@"%c", 10];
         }
+    }
+    // The first tweet's media on screen, from its container down: what would
+    // have to move for a small photo to sit at the right.
+    UIView* mediaBox = FindViewByClassParts(window, @[ @"T1StatusViewAttachmentContainerView" ]);
+    if (mediaBox) {
+        [out appendFormat:@"== MEDIA ROW == in %@ %@%c", NSStringFromClass(mediaBox.superview.class),
+                          NSStringFromCGRect(mediaBox.superview.bounds), 10];
+        NSUInteger mediaLines = kMaxLines - 22;
+        DumpView(mediaBox, 0, out, &mediaLines);
     }
     UIView* status = FindViewByClassParts(window, @[ @"T1StandardStatusView" ]);
     SEL authorSel = NSSelectorFromString(@"visibleAuthorView");
@@ -588,19 +640,6 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
                 shown++;
             }
             [queue addObjectsFromArray:view.subviews];
-        }
-    }
-    // Where X sets the width of a row's text column (for media beside the text).
-    // 7.3.87's paste stopped inside the adapter, so the layout classes go first.
-    [out appendFormat:@"== ROW LAYOUT ==%c", 10];
-    NSArray* layoutWords = @[ @"width", @"layout", @"size", @"frame", @"text", @"attach", @"media", @"column",
-                              @"inset", @"margin", @"height", @"avatar", @"author", @"name" ];
-    NSMutableArray<NSString*>* names = [NSMutableArray arrayWithArray:NFBRowLayoutClasses()];
-    [names addObject:@"T1StandardStatusAttachmentViewAdapter"];
-    for (NSString* name in names) {
-        Class cls = NSClassFromString(name);
-        if (cls) {
-            DumpClassInfoMatching(cls, out, layoutWords, 40);
         }
     }
     [out appendFormat:@"== END OF ROW PROBES ==%c", 10];
@@ -683,16 +722,6 @@ static void PerformDump(UIWindow* window) {
         }
     } else {
         [out appendFormat:@"(none)%c", 10];
-    }
-
-    // The top navigation bar (where the logo is), hidden pieces included.
-    UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);
-    if (navBar) {
-        [out appendFormat:@"== NAV BAR %@ ==%c", NSStringFromClass(navBar.class), 10];
-        NSUInteger navLines = 0;
-        gIncludeHidden = YES;
-        DumpView(navBar, 0, out, &navLines);
-        gIncludeHidden = NO;
     }
 
     // What the speech bubble has seen and decided.

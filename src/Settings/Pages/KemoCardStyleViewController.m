@@ -5,6 +5,7 @@
 
 #import "Settings/Pages/KemoCardStyleViewController.h"
 #import "Core/BHTBundle.h"
+#import "Core/BHTSettings.h"
 #import "Core/NFBCardStyle.h"
 
 extern UIColor* CurrentAccentColor(void);
@@ -14,17 +15,320 @@ static NSString* L(NSString* key) {
 }
 
 // MARK: - Preview
-// A few made-up rows drawn with the same card view and the same numbers as the
-// timeline: a tweet, and a thread (first tweet, then a reply in the inner box).
+// A piece of the timeline, laid out the way the timeline lays its rows out
+// now (X's own row layout inside the card margin, nothing drawn smaller): the
+// tweets that were on screen in the home timeline when the page opened, with
+// their own names, text, pictures and threads. Until 7.3.96 this was three
+// made-up rows drawn smaller into their cards, which is not how the timeline
+// looks. Where the timeline has nothing to show (cards off, or the app was
+// opened straight into settings), a made-up tweet and thread stand in.
 
-@interface NFBCardPreviewRow : NSObject
-@property (nonatomic, strong) UIView* avatar;
-@property (nonatomic, strong) UILabel* name;
-@property (nonatomic, strong) UILabel* body;
-@property (nonatomic, strong) UILabel* actions;
+// Readability.x: the tweets on screen in the home timeline. Each is a
+// dictionary: name, handle, time, body, context (strings), avatar, media
+// (UIImage), connector (X's thread connector: 1 = up, 2 = down).
+extern NSArray<NSDictionary*>* NFBTimelineSamples(void);
+
+static const CGFloat kPreviewSide = 8;    // page colour beside a card (kCardSide in Readability.x)
+static const CGFloat kPreviewPad = 9;     // X's own margin inside a row
+static const CGFloat kPreviewAvatar = 38; // X's avatar
+static const CGFloat kPreviewColumnGap = 8;
+static const CGFloat kPreviewThumb = 92;  // a small photo (CompactMedia.x)
+
+@interface NFBPreviewRow : UIView
+@property (nonatomic, copy) NSDictionary* sample;
+@property (nonatomic, assign) NFBCardStyle style;
+@property (nonatomic, assign) BOOL up;      // joined to the row above: a reply in a thread card
+@property (nonatomic, assign) BOOL down;    // joined to the row below
+@property (nonatomic, assign) BOOL nestUp;  // the row above is a reply too
+@property (nonatomic, assign) BOOL compact; // small media
+@property (nonatomic, assign) BOOL dim;     // faded action row
+- (CGFloat)layoutForWidth:(CGFloat)width;
 @end
 
-@implementation NFBCardPreviewRow
+@implementation NFBPreviewRow {
+    NFBCardView* _card;
+    NFBCardView* _nest;
+    CAShapeLayer* _line;
+    UIImageView* _contextIcon;
+    UILabel* _contextLabel;
+    UIImageView* _avatar;
+    UILabel* _avatarLetter;
+    UILabel* _name;
+    UILabel* _handle;
+    UILabel* _time;
+    UIImageView* _more;
+    UILabel* _body;
+    UIImageView* _media;
+    NSArray<UIImageView*>* _actionIcons;
+    NSArray<UILabel*>* _actionCounts;
+}
+
+- (UIImageView*)symbol:(NSString*)name size:(CGFloat)size {
+    UIImageSymbolConfiguration* config = [UIImageSymbolConfiguration configurationWithPointSize:size
+                                                                                         weight:UIImageSymbolWeightRegular];
+    UIImageView* view = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:name withConfiguration:config]];
+    view.contentMode = UIViewContentModeCenter;
+    view.tintColor = [UIColor secondaryLabelColor];
+    return view;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.backgroundColor = [UIColor clearColor];
+        _card = [NFBCardView new];
+        _nest = [NFBCardView new];
+        _nest.plain = YES;
+        [self addSubview:_card];
+        [self addSubview:_nest];
+        _line = [CAShapeLayer layer];
+        _line.fillColor = nil;
+        _line.lineWidth = 2;
+        _line.lineCap = kCALineCapRound;
+        _line.actions = @{@"path" : [NSNull null], @"strokeColor" : [NSNull null]};
+        [self.layer addSublayer:_line];
+
+        _contextIcon = [self symbol:@"arrow.2.squarepath" size:11];
+        _contextLabel = [UILabel new];
+        _contextLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _contextLabel.textColor = [UIColor secondaryLabelColor];
+        _avatar = [UIImageView new];
+        _avatar.contentMode = UIViewContentModeScaleAspectFill;
+        _avatar.clipsToBounds = YES;
+        _avatarLetter = [UILabel new];
+        _avatarLetter.textAlignment = NSTextAlignmentCenter;
+        _avatarLetter.textColor = [UIColor whiteColor];
+        [_avatar addSubview:_avatarLetter];
+        _name = [UILabel new];
+        _name.textColor = [UIColor labelColor];
+        _handle = [UILabel new];
+        _handle.textColor = [UIColor secondaryLabelColor];
+        _handle.lineBreakMode = NSLineBreakByTruncatingTail;
+        _time = [UILabel new];
+        _time.textColor = [UIColor secondaryLabelColor];
+        _more = [self symbol:@"ellipsis" size:13];
+        _body = [UILabel new];
+        _body.numberOfLines = 0;
+        _body.textColor = [UIColor labelColor];
+        _media = [UIImageView new];
+        _media.contentMode = UIViewContentModeScaleAspectFill;
+        _media.clipsToBounds = YES;
+        _media.layer.cornerCurve = kCACornerCurveContinuous;
+        for (UIView* view in @[ _contextIcon, _contextLabel, _avatar, _name, _handle, _time, _more, _body, _media ]) {
+            [self addSubview:view];
+        }
+        NSMutableArray<UIImageView*>* icons = [NSMutableArray array];
+        NSMutableArray<UILabel*>* counts = [NSMutableArray array];
+        NSArray<NSString*>* names = @[ @"bubble.left", @"arrow.2.squarepath", @"heart", @"chart.bar" ];
+        NSArray<NSString*>* numbers = @[ @"3", @"12", @"48", @"1,204" ];
+        for (NSUInteger i = 0; i < names.count; i++) {
+            UIImageView* icon = [self symbol:names[i] size:13];
+            UILabel* count = [UILabel new];
+            count.text = numbers[i];
+            count.font = [UIFont systemFontOfSize:12];
+            count.textColor = [UIColor secondaryLabelColor];
+            [self addSubview:icon];
+            [self addSubview:count];
+            [icons addObject:icon];
+            [counts addObject:count];
+        }
+        _actionIcons = icons;
+        _actionCounts = counts;
+    }
+    return self;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection*)previous {
+    [super traitCollectionDidChange:previous];
+    [self.superview.superview setNeedsLayout];
+}
+
+- (CGFloat)layoutForWidth:(CGFloat)width {
+    NFBCardStyle style = self.style;
+    NSDictionary* sample = self.sample;
+    CGFloat margin = kPreviewSide + style.inner;
+    CGFloat drawnAvatar = kPreviewAvatar * style.avatarScale;
+    // The thread line runs under a first tweet's reply icon; a reply sits
+    // further in, with its avatar on that line.
+    CGFloat lineX = margin + kPreviewPad + kPreviewAvatar + kPreviewColumnGap + 10;
+    CGFloat indent = self.up ? lineX - (margin + kPreviewPad + kPreviewAvatar - drawnAvatar / 2) : 0;
+    CGFloat left = margin + indent, right = width - margin;
+    CGFloat avatarRight = left + kPreviewPad + kPreviewAvatar;
+    CGFloat columnX = avatarRight + kPreviewColumnGap, columnRight = right - kPreviewPad;
+    CGFloat columnWidth = MAX(40, columnRight - columnX);
+    CGFloat y = 12;
+
+    // "... reposted" above the tweet.
+    NSString* context = [sample[@"context"] isKindOfClass:[NSString class]] ? sample[@"context"] : nil;
+    BOOL hasContext = context.length > 0;
+    _contextIcon.hidden = !hasContext;
+    _contextLabel.hidden = !hasContext;
+    if (hasContext) {
+        _contextLabel.text = context;
+        _contextIcon.frame = CGRectMake(columnX - 20, y, 14, 14);
+        _contextLabel.frame = CGRectMake(columnX, y - 1, columnWidth, 16);
+        y += 19;
+    }
+
+    // The avatar grows from its top right corner, as in the timeline.
+    _avatar.frame = CGRectMake(avatarRight - drawnAvatar, y, drawnAvatar, drawnAvatar);
+    _avatar.layer.cornerRadius = drawnAvatar / 2;
+    UIImage* face = [sample[@"avatar"] isKindOfClass:[UIImage class]] ? sample[@"avatar"] : nil;
+    NSString* nameText = [sample[@"name"] isKindOfClass:[NSString class]] ? sample[@"name"] : @"";
+    _avatar.image = face;
+    _avatarLetter.hidden = face != nil;
+    if (!face) {
+        NSUInteger hue = nameText.hash % 12;
+        _avatar.backgroundColor = [UIColor colorWithHue:hue / 12.0 saturation:0.35 brightness:0.72 alpha:1];
+        _avatarLetter.text = nameText.length > 0
+                                 ? [nameText substringWithRange:[nameText rangeOfComposedCharacterSequenceAtIndex:0]]
+                                 : @"";
+        _avatarLetter.font = [UIFont systemFontOfSize:drawnAvatar * 0.42 weight:UIFontWeightSemibold];
+        _avatarLetter.frame = CGRectMake(0, 0, drawnAvatar, drawnAvatar);
+    }
+
+    // The name line: name and handle larger by the chosen size, the time a
+    // little smaller at the right end just left of "...", all on one
+    // baseline, moved up by the chosen gap. A reply leaves its time out.
+    const CGFloat lineBox = 16;
+    _name.font = [UIFont systemFontOfSize:14 * style.nameScale weight:UIFontWeightSemibold];
+    _handle.font = [UIFont systemFontOfSize:14 * style.nameScale];
+    _time.font = [UIFont systemFontOfSize:14 * 0.9];
+    _name.text = nameText;
+    _handle.text = [sample[@"handle"] isKindOfClass:[NSString class]] ? sample[@"handle"] : @"";
+    _time.text = [sample[@"time"] isKindOfClass:[NSString class]] ? sample[@"time"] : @"";
+    _more.frame = CGRectMake(columnRight - 18, y - 1, 18, 18);
+    CGFloat pixel = 1.0 / MAX(1.0, UIScreen.mainScreen.scale);
+    CGFloat nameHeight = ceil(_name.font.lineHeight);
+    CGFloat nameTop = y + round((lineBox - nameHeight) / 2) - style.nameGap;
+    CGFloat baseline = nameTop + (nameHeight - _name.font.lineHeight) / 2 + _name.font.ascender;
+    CGFloat (^topOf)(UILabel*) = ^CGFloat(UILabel* label) {
+        CGFloat labelHeight = ceil(label.font.lineHeight);
+        CGFloat labelTop = baseline - label.font.ascender - (labelHeight - label.font.lineHeight) / 2;
+        return round(labelTop / pixel) * pixel;
+    };
+    CGFloat (^fit)(UILabel*) = ^CGFloat(UILabel* label) {
+        return ceil([label sizeThatFits:CGSizeMake(CGFLOAT_MAX, lineBox)].width);
+    };
+    CGFloat limit = CGRectGetMinX(_more.frame);
+    CGFloat end = limit - 6;
+    _time.hidden = self.up || _time.text.length == 0;
+    if (!_time.hidden) {
+        CGFloat timeWidth = fit(_time);
+        _time.frame = CGRectMake(limit - 6 - timeWidth, topOf(_time), timeWidth, ceil(_time.font.lineHeight));
+        end = CGRectGetMinX(_time.frame) - 8;
+    }
+    CGFloat nameWidth = fit(_name), handleWidth = _handle.text.length > 0 ? fit(_handle) : 0;
+    CGFloat room = end - columnX - 4 - handleWidth;
+    if (room < nameWidth && handleWidth > 44) {
+        handleWidth = MAX(44, handleWidth - (nameWidth - room));
+        room = end - columnX - 4 - handleWidth;
+    }
+    if (room < MIN(nameWidth, 36)) {
+        handleWidth = MAX(0, handleWidth - (MIN(nameWidth, 36) - room));
+        room = end - columnX - 4 - handleWidth;
+    }
+    CGFloat shownName = MAX(0, MIN(nameWidth, room));
+    _name.lineBreakMode = shownName < nameWidth - 0.5 ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
+    _name.frame = CGRectMake(columnX, nameTop, shownName, nameHeight);
+    _handle.frame = CGRectMake(CGRectGetMaxX(_name.frame) + 4, topOf(_handle), handleWidth, ceil(_handle.font.lineHeight));
+    _handle.hidden = handleWidth < 8;
+    y += lineBox + 3;
+
+    // The tweet's text.
+    _body.font = [UIFont systemFontOfSize:15 + style.bodyStep];
+    NSString* bodyText = [sample[@"body"] isKindOfClass:[NSString class]] ? sample[@"body"] : @"";
+    _body.text = bodyText;
+    _body.hidden = bodyText.length == 0;
+    if (!_body.hidden) {
+        CGFloat bodyHeight = ceil([_body sizeThatFits:CGSizeMake(columnWidth, CGFLOAT_MAX)].height);
+        _body.frame = CGRectMake(columnX, y, columnWidth, bodyHeight);
+        y += bodyHeight;
+    }
+
+    // Its picture: a small square at the right end of the text column with
+    // small media on, else as wide as the column.
+    UIImage* picture = [sample[@"media"] isKindOfClass:[UIImage class]] ? sample[@"media"] : nil;
+    _media.hidden = picture == nil;
+    if (picture) {
+        y += 8;
+        _media.image = picture;
+        if (self.compact) {
+            CGFloat side = MIN(kPreviewThumb, columnWidth);
+            _media.frame = CGRectMake(columnRight - side, y, side, side);
+            _media.layer.cornerRadius = 12;
+            y += side;
+        } else {
+            CGFloat ratio = picture.size.width > 0 ? picture.size.height / picture.size.width : 0.5625;
+            CGFloat mediaHeight = round(columnWidth * MAX(0.4, MIN(1.25, ratio)));
+            _media.frame = CGRectMake(columnX, y, columnWidth, mediaHeight);
+            _media.layer.cornerRadius = 14;
+            y += mediaHeight;
+        }
+    }
+
+    // Reply, repost, like, views.
+    y += 10;
+    CGFloat step = columnWidth / _actionIcons.count;
+    for (NSUInteger i = 0; i < _actionIcons.count; i++) {
+        UIImageView* icon = _actionIcons[i];
+        UILabel* count = _actionCounts[i];
+        icon.frame = CGRectMake(columnX + step * i, y, 20, 18);
+        CGFloat countWidth = ceil([count sizeThatFits:CGSizeMake(CGFLOAT_MAX, 18)].width);
+        count.frame = CGRectMake(CGRectGetMaxX(icon.frame) + 3, y, MIN(countWidth, step - 26), 18);
+        icon.alpha = self.dim ? 0.45 : 1;
+        count.alpha = self.dim ? 0.45 : 1;
+    }
+    CGRect replyIcon = _actionIcons.firstObject.frame;
+    y += 18 + 10;
+    CGFloat height = MAX(y, CGRectGetMaxY(_avatar.frame) + 10);
+
+    // The card (Readability.x's NFBCardBackground): as wide as the row, with
+    // half the gap above and below unless joined to the next row.
+    CGFloat half = style.gap / 2;
+    CGFloat cardTop = self.up ? 0 : half;
+    CGFloat cardBottom = self.down ? height : height - half;
+    UIColor* paper = NFBCardPaperColor(style, [UIColor systemBackgroundColor], CurrentAccentColor());
+    UIColor* page = NFBCardPageColor(paper);
+    _card.style = style;
+    _card.backgroundColor = paper;
+    _card.openTop = self.up;
+    _card.openBottom = self.down;
+    _card.frame = CGRectMake(kPreviewSide, cardTop, width - kPreviewSide * 2, MAX(0, cardBottom - cardTop));
+    _nest.hidden = !self.up;
+    if (self.up) {
+        CGFloat nestLeft = lineX - drawnAvatar / 2 - 8;
+        CGFloat nestRight = width - kPreviewSide - 8;
+        CGFloat nestTop = self.nestUp ? 0 : cardTop + 2;
+        CGFloat nestBottom = self.down ? height : cardBottom - 8;
+        _nest.style = style;
+        _nest.backgroundColor = NFBCardBlend(paper, page, 0.55);
+        _nest.radiusOverride = MAX(4, MIN(14, style.radius * 0.75));
+        _nest.openTop = self.nestUp;
+        _nest.openBottom = self.down;
+        _nest.frame = CGRectMake(nestLeft, nestTop, MAX(0, nestRight - nestLeft), MAX(0, nestBottom - nestTop));
+    }
+
+    // The reply line.
+    UIBezierPath* path = [UIBezierPath bezierPath];
+    if (self.up) {
+        [path moveToPoint:CGPointMake(lineX, 0)];
+        [path addLineToPoint:CGPointMake(lineX, MAX(0, CGRectGetMinY(_avatar.frame) - 3))];
+        if (self.down) {
+            [path moveToPoint:CGPointMake(lineX, CGRectGetMaxY(_avatar.frame) + 3)];
+            [path addLineToPoint:CGPointMake(lineX, height)];
+        }
+    } else if (self.down) {
+        [path moveToPoint:CGPointMake(lineX, CGRectGetMaxY(replyIcon) + 3)];
+        [path addLineToPoint:CGPointMake(lineX, height)];
+    }
+    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    _line.frame = CGRectMake(0, 0, width, height);
+    _line.strokeColor = (dark ? [UIColor colorWithRed:0.20 green:0.21 blue:0.22 alpha:1]
+                              : [UIColor colorWithRed:0.81 green:0.85 blue:0.87 alpha:1]).CGColor;
+    _line.path = (self.up || self.down) ? path.CGPath : nil;
+    return height;
+}
+
 @end
 
 @interface NFBCardPreview : UIView
@@ -32,56 +336,82 @@ static NSString* L(NSString* key) {
 @end
 
 @implementation NFBCardPreview {
-    NFBCardView* _first;
-    NFBCardView* _thread;
-    UIView* _nest;
-    CAShapeLayer* _line;
-    NSArray<NFBCardPreviewRow*>* _rows;
+    UIScrollView* _scroll;
+    NSMutableArray<NFBPreviewRow*>* _rows;
 }
 
-- (NFBCardPreviewRow*)rowWithName:(NSString*)name handle:(NSString*)handle body:(NSString*)body color:(UIColor*)color {
-    NFBCardPreviewRow* row = [NFBCardPreviewRow new];
-    row.avatar = [UIView new];
-    row.avatar.backgroundColor = color;
-    row.name = [UILabel new];
-    NSMutableAttributedString* text = [[NSMutableAttributedString alloc] initWithString:name];
-    [text appendAttributedString:[[NSAttributedString alloc] initWithString:[@" " stringByAppendingString:handle]]];
-    row.name.attributedText = text;
-    row.name.lineBreakMode = NSLineBreakByTruncatingTail;
-    row.body = [UILabel new];
-    row.body.text = body;
-    row.body.numberOfLines = 2;
-    row.actions = [UILabel new];
-    row.actions.text = @"💬 3      🔁 1      ♡ 12      📊 131";
-    row.actions.textColor = [UIColor secondaryLabelColor];
-    for (UIView* view in @[ row.avatar, row.name, row.body, row.actions ]) {
-        [self addSubview:view];
-    }
-    return row;
+// Stand-ins for when the timeline has nothing on screen.
++ (NSArray<NSDictionary*>*)madeUpSamples {
+    return @[
+        @{
+            @"name" : @"フェムト",
+            @"handle" : @"@femt_1240",
+            @"time" : @"8분",
+            @"body" : L(@"KEMO_CARD_PREVIEW_BODY1"),
+            @"connector" : @0
+        },
+        @{
+            @"name" : @"きたしろ",
+            @"handle" : @"@NW_1838",
+            @"time" : @"19시",
+            @"body" : L(@"KEMO_CARD_PREVIEW_BODY2"),
+            @"connector" : @2
+        },
+        @{
+            @"name" : @"ねこ",
+            @"handle" : @"@neko",
+            @"time" : @"18시",
+            @"body" : L(@"KEMO_CARD_PREVIEW_BODY3"),
+            @"connector" : @1
+        },
+    ];
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.clipsToBounds = YES;
-        _first = [NFBCardView new];
-        _thread = [NFBCardView new];
-        _nest = [UIView new];
-        _nest.layer.cornerCurve = kCACornerCurveContinuous;
-        [self addSubview:_first];
-        [self addSubview:_thread];
-        [self addSubview:_nest];
-        _line = [CAShapeLayer layer];
-        _line.fillColor = nil;
-        _line.lineWidth = 2;
-        _line.lineCap = kCALineCapRound;
-        _rows = @[
-            [self rowWithName:@"フェムト" handle:@"@femt_1240 · 8분" body:L(@"KEMO_CARD_PREVIEW_BODY1")
-                        color:[UIColor colorWithRed:0.48 green:0.56 blue:0.69 alpha:1]],
-            [self rowWithName:@"きたしろ" handle:@"@NW_1838 · 19시" body:L(@"KEMO_CARD_PREVIEW_BODY2")
-                        color:[UIColor colorWithRed:0.85 green:0.65 blue:0.42 alpha:1]],
-            [self rowWithName:@"ねこ" handle:@"@neko · 18시" body:L(@"KEMO_CARD_PREVIEW_BODY3")
-                        color:[UIColor colorWithRed:0.72 green:0.64 blue:0.79 alpha:1]],
-        ];
+        _scroll = [UIScrollView new];
+        _scroll.alwaysBounceVertical = YES;
+        _scroll.showsVerticalScrollIndicator = NO;
+        [self addSubview:_scroll];
+        _rows = [NSMutableArray array];
+
+        NSMutableArray<NSDictionary*>* samples = [NSMutableArray array];
+        BOOL hasThread = NO;
+        for (NSDictionary* sample in NFBTimelineSamples()) {
+            if (![sample isKindOfClass:[NSDictionary class]] || samples.count >= 6) {
+                continue;
+            }
+            [samples addObject:sample];
+        }
+        // A thread only counts when both ends of it were on screen.
+        for (NSUInteger i = 0; i + 1 < samples.count; i++) {
+            if (([samples[i][@"connector"] unsignedIntegerValue] & 2) &&
+                ([samples[i + 1][@"connector"] unsignedIntegerValue] & 1)) {
+                hasThread = YES;
+            }
+        }
+        NSArray<NSDictionary*>* madeUp = [NFBCardPreview madeUpSamples];
+        if (samples.count == 0) {
+            [samples addObjectsFromArray:madeUp];
+        } else if (!hasThread) {
+            // Always show what a thread looks like.
+            [samples addObject:madeUp[1]];
+            [samples addObject:madeUp[2]];
+        }
+        for (NSUInteger i = 0; i < samples.count; i++) {
+            NFBPreviewRow* row = [NFBPreviewRow new];
+            row.sample = samples[i];
+            NSUInteger connector = [samples[i][@"connector"] unsignedIntegerValue];
+            NSUInteger before = i > 0 ? [samples[i - 1][@"connector"] unsignedIntegerValue] : 0;
+            NSUInteger after = i + 1 < samples.count ? [samples[i + 1][@"connector"] unsignedIntegerValue] : 0;
+            // Joined only when the neighbour agrees, as in the timeline.
+            row.up = (connector & 1) && (before & 2);
+            row.down = (connector & 2) && (after & 1);
+            row.nestUp = row.up && (before & 1) && i > 1 && ([samples[i - 2][@"connector"] unsignedIntegerValue] & 2);
+            [_scroll addSubview:row];
+            [_rows addObject:row];
+        }
     }
     return self;
 }
@@ -96,105 +426,26 @@ static NSString* L(NSString* key) {
     [self setNeedsLayout];
 }
 
-// Lays one made-up row out in `box` (the row's full width, like X's row), then
-// draws it scaled into `target`, the way the timeline does. Returns its height.
-- (CGFloat)layoutRow:(NFBCardPreviewRow*)row at:(CGFloat)y width:(CGFloat)width target:(CGRect)target {
-    NFBCardStyle style = self.style;
-    CGFloat avatarSide = 40;
-    UIFont* nameFont = [UIFont systemFontOfSize:15 * style.nameScale weight:UIFontWeightBold];
-    UIFont* handleFont = [UIFont systemFontOfSize:15 * style.nameScale];
-    NSMutableAttributedString* name = [row.name.attributedText mutableCopy];
-    NSRange space = [name.string rangeOfString:@" "];
-    [name addAttributes:@{NSFontAttributeName : nameFont, NSForegroundColorAttributeName : [UIColor labelColor]}
-                  range:NSMakeRange(0, space.location)];
-    [name addAttributes:@{NSFontAttributeName : handleFont, NSForegroundColorAttributeName : [UIColor secondaryLabelColor]}
-                  range:NSMakeRange(space.location, name.length - space.location)];
-    row.name.attributedText = name;
-    row.body.font = [UIFont systemFontOfSize:15 + style.bodyStep];
-    row.actions.font = [UIFont systemFontOfSize:12];
-
-    // X's own row: 12 above, avatar at 16, text column from 68.
-    CGFloat textX = 68, textW = width - textX - 16;
-    CGFloat nameH = ceil(nameFont.lineHeight);
-    CGSize bodySize = [row.body sizeThatFits:CGSizeMake(textW, CGFLOAT_MAX)];
-    CGFloat height = 12 + nameH + 2 + bodySize.height + 8 + 18 + 10;
-
-    CGFloat scale = CGRectGetWidth(target) / width;
-    CGAffineTransform place = CGAffineTransformMakeTranslation(CGRectGetMinX(target), y + (1 - scale) * height / 2);
-    place = CGAffineTransformScale(place, scale, scale);
-    void (^put)(UIView*, CGRect) = ^(UIView* view, CGRect frame) {
-        view.transform = CGAffineTransformIdentity;
-        view.frame = frame;
-        CGPoint center = CGPointApplyAffineTransform(CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame)), place);
-        view.center = center;
-        view.transform = CGAffineTransformMakeScale(scale, scale);
-    };
-    CGFloat side = avatarSide * style.avatarScale;
-    // The avatar grows from its top right corner, as in the timeline.
-    put(row.avatar, CGRectMake(16 + avatarSide - side, 12, side, side));
-    row.avatar.layer.cornerRadius = side / 2;
-    put(row.name, CGRectMake(textX, 12 - style.nameGap, textW, nameH));
-    put(row.body, CGRectMake(textX, 12 + nameH + 2, textW, bodySize.height));
-    put(row.actions, CGRectMake(textX, 12 + nameH + 2 + bodySize.height + 8, textW, 18));
-    row.actions.alpha = 0.6;
-    return height * scale;
-}
-
 - (void)layoutSubviews {
     [super layoutSubviews];
     NFBCardStyle style = self.style;
-    UIColor* xPaper = [UIColor systemBackgroundColor];
-    UIColor* paper = NFBCardPaperColor(style, xPaper, CurrentAccentColor());
-    UIColor* page = NFBCardPageColor(paper);
-    self.backgroundColor = page;
+    UIColor* paper = NFBCardPaperColor(style, [UIColor systemBackgroundColor], CurrentAccentColor());
+    self.backgroundColor = NFBCardPageColor(paper);
+    _scroll.frame = self.bounds;
     CGFloat width = CGRectGetWidth(self.bounds);
-    CGFloat side = 8, half = style.gap / 2;
-
-    // A plain tweet card.
-    CGFloat top = 10 + half;
-    CGFloat inner = (width - (side + style.inner) * 2);
-    CGRect target = CGRectMake((width - inner) / 2, top, inner, 0);
-    CGFloat h1 = [self layoutRow:_rows[0] at:top width:width target:target];
-    CGFloat cardTop = top;
-    CGFloat cardBottom = top + h1;
-    // The card reaches as far as the row (the gap is outside it).
-    _first.style = style;
-    _first.backgroundColor = paper;
-    _first.frame = CGRectMake(side, cardTop, width - side * 2, cardBottom - cardTop);
-
-    // A thread: first tweet, then a reply in the inner box.
-    CGFloat t2 = cardBottom + style.gap;
-    CGFloat h2 = [self layoutRow:_rows[1] at:t2 width:width target:CGRectMake((width - inner) / 2, t2, inner, 0)];
-    CGFloat nestLeft = side + 46, nestRight = width - side - 8;
-    CGFloat t3 = t2 + h2;
-    CGFloat nestW = nestRight - nestLeft;
-    CGFloat h3 = [self layoutRow:_rows[2] at:t3 + 2 width:width target:CGRectMake(nestLeft + 2, t3 + 2, nestW - 4, 0)];
-    _thread.style = style;
-    _thread.backgroundColor = paper;
-    _thread.frame = CGRectMake(side, t2, width - side * 2, h2 + h3 + 14);
-    _nest.backgroundColor = NFBCardBlend(paper, page, 0.55);
-    _nest.layer.cornerRadius = MAX(4, MIN(14, style.radius * 0.75));
-    _nest.frame = CGRectMake(nestLeft, t3, nestW, h3 + 4);
-    [self bringSubviewToFront:_nest];
-    for (NFBCardPreviewRow* row in _rows) {
-        for (UIView* view in @[ row.avatar, row.name, row.body, row.actions ]) {
-            [self bringSubviewToFront:view];
-        }
+    BOOL compact = [BHTSettings boolForKey:@"kemo_compact_media"] &&
+                   ![BHTSettings boolForKey:@"disable_sensitive_tweet_warnings"];
+    BOOL dim = [BHTSettings boolForKey:@"kemo_dim_actions"];
+    CGFloat y = 6;
+    for (NFBPreviewRow* row in _rows) {
+        row.style = style;
+        row.compact = compact;
+        row.dim = dim;
+        CGFloat height = [row layoutForWidth:width];
+        row.frame = CGRectMake(0, y, width, height);
+        y += height;
     }
-    // The reply line: down from the first tweet's avatar, bending into the reply's.
-    CGRect head = _rows[1].avatar.frame, reply = _rows[2].avatar.frame;
-    CGFloat x = CGRectGetMidX(head), y = CGRectGetMidY(reply), bend = 10;
-    UIBezierPath* path = [UIBezierPath bezierPath];
-    [path moveToPoint:CGPointMake(x, CGRectGetMaxY(head) + 4)];
-    [path addLineToPoint:CGPointMake(x, y - bend)];
-    [path addQuadCurveToPoint:CGPointMake(x + bend, y) controlPoint:CGPointMake(x, y)];
-    [path addLineToPoint:CGPointMake(CGRectGetMinX(reply) - 4, y)];
-    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
-    _line.strokeColor = (dark ? [UIColor colorWithRed:0.20 green:0.21 blue:0.22 alpha:1]
-                              : [UIColor colorWithRed:0.81 green:0.85 blue:0.87 alpha:1]).CGColor;
-    _line.path = path.CGPath;
-    [_line removeFromSuperlayer];
-    [self.layer addSublayer:_line];
+    _scroll.contentSize = CGSizeMake(width, y + 6);
 }
 
 @end

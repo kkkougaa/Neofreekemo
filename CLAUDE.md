@@ -29,4 +29,8 @@
 
 - 이 환경에서는 iOS 빌드를 돌릴 수 없다. 컴파일 확인은 CI 빌드로 한다.
 - 실기기 디버깅은 앱의 흔들기 덤프(`src/Hooks/DebugDump.x`)를 사용자에게 받아서 한다.
+- X 쪽 클래스·메서드 이름은 추측하지 않는다. 복호화한 X IPA의 프레임워크 바이너리를 `docs/objc_class_dump.py`로 뽑아서 확인한다(클래스, ivar, 메서드와 타입 인코딩). 덤프에 안 찍힌 버전의 메서드는 `class_getInstanceMethod`로 있는지 본 뒤 `%group`으로 따로 `%init`한다.
+- X의 행은 `TFNTableViewCell`이고, `layoutSubviews`·`setHighlighted:animated:`·`setSelected:animated:`를 직접 구현해 `super` 호출 **뒤에** 자기 일을 한다(구분선, 강조선, 배경). `UITableViewCell`에 건 훅은 그 `super` 호출 안에서 돌아서 X가 다시 덮는다. X가 한 일을 고치려면 `TFNTableViewCell` 쪽에 건다.
+- 행은 트윗(`T1StandardStatusView`)보다 먼저 배치된다. 행의 `layoutSubviews` 시점에 트윗 안 뷰의 위치는 직전 트윗 것이다. 트윗 안 위치가 필요하면 `T1StandardStatusView`의 배치가 끝난 뒤에 계산한다.
+- 행의 여백·폭은 뷰를 옮기거나 줄여서 맞추지 않는다. X가 배치에 쓰는 `TFNLayoutMetrics`(`-[TFNDataViewController calculatedLayoutMetrics]`, 행 단위는 `+[T1StatusCell cellLayoutForViewModel:options:account:layoutMetrics:withPreviousLayout:]`)에 `layoutMetricsWith…EdgeInsets:`로 넣는다.
 - `NSUserDefaultsDidChangeNotification`을 `queue:[NSOperationQueue mainQueue]`로 받으면 실행 중 스플래시에서 멈춘다(7.3.79, 7.3.86). 항상 `queue:nil`로 받고, 필요할 때만 메인으로 넘긴다.

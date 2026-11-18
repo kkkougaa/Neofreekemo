@@ -1396,7 +1396,19 @@ NSArray* NFBFilteredTimelineSections(TFNItemsDataViewController* controller, NSA
         %orig(held, held == sections ? identifiers : @[], animation, completion);
         return;
     }
+    if ([BHTSettings boolForKey:@"kemo_local_search"] && IsHomeTimeline(self)) {
+        NFBLocalSearchAttach(self);
+    }
     %orig(FilteredTimelineSections(self, sections), identifiers, animation, completion);
+}
+
+// The list may only be set while it is not yet under the home screen, and
+// later changes may only come through updateSections; attach once it shows.
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if ([BHTSettings boolForKey:@"kemo_local_search"] && IsHomeTimeline(self)) {
+        NFBLocalSearchAttach(self);
+    }
 }
 
 %end

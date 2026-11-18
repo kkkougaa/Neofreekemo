@@ -24,6 +24,7 @@ extern NSString* NFBTimelineProbeText(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
+extern NSString* NFBLocalSearchDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -415,6 +416,7 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
     [out appendFormat:@"== COMPACT MEDIA ==%c%@%c", 10, NFBCompactMediaDebugText(), 10];
+    [out appendFormat:@"== LOCAL SEARCH ==%c%@%c", 10, NFBLocalSearchDebugText(), 10];
     [out appendFormat:@"== LAST CRASH ==%c%@%c", 10, NFBLastCrashText(), 10];
 
     // The drawer's controller: which methods it has (to see who rebuilds the menu list).

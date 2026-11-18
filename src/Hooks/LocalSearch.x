@@ -21,8 +21,19 @@
 // (NFBLocalSearchHold); the pull is watched on the table's own pan gesture.
 
 static NSString* const kSearchKey = @"kemo_local_search";
-// How far the list must be pulled past its resting top to open the bar.
-static const CGFloat kPullToSearch = 115.0;
+// How far the finger must travel down, starting with the list at its top, to
+// open the bar. Measured on the finger rather than the list's offset: the
+// list only gives way a little (rubber band), and once X starts refreshing it
+// moves its own top inset, which made the old offset check almost unreachable.
+static const CGFloat kPullToSearch = 170.0;
+
+// For the shake dump.
+static NSInteger gAttachedLists = 0;
+static NSString* gSearchLog = @"(no pull yet)";
+NSString* NFBLocalSearchDebugText(void) {
+    return [NSString stringWithFormat:@"on=%d lists=%ld last=%@", [BHTSettings boolForKey:@"kemo_local_search"],
+                                      (long)gAttachedLists, gSearchLog];
+}
 static const CGFloat kBarHeight = 44.0;
 
 extern UIColor* CurrentAccentColor(void);
@@ -296,6 +307,9 @@ static __weak NFBLocalSearchBar* gBar;
     NSArray* base = showing ? gHeld : controller.sections;
     NSUInteger found = 0, scanned = 0;
     NSArray* results = MatchingSections(base, words, &found, &scanned);
+    gSearchLog = [NSString stringWithFormat:@"search %lu words: %lu of %lu items in %lu sections",
+                                            (unsigned long)words.count, (unsigned long)found,
+                                            (unsigned long)scanned, (unsigned long)base.count];
     self.count.text = [NSString stringWithFormat:@"%lu", (unsigned long)found];
     if (found == 0) {
         // Nothing to show: leave the list as it is and say so with a shake.
@@ -403,6 +417,9 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
 @interface NFBLocalSearchPull : NSObject
 @property (nonatomic, strong) UIImageView* hint;
 @property (nonatomic, assign) BOOL armed;
+// The drag began with the list at its top; how far it has gone at most.
+@property (nonatomic, assign) BOOL fromTop;
+@property (nonatomic, assign) CGFloat farthest;
 @end
 
 @implementation NFBLocalSearchPull
@@ -434,7 +451,18 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
     if (![scroll isKindOfClass:[UIScrollView class]] || ![BHTSettings boolForKey:kSearchKey]) {
         return;
     }
-    CGFloat pull = -(scroll.contentOffset.y + scroll.adjustedContentInset.top);
+    CGFloat stretch = -(scroll.contentOffset.y + scroll.adjustedContentInset.top);
+
+    if (pan.state == UIGestureRecognizerStateBegan) {
+        self.fromTop = stretch >= -2.0;
+        self.farthest = 0;
+        return;
+    }
+    if (!self.fromTop) {
+        return;
+    }
+    CGFloat pull = MAX(0, [pan translationInView:scroll].y);
+    self.farthest = MAX(self.farthest, pull);
 
     if (pan.state == UIGestureRecognizerStateChanged) {
         CGFloat progress = (pull - kPullToSearch * 0.55) / (kPullToSearch * 0.45);
@@ -459,7 +487,8 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
         BOOL armed = pull >= kPullToSearch;
         CGFloat shown = MIN(progress, 1.0);
         self.hint.center = CGPointMake(CGRectGetMidX(scroll.frame),
-                                       CGRectGetMinY(scroll.frame) + scroll.adjustedContentInset.top + pull - 24);
+                                       CGRectGetMinY(scroll.frame) + scroll.adjustedContentInset.top +
+                                           MAX(24.0, stretch - 24.0));
         self.hint.alpha = shown;
         CGFloat scale = 0.6 + 0.4 * shown;
         self.hint.transform = CGAffineTransformMakeScale(scale, scale);
@@ -477,6 +506,8 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
     if (pan.state == UIGestureRecognizerStateEnded) {
         BOOL open = self.armed && pull >= kPullToSearch * 0.8;
         [self dropHint];
+        gSearchLog = [NSString stringWithFormat:@"pull %.0f of %.0f (farthest %.0f) open=%d", pull, kPullToSearch,
+                                                self.farthest, open];
         if (!open) {
             return;
         }
@@ -487,6 +518,8 @@ static void OpenSearch(TFNItemsDataViewController* controller) {
         }
         if (responder) {
             OpenSearch((TFNItemsDataViewController*)responder);
+        } else {
+            gSearchLog = [gSearchLog stringByAppendingString:@" (no list found)"];
         }
         return;
     }
@@ -506,5 +539,6 @@ void NFBLocalSearchAttach(TFNItemsDataViewController* controller) {
         return;
     }
     objc_setAssociatedObject(table, kAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    gAttachedLists++;
     [table.panGestureRecognizer addTarget:[NFBLocalSearchPull shared] action:@selector(pan:)];
 }

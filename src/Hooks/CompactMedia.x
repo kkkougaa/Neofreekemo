@@ -184,6 +184,35 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 @property (readonly, nonatomic) UIView* attachmentView;
 @end
 
+static NSString* gRightLog = @"-";
+
+// The small square: the first view, looking down from the container, that is
+// square, thumbnail sized and narrower than its parent. 7.3.95 only looked at
+// the photo view itself, which turned out not to be the square (right=0).
+static UIView* SmallSquare(UIView* view, int depth) {
+    if (depth > 4 || view.hidden) {
+        return nil;
+    }
+    for (UIView* sub in view.subviews) {
+        NSString* name = NSStringFromClass(sub.class);
+        // Link previews and quoted tweets keep their own layout.
+        if ([name containsString:@"Card"] || [name containsString:@"Quoted"] || [name containsString:@"Avatar"]) {
+            continue;
+        }
+        CGRect frame = sub.frame;
+        CGFloat w = CGRectGetWidth(frame), h = CGRectGetHeight(frame);
+        if (!sub.hidden && w >= 40 && w <= kThumbSide + 1 && fabs(w - h) <= 1.5 &&
+            CGRectGetWidth(view.bounds) >= w + 8) {
+            return sub;
+        }
+        UIView* found = SmallSquare(sub, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
 %hook T1StatusViewAttachmentContainerView
 
 - (void)layoutSubviews {
@@ -191,24 +220,25 @@ static BOOL NFBIsPreviewCard(id viewModel) {
     if (!NFBCompactMedia()) {
         return;
     }
-    T1StatusViewAttachmentContainerView* container = (T1StatusViewAttachmentContainerView*)self;
-    UIView* photo = [container respondsToSelector:@selector(photoVideoView)] ? container.photoVideoView : nil;
-    if (!photo || photo.superview != container || photo.hidden) {
+    UIView* container = (UIView*)self;
+    UIView* square = SmallSquare(container, 0);
+    if (!square) {
         return;
     }
-    CGRect frame = photo.frame;
-    CGFloat width = CGRectGetWidth(container.bounds);
-    // Only the small square (the strip of several photos keeps its place).
-    if (CGRectGetWidth(frame) > kThumbSide + 0.5 || fabs(CGRectGetWidth(frame) - CGRectGetHeight(frame)) > 1 ||
-        width < CGRectGetWidth(frame) + 8) {
-        return;
+    // Every view from the square up to the container goes to the right edge
+    // of its parent, so the square ends up at the container's right edge.
+    for (UIView* view = square; view && view != container; view = view.superview) {
+        CGRect frame = view.frame;
+        CGFloat x = CGRectGetWidth(view.superview.bounds) - CGRectGetWidth(frame);
+        if (x > 0.5 && fabs(CGRectGetMinX(frame) - x) > 0.5 && CGRectGetWidth(frame) <= kThumbSide + 1) {
+            frame.origin.x = x;
+            view.frame = frame;
+            gRightAligned++;
+        }
     }
-    CGFloat x = width - CGRectGetWidth(frame);
-    if (fabs(CGRectGetMinX(frame) - x) > 0.5) {
-        frame.origin.x = x;
-        photo.frame = frame;
-        gRightAligned++;
-    }
+    gRightLog = [NSString stringWithFormat:@"%@ in %@ (%.0f wide)", NSStringFromClass(square.class),
+                                           NSStringFromClass(square.superview.class),
+                                           CGRectGetWidth(square.superview.bounds)];
 }
 
 %end
@@ -280,11 +310,11 @@ static void NFBWatchMode(void) {
 // Read by Hooks/DebugDump.x.
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
-                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld right=%ld lastViewModel=%@",
+                                      @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld right=%ld (%@) lastViewModel=%@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
-                                      (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gRightAligned, gLastViewModelClass ?: @"-"];
+                                      (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gRightAligned, gRightLog, gLastViewModelClass ?: @"-"];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

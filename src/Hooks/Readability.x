@@ -373,6 +373,28 @@ static void FindDividers(UIView* view, UITableViewCell* cell, int depth, NSMutab
 
 static const void* kHiddenDividersKey = &kHiddenDividersKey;
 
+static void HideLineLayers(CALayer* layer, UITableViewCell* cell, int depth) {
+    if (depth > 7) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(cell.bounds), height = CGRectGetHeight(cell.bounds);
+    for (CALayer* sub in layer.sublayers) {
+        id owner = sub.delegate;
+        if ([owner isKindOfClass:[NFBCardBackground class]] || [owner isKindOfClass:[NFBCardView class]]) {
+            continue; // our own card
+        }
+        if (![owner isKindOfClass:[UIView class]] && !sub.hidden) {
+            CGRect frame = [layer convertRect:sub.frame toLayer:cell.layer];
+            if (CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.4 &&
+                (CGRectGetMinY(frame) < 3 || CGRectGetMaxY(frame) > height - 3)) {
+                sub.hidden = YES;
+                continue;
+            }
+        }
+        HideLineLayers(sub, cell, depth + 1);
+    }
+}
+
 static void SetDividersHidden(UITableViewCell* cell, BOOL hidden) {
     NSHashTable<UIView*>* done = objc_getAssociatedObject(cell, kHiddenDividersKey);
     if (hidden) {
@@ -388,27 +410,10 @@ static void SetDividersHidden(UITableViewCell* cell, BOOL hidden) {
                 [done addObject:view];
             }
         }
-        // Lines drawn as bare layers (no view of their own), as the
-        // notifications list's rows have between them.
-        CGFloat width = CGRectGetWidth(cell.bounds), height = CGRectGetHeight(cell.bounds);
-        for (CALayer* host in @[ cell.layer, cell.contentView.layer ]) {
-            for (CALayer* layer in host.sublayers) {
-                if ([layer.delegate isKindOfClass:[UIView class]] || layer.hidden) {
-                    continue;
-                }
-                CGRect frame = [host convertRect:layer.frame toLayer:cell.layer];
-                if (CGRectGetHeight(frame) <= 1.01 && CGRectGetWidth(frame) > width * 0.4 &&
-                    (CGRectGetMinY(frame) < 3 || CGRectGetMaxY(frame) > height - 3)) {
-                    layer.hidden = YES;
-                }
-            }
-        }
-        UITableView* table = TableOf(cell);
-        if (table && table.separatorStyle != UITableViewCellSeparatorStyleNone) {
-            objc_setAssociatedObject(table, kOldSeparatorStyleKey, @(table.separatorStyle),
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            table.separatorStyle = UITableViewCellSeparatorStyleNone;
-        }
+        // Lines drawn as bare layers (no view of their own), anywhere in the row:
+        // the notifications list draws its line between rows that way, at the
+        // row's top (7.3.95 dump: a CALayer 440 x 0.33 at y 0).
+        HideLineLayers(cell.layer, cell, 0);
     } else {
         for (UIView* view in done.allObjects) {
             view.hidden = NO;
@@ -696,7 +701,16 @@ static void DrawThreadLine(UITableViewCell* cell, NFBCardBackground* background,
             return;
         }
         CGRect from = CGRectIsNull(button) ? face : button;
-        gThreadX = CGRectGetMidX(from);
+        CGFloat x = CGRectGetMidX(from);
+        if (fabs(x - gThreadX) > 0.5) {
+            // Replies already on screen were placed for the old line: again.
+            gThreadX = x;
+            for (UITableViewCell* other in TableOf(cell).visibleCells) {
+                if (other != cell) {
+                    [other setNeedsLayout];
+                }
+            }
+        }
         if (down) {
             [path moveToPoint:CGPointMake(gThreadX, CGRectGetMaxY(from) + 3)];
             [path addLineToPoint:CGPointMake(gThreadX, height)];
@@ -919,6 +933,17 @@ static void ApplyCard(UITableViewCell* cell, NFBListKind kind) {
         CGFloat scale = MAX(0.6, MIN(1, (boxRight - 6 - lineX) / MAX(1, contentRight - avatarX)));
         CGFloat shift = lineX - width / 2 - scale * (avatarX - width / 2);
         transform = CATransform3DScale(CATransform3DMakeTranslation(shift, 0, 0), scale, scale, 1);
+        // Measure where the avatar really landed and correct (its own scale and
+        // anything X adds make the sum above slightly off: 7.3.95 lines bent).
+        if (avatar) {
+            contentView.layer.sublayerTransform = transform;
+            CGFloat landed = CGRectGetMidX([avatar convertRect:avatar.bounds toView:cell]);
+            CGFloat delta = ThreadX() - landed;
+            if (fabs(delta) > 0.25) {
+                shift += delta;
+                transform = CATransform3DScale(CATransform3DMakeTranslation(shift, 0, 0), scale, scale, 1);
+            }
+        }
         background.nestLeft = ThreadX() - 22 * scale - 8;
     } else if (!fits) {
         CGFloat scale = MAX(0.8, (cellWidth - margin * 2) / MAX(1, width));
@@ -1259,6 +1284,21 @@ static void AttachReplySwipe(UITableViewCell* cell) {
 // Coming back from a tweet, X unhighlights the row with an animation and
 // UIKit shows its separator and X its white backing meanwhile, without a
 // layout pass: square corners and a thin line flashed (7.3.94). Keep them off.
+// X paints a row white again while it animates back from a tweet (7.3.95: the
+// plain timeline showed for a moment). A row with a card stays clear.
+- (void)setBackgroundColor:(UIColor*)color {
+    NFBCardMemory* memory = objc_getAssociatedObject(self, kCardMemoryKey);
+    if (memory.active && color) {
+        CGFloat r = 0, g = 0, b = 0, alpha = 0;
+        [color getRed:&r green:&g blue:&b alpha:&alpha];
+        if (alpha > 0.01) {
+            %orig([UIColor clearColor]);
+            return;
+        }
+    }
+    %orig;
+}
+
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     %orig;
     NFBCardMemory* memory = objc_getAssociatedObject(self, kCardMemoryKey);
@@ -1326,33 +1366,23 @@ static void Unscale(UIView* view) {
     }
 }
 
-// The name line (TTAStatusAuthorView) draws the name, handle and time itself
-// and holds the "..." button at its right end (7.3.90 dump). The whole line is
-// scaled from its left middle, and moved up by the chosen gap to leave more
-// room above the tweet text. The pieces at the right end are scaled back so
-// they stay exactly where X put them.
-static const void* kScaledPiecesKey = &kScaledPiecesKey;
+// MARK: The name line
+// TTAStatusAuthorView lays out separate UILabels (7.3.95 dump): the name
+// (semibold), the @handle, a "·", and the time; the "..." button is a
+// TFNDismissButton in a screenshot container at its right end. 7.3.89-7.3.95
+// scaled the whole view, which pushed that button off the card. Now nothing is
+// scaled: the labels get a larger font, and are placed again after X:
+//  - the time, a little smaller, at the right end just left of the button
+//    (left out in replies inside a thread card),
+//  - the handle right after the name, the "·" hidden,
+//  - a name too long for what is left cut and faded at its end.
+// The line moves up by the chosen gap (only the labels and badges, not the button).
 
-static void UnscaleNameLine(UIView* line) {
-    if (!line) {
-        return;
-    }
-    NSHashTable<UIView*>* pieces = objc_getAssociatedObject(line, kScaledPiecesKey);
-    for (UIView* piece in pieces.allObjects) {
-        piece.transform = CGAffineTransformIdentity;
-    }
-    [pieces removeAllObjects];
-    if (objc_getAssociatedObject(line, kScaledKey)) {
-        line.layer.mask = nil;
-    }
-    Unscale(line);
-}
+static const void* kBaseFontKey = &kBaseFontKey;   // X's own font for a label
+static const void* kOurFontKey = &kOurFontKey;     // the font we last gave it
+static const void* kArrangedKey = &kArrangedKey;   // the line was arranged by us
+static const void* kHiddenTimeKey = &kHiddenTimeKey;
 
-// 7.3.95: the time goes to the right end of the line (just left of the "..."
-// button), the @handle follows the name, and a name too long for what is left
-// fades out at its end. The line's pieces are UILabels (name semibold, then the
-// handle, then the time; 7.3.90 dump). `limit` is where the trailing pieces
-// start as seen on screen, in the line's unscaled coordinates.
 static BOOL IsBoldFont(UIFont* font) {
     NSString* name = font.fontName;
     return (font.fontDescriptor.symbolicTraits & UIFontDescriptorTraitBold) || [name containsString:@"Semibold"] ||
@@ -1379,125 +1409,158 @@ static void FadeEnd(UIView* view, BOOL fade) {
     view.layer.mask = mask;
 }
 
-static void ArrangeNameLine(UIView* line, CGFloat scale, CGFloat limit) {
-    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
-    for (UIView* sub in line.subviews) {
-        if ([sub isKindOfClass:[UILabel class]] && !sub.hidden && ((UILabel*)sub).text.length > 0 &&
-            CGRectGetWidth(sub.frame) > 0) {
-            [labels addObject:(UILabel*)sub];
+// Gives a label X's font times `factor`, remembering X's own.
+static void SizeLabel(UILabel* label, CGFloat factor) {
+    UIFont* ours = objc_getAssociatedObject(label, kOurFontKey);
+    if (!ours || ![label.font isEqual:ours]) {
+        objc_setAssociatedObject(label, kBaseFontKey, label.font, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    UIFont* base = objc_getAssociatedObject(label, kBaseFontKey) ?: label.font;
+    UIFont* font = fabs(factor - 1) < 0.005 ? base : [base fontWithSize:base.pointSize * factor];
+    if (![label.font isEqual:font]) {
+        label.font = font;
+    }
+    objc_setAssociatedObject(label, kOurFontKey, font, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// The card row a name line belongs to, if it is a tweet's own line in the
+// home timeline or notifications with cards on (not a quoted tweet's).
+static UITableViewCell* CardRowOf(UIView* line) {
+    for (UIView* up = line.superview; up; up = up.superview) {
+        if ([NSStringFromClass(up.class) containsString:@"Quoted"]) {
+            return nil;
+        }
+        if ([up isKindOfClass:[UITableViewCell class]]) {
+            NFBCardMemory* memory = objc_getAssociatedObject(up, kCardMemoryKey);
+            return memory.active ? (UITableViewCell*)up : nil;
         }
     }
-    if (labels.count < 2) {
-        return; // drawn some other way: leave it to X
-    }
-    [labels sortUsingComparator:^NSComparisonResult(UILabel* a, UILabel* b) {
-        return CGRectGetMinX(a.frame) < CGRectGetMinX(b.frame) ? NSOrderedAscending : NSOrderedDescending;
-    }];
-    UILabel* name = nil;
-    for (UILabel* label in labels) {
-        if (IsBoldFont(label.font)) {
-            name = label;
-            break;
-        }
-    }
-    UILabel* time = labels.lastObject;
-    if (!name || name == time) {
+    return nil;
+}
+
+static BOOL InNestedReply(UITableViewCell* cell) {
+    NFBCardMemory* memory = objc_getAssociatedObject(cell, kCardMemoryKey);
+    return memory.active && memory.background.nested;
+}
+
+static void ArrangeNameLine(UIView* line) {
+    if (CGRectGetWidth(line.bounds) < 40) {
         return;
     }
-    UILabel* handle = nil;
-    for (UILabel* label in labels) {
-        if (label != name && label != time && CGRectGetMinX(label.frame) > CGRectGetMinX(name.frame)) {
+    UITableViewCell* row = CardRowOf(line);
+    if (!row) {
+        return;
+    }
+    NSMutableArray<UILabel*>* labels = [NSMutableArray array];
+    UILabel *name = nil, *handle = nil, *dot = nil, *time = nil;
+    for (UIView* sub in line.subviews) {
+        if (![sub isKindOfClass:[UILabel class]]) {
+            continue;
+        }
+        UILabel* label = (UILabel*)sub;
+        NSString* text = [label.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (text.length == 0) {
+            continue;
+        }
+        [labels addObject:label];
+        if (!name && IsBoldFont(objc_getAssociatedObject(label, kBaseFontKey) ?: label.font)) {
+            name = label;
+        } else if (!handle && [text hasPrefix:@"@"]) {
             handle = label;
-            break;
+        } else if (!dot && ([text isEqualToString:@"·"] || [text isEqualToString:@"•"])) {
+            dot = label;
+        } else if (!time) {
+            time = label;
         }
     }
-    CGRect nameFrame = name.frame, timeFrame = time.frame, handleFrame = handle ? handle.frame : CGRectNull;
-    CGFloat afterName = CGRectGetMaxX(nameFrame);
-    CGFloat gapToHandle = handle ? MAX(2, CGRectGetMinX(handleFrame) - afterName) : 0;
-    CGFloat gapToTime = MAX(4, CGRectGetMinX(timeFrame) - (handle ? CGRectGetMaxX(handleFrame) : afterName));
+    if (!name || !time) {
+        return; // drawn some other way: leave it to X
+    }
+    objc_setAssociatedObject(line, kArrangedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CGFloat height = CGRectGetHeight(line.bounds);
+    CGFloat lift = gStyle.nameGap;
 
-    CGFloat timeWasAt = CGRectGetMinX(timeFrame);
-    // The time: right-aligned to the end of the line as seen on screen.
-    CGFloat right = (MIN(limit, CGRectGetWidth(line.bounds)) - 4) / MAX(scale, 0.01);
-    timeFrame.origin.x = right - CGRectGetWidth(timeFrame);
+    // The trailing pieces ("..." and friends): not labels, at the right end.
+    CGFloat limit = CGRectGetWidth(line.bounds);
+    for (UIView* sub in line.subviews) {
+        if (![sub isKindOfClass:[UILabel class]] && !sub.hidden && CGRectGetWidth(sub.frame) > 0 &&
+            CGRectGetMinX(sub.frame) > CGRectGetWidth(line.bounds) * 0.6) {
+            limit = MIN(limit, CGRectGetMinX(sub.frame));
+        }
+    }
+
+    SizeLabel(name, gStyle.nameScale);
+    if (handle) {
+        SizeLabel(handle, gStyle.nameScale);
+    }
+    SizeLabel(time, 0.9);
+    BOOL hideTime = InNestedReply(row);
+    time.hidden = hideTime;
+    objc_setAssociatedObject(time, kHiddenTimeKey, hideTime ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (dot) {
+        dot.hidden = YES;
+    }
+
+    CGFloat (^lineHeight)(UILabel*) = ^CGFloat(UILabel* label) {
+        return ceil(label.font.lineHeight);
+    };
+    CGFloat (^top)(UILabel*) = ^CGFloat(UILabel* label) {
+        return round((height - lineHeight(label)) / 2) - lift;
+    };
+
+    // The time at the right end.
+    CGFloat timeWidth = ceil([time sizeThatFits:CGSizeMake(CGFLOAT_MAX, height)].width);
+    CGRect timeFrame = CGRectMake(limit - 6 - timeWidth, top(time), timeWidth, lineHeight(time));
     time.frame = timeFrame;
+    CGFloat end = hideTime ? limit - 6 : CGRectGetMinX(timeFrame) - 8;
 
-    // The name gets what is left after the handle.
-    CGFloat handleWidth = handle ? [handle sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGRectGetHeight(handleFrame))].width : 0;
-    CGFloat nameWidth = [name sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGRectGetHeight(nameFrame))].width;
-    CGFloat room = CGRectGetMinX(timeFrame) - gapToTime - (handle ? handleWidth + gapToHandle : 0) - CGRectGetMinX(nameFrame);
-    CGFloat minimumName = 28;
+    // Badges (verified mark and the like) that sat between the name and the handle.
+    CGRect nameFrame = name.frame;
+    CGFloat nameStart = CGRectGetMinX(nameFrame);
+    NSMutableArray<UIView*>* badges = [NSMutableArray array];
+    CGFloat badgesWidth = 0;
+    CGFloat handleWasAt = handle ? CGRectGetMinX(handle.frame) : CGFLOAT_MAX;
+    for (UIView* sub in line.subviews) {
+        if ([sub isKindOfClass:[UILabel class]] || sub.hidden || CGRectGetWidth(sub.frame) <= 0) {
+            continue;
+        }
+        CGRect frame = sub.frame;
+        if (CGRectGetMinX(frame) >= CGRectGetMaxX(nameFrame) - 1 && CGRectGetMaxX(frame) <= handleWasAt + 1 &&
+            CGRectGetMinX(frame) < limit) {
+            [badges addObject:sub];
+            badgesWidth += CGRectGetWidth(frame) + 3;
+        }
+    }
+
+    CGFloat nameWidth = ceil([name sizeThatFits:CGSizeMake(CGFLOAT_MAX, height)].width);
+    CGFloat handleWidth = handle ? ceil([handle sizeThatFits:CGSizeMake(CGFLOAT_MAX, height)].width) : 0;
+    CGFloat handleGap = handle ? 4 : 0;
+    CGFloat room = end - nameStart - badgesWidth - handleGap - handleWidth;
+    const CGFloat minimumName = 36;
     if (room < minimumName && handle) {
-        // Not even a bit of the name fits: the handle gives way (X truncates it).
+        // The handle gives way first (X truncates it with "...").
         handleWidth = MAX(0, handleWidth - (minimumName - room));
         room = minimumName;
     }
     CGFloat shownName = MAX(0, MIN(nameWidth, room));
     BOOL cut = shownName < nameWidth - 0.5;
-    nameFrame.size.width = shownName;
     name.lineBreakMode = cut ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
-    name.frame = nameFrame;
+    name.frame = CGRectMake(nameStart, top(name), shownName, lineHeight(name));
     FadeEnd(name, cut);
 
-    // Badges between the name and the handle, and the handle, follow the name.
-    CGFloat shift = CGRectGetMaxX(nameFrame) - afterName;
-    if (fabs(shift) > 0.25) {
-        NSHashTable* trailing = objc_getAssociatedObject(line, kScaledPiecesKey);
-        CGFloat stop = handle ? CGRectGetMaxX(handleFrame) - 0.5 : timeWasAt;
-        for (UIView* sub in line.subviews) {
-            if (sub == name || sub == time || sub.hidden || [trailing containsObject:sub]) {
-                continue;
-            }
-            CGRect frame = sub.frame;
-            if (CGRectGetMinX(frame) >= afterName - 1 && CGRectGetMinX(frame) < stop) {
-                frame.origin.x += shift;
-                sub.frame = frame;
-            }
-        }
+    CGFloat x = CGRectGetMaxX(name.frame) + 3;
+    for (UIView* badge in badges) {
+        CGRect frame = badge.frame;
+        frame.origin.x = x;
+        frame.origin.y = round((height - CGRectGetHeight(frame)) / 2) - lift;
+        badge.frame = frame;
+        x += CGRectGetWidth(frame) + 3;
     }
     if (handle) {
-        CGRect frame = handle.frame;
-        frame.size.width = handleWidth;
-        handle.frame = frame;
+        handle.lineBreakMode = NSLineBreakByTruncatingTail;
+        handle.frame = CGRectMake(x + handleGap - 3, top(handle), handleWidth, lineHeight(handle));
+        handle.hidden = handleWidth < 8;
     }
-}
-
-static void ScaleNameLine(UIView* line, CGFloat scale, CGFloat lift) {
-    CGSize size = line.bounds.size;
-    if (size.width <= 0 || size.height <= 0) {
-        return;
-    }
-    // Scale about the left middle, then lift.
-    CGFloat tx = -0.5 * size.width * (1 - scale);
-    line.transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(tx, -lift), scale, scale);
-    objc_setAssociatedObject(line, kScaledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    NSHashTable<UIView*>* pieces = objc_getAssociatedObject(line, kScaledPiecesKey);
-    if (!pieces) {
-        pieces = [NSHashTable weakObjectsHashTable];
-        objc_setAssociatedObject(line, kScaledPiecesKey, pieces, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    // Where the trailing pieces start, in the line's own (unscaled) coordinates.
-    CGFloat limit = size.width;
-    CGFloat midY = size.height / 2;
-    for (UIView* piece in line.subviews) {
-        CGRect frame = piece.frame;
-        if (piece.hidden || CGRectGetWidth(frame) <= 0 || CGRectGetMinX(frame) < size.width * 0.6 ||
-            [piece isKindOfClass:[UILabel class]]) {
-            continue;
-        }
-        limit = MIN(limit, CGRectGetMinX(frame));
-        // Undo the line's scale for this piece, keeping its spot on screen.
-        CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
-        CGPoint wanted = CGPointMake(center.x / scale, midY + (center.y - midY) / scale + lift / scale);
-        piece.transform = CGAffineTransformScale(
-            CGAffineTransformMakeTranslation(wanted.x - center.x, wanted.y - center.y), 1 / scale, 1 / scale);
-        [pieces addObject:piece];
-    }
-    // 7.3.93-7.3.94 faded the text out before those pieces with a mask, which
-    // also hid the "..." button: no mask any more.
-    line.layer.mask = nil;
-    ArrangeNameLine(line, scale, limit);
 }
 
 // MARK: The faded action row
@@ -1670,21 +1733,31 @@ static void DimActions(UIView* actions) {
 
 %end
 
+// The same for the row's content view.
+%hook UITableViewCellContentView
+
+- (void)setBackgroundColor:(UIColor*)color {
+    UIView* cell = ((UIView*)self).superview;
+    NFBCardMemory* memory = cell ? objc_getAssociatedObject(cell, kCardMemoryKey) : nil;
+    if (memory.active && color) {
+        CGFloat r = 0, g = 0, b = 0, alpha = 0;
+        [color getRed:&r green:&g blue:&b alpha:&alpha];
+        if (alpha > 0.01) {
+            %orig([UIColor clearColor]);
+            return;
+        }
+    }
+    %orig;
+}
+
+%end
+
 // X can lay the name line out again on its own; arrange it again then.
 %hook TTAStatusAuthorView
 
 - (void)layoutSubviews {
     %orig;
-    UIView* line = (UIView*)self;
-    if (!objc_getAssociatedObject(line, kScaledKey)) {
-        return;
-    }
-    CGFloat limit = CGRectGetWidth(line.bounds);
-    NSHashTable<UIView*>* trailing = objc_getAssociatedObject(line, kScaledPiecesKey);
-    for (UIView* piece in trailing.allObjects) {
-        limit = MIN(limit, piece.center.x - CGRectGetWidth(piece.bounds) / 2);
-    }
-    ArrangeNameLine(line, gStyle.nameScale, limit);
+    ArrangeNameLine((UIView*)self);
 }
 
 %end
@@ -1697,7 +1770,6 @@ static void DimActions(UIView* actions) {
     UIView* avatar = [status respondsToSelector:@selector(visibleAvatarView)] ? [status visibleAvatarView] : nil;
     UIView* author = [status respondsToSelector:@selector(visibleAuthorView)] ? [status visibleAuthorView] : nil;
     Unscale(avatar);
-    UnscaleNameLine(author);
     %orig;
     // Quoted tweets and other kinds keep X's sizes.
     if (plain) {
@@ -1707,8 +1779,19 @@ static void DimActions(UIView* actions) {
             CGRectGetWidth(avatar.bounds) < 80) {
             ScaleFrom(avatar, gStyle.avatarScale, CGPointMake(1, 0));
         }
-        if ((fabs(gStyle.nameScale - 1) > 0.005 || gStyle.nameGap > 0.05) && CGRectGetWidth(author.bounds) > 40) {
-            ScaleNameLine(author, gStyle.nameScale, gStyle.nameGap);
+        if (author) {
+            ArrangeNameLine(author);
+        }
+        // X shows its own thread line again when it lays the tweet out (after
+        // the row): hide it again in thread cards.
+        for (UIView* up = status.superview; up; up = up.superview) {
+            if ([up isKindOfClass:[UITableViewCell class]]) {
+                NFBCardMemory* memory = objc_getAssociatedObject(up, kCardMemoryKey);
+                if (memory.active && memory.thread) {
+                    SetThreadLinesHidden((UITableViewCell*)up, memory, YES);
+                }
+                break;
+            }
         }
     }
     UIView* actions = [self respondsToSelector:@selector(visibleInlineActionsView)]
@@ -1778,8 +1861,13 @@ static UIView* RefreshControlIn(UIScrollView* scroll) {
     return nil;
 }
 
+// The pill lives beside the control (just under it in its superview), not
+// inside it: 7.3.93-7.3.95 put it in the control's subviews, which X and the
+// paws code look through.
+static const void* kPillKey = &kPillKey;
+
 static void LayoutPill(UIView* control) {
-    UIView* pill = [control viewWithTag:kPillTag];
+    UIView* pill = objc_getAssociatedObject(control, kPillKey);
     UITableView* table = TableOf(control);
     NFBListKind kind = ListKind(table);
     if (kind == NFBListOther) {
@@ -1809,12 +1897,20 @@ static void LayoutPill(UIView* control) {
         }
         return;
     }
+    UIView* host = control.superview;
+    if (!host) {
+        return;
+    }
     if (![pill isKindOfClass:[NFBCardView class]]) {
-        [pill removeFromSuperview];
         pill = [NFBCardView new];
         pill.tag = kPillTag;
-        [control insertSubview:pill atIndex:0];
+        pill.userInteractionEnabled = NO;
+        objc_setAssociatedObject(control, kPillKey, pill, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         gPills++;
+    }
+    if (pill.superview != host) {
+        [pill removeFromSuperview];
+        [host insertSubview:pill belowSubview:control];
     }
     NFBCardView* card = (NFBCardView*)pill;
     card.hidden = NO;
@@ -1833,15 +1929,16 @@ static void LayoutPill(UIView* control) {
     UIColor* xPaper = (table ? objc_getAssociatedObject(table, kOldTableColorKey) : nil) ?: [UIColor systemBackgroundColor];
     card.backgroundColor = NFBCardPaperColor(style, xPaper, CurrentAccentColor());
     CGPoint center = [spinner.superview convertPoint:spinner.center toView:control];
+    CGPoint centerInHost = [spinner.superview convertPoint:spinner.center toView:host];
     card.bounds = CGRectMake(0, 0, size.width, size.height);
-    card.center = center;
+    card.center = centerInHost;
     // Fade in with the pull: fully there once the control shows the whole pill.
     CGFloat shown = CGRectGetMaxY(control.bounds) - (center.y - size.height / 2);
     card.alpha = MAX(0, MIN(1, shown / size.height));
     if ([spinner isKindOfClass:[UIActivityIndicatorView class]] && ((UIActivityIndicatorView*)spinner).isAnimating) {
         card.alpha = 1;
     }
-    [control sendSubviewToBack:card];
+    card.alpha *= control.hidden ? 0 : control.alpha;
     gPillLog = [NSString stringWithFormat:@"pill alpha=%.2f at %@ spinner=%@", card.alpha,
                                           NSStringFromCGPoint(center), NSStringFromClass(spinner.class)];
 }
@@ -1855,14 +1952,17 @@ static void LayoutPill(UIView* control) {
 
 - (void)setFrame:(CGRect)frame {
     %orig;
-    if ([self viewWithTag:kPillTag] || gCardsOn || gNoteCardsOn) {
+    if (gCardsOn || gNoteCardsOn) {
         LayoutPill(self);
     }
 }
 
-- (void)_setStatus:(unsigned long long)status fromScrolling:(BOOL)fromScrolling {
+- (void)setHidden:(BOOL)hidden {
     %orig;
-    if (gCardsOn || gNoteCardsOn) {
+    UIView* pill = objc_getAssociatedObject(self, kPillKey);
+    if (hidden) {
+        pill.hidden = YES;
+    } else if (gCardsOn || gNoteCardsOn) {
         LayoutPill(self);
     }
 }

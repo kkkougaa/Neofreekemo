@@ -109,6 +109,36 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
     [self.navigationController pushViewController:[KemoEventListViewController new] animated:YES];
 }
 
+// The last two shake dumps as text files, through the share sheet (save to
+// Files, AirDrop, or attach to a chat), since a pasted dump gets cut short.
+- (void)shareLastDump:(NSDictionary*)sender {
+    NSString* folder = NSTemporaryDirectory();
+    NSMutableArray<NSURL*>* items = [NSMutableArray array];
+    for (NSString* name in @[ @"NeoFreeBird-dump.txt", @"NeoFreeBird-dump-previous.txt" ]) {
+        NSString* path = [folder stringByAppendingPathComponent:name];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            [items addObject:[NSURL fileURLWithPath:path]];
+        }
+    }
+    if (items.count == 0) {
+        UIAlertController* alert =
+            [UIAlertController alertControllerWithTitle:[self localized:@"KEMO_SHARE_DUMP_NONE"]
+                                                message:nil
+                                         preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:[self localized:@"OK_ACTION_LABEL"]
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    UIActivityViewController* share = [[UIActivityViewController alloc] initWithActivityItems:items
+                                                                        applicationActivities:nil];
+    share.popoverPresentationController.sourceView = self.view;
+    share.popoverPresentationController.sourceRect =
+        CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    [self presentViewController:share animated:YES completion:nil];
+}
+
 - (void)openKeywordEditor:(NSDictionary*)sender {
     [self.navigationController pushViewController:[KemoKeywordListViewController new] animated:YES];
 }

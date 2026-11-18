@@ -616,3 +616,6 @@
 "KEMO_CARD_PREVIEW_BODY1" = "This preview changes as you adjust the cards.";
 "KEMO_CARD_PREVIEW_BODY2" = "Tweets in a thread share one card.";
 "KEMO_CARD_PREVIEW_BODY3" = "Replies sit in the inner box.";
+
+"KEMO_SHARE_DUMP_TITLE" = "Send the last dump as a file";
+"KEMO_SHARE_DUMP_NONE" = "No dump yet. Press volume down to make one first.";

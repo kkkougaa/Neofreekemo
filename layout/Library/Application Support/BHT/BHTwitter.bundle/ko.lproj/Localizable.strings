@@ -568,3 +568,6 @@
 "KEMO_CARD_PREVIEW_BODY1" = "카드 모양을 바꾸면 여기 미리보기가 바로 바뀌어요.";
 "KEMO_CARD_PREVIEW_BODY2" = "이어진 트윗은 한 카드로 묶여요.";
 "KEMO_CARD_PREVIEW_BODY3" = "답글은 안쪽 상자에 들어가요.";
+
+"KEMO_SHARE_DUMP_TITLE" = "마지막 덤프 파일로 보내기";
+"KEMO_SHARE_DUMP_NONE" = "아직 뜬 덤프가 없어요. 볼륨 아래 버튼을 눌러 먼저 덤프를 떠 주세요.";

@@ -404,6 +404,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_shake_dump",
                         @"default": @NO,
                         @"type": @"toggle"
+                    },
+                    @{
+                        @"titleKey": @"KEMO_SHARE_DUMP_TITLE",
+                        @"action": @"shareLastDump:",
+                        @"type": @"button",
+                        @"parentKey": @"kemo_shake_dump"
                     }
                 ]
             },

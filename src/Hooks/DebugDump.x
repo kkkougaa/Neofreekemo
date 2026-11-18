@@ -540,6 +540,26 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== COMPACT MEDIA ==%c%@ mediaWidth=%.1f%c", 10, NFBCompactMediaDebugText(), NFBLastMediaWidth(), 10];
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     DumpCardRows(window, out);
+    // The header (logo place and look), early so it is never cut off.
+    [out appendFormat:@"== HEADER ==%c%@%c", 10, NFBBubbleDebugText(), 10];
+    // Where the list's controller takes its layout metrics from (to give the
+    // rows a side margin X lays them out within).
+    UITableView* list = FindMainTable(window, 0, nil);
+    UIResponder* owner = list.nextResponder;
+    while (owner && ![owner isKindOfClass:[UIViewController class]]) {
+        owner = owner.nextResponder;
+    }
+    if (owner) {
+        UIViewController* controller = (UIViewController*)owner;
+        [out appendFormat:@"== LIST CONTROLLER == safe=%@ extra=%@ cellContent=%@%c",
+                          NSStringFromUIEdgeInsets(list.safeAreaInsets),
+                          NSStringFromUIEdgeInsets(controller.additionalSafeAreaInsets),
+                          list.visibleCells.count ? NSStringFromCGRect(list.visibleCells.firstObject.contentView.frame) : @"-",
+                          10];
+        for (Class cls = controller.class; cls && cls != [UIViewController class]; cls = class_getSuperclass(cls)) {
+            DumpClassInfoMatching(cls, out, @[ @"etrics", @"nset", @"argin", @"idth" ], 0);
+        }
+    }
     UIView* status = FindViewByClassParts(window, @[ @"T1StandardStatusView" ]);
     SEL authorSel = NSSelectorFromString(@"visibleAuthorView");
     SEL avatarSel = NSSelectorFromString(@"visibleAvatarView");
@@ -794,6 +814,16 @@ static void PerformDump(UIWindow* window) {
     NSUInteger lines = 0;
     DumpView(window, 0, out, &lines);
     [UIPasteboard generalPasteboard].string = out;
+    // Also kept as a file: a paste into a chat gets cut short, a file does not.
+    // Settings > "Send the last dump as a file" shares it; the dump before it
+    // is kept beside it.
+    NSString* folder = NSTemporaryDirectory();
+    NSString* latest = [folder stringByAppendingPathComponent:@"NeoFreeBird-dump.txt"];
+    NSString* previous = [folder stringByAppendingPathComponent:@"NeoFreeBird-dump-previous.txt"];
+    NSFileManager* files = [NSFileManager defaultManager];
+    [files removeItemAtPath:previous error:nil];
+    [files moveItemAtPath:latest toPath:previous error:nil];
+    [out writeToFile:latest atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [[[UINotificationFeedbackGenerator alloc]
         init] notificationOccurred:UINotificationFeedbackTypeSuccess];
 }

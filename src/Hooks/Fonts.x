@@ -472,3 +472,35 @@ static UINavigationBarAppearance* BHTNavigationAppearanceWithFonts(
 }
 
 %end
+
+// MARK: - Chirp in every language
+// X only draws tweets and names with its bundled Chirp when
+// +[UIFont tfn_isChirpFontEnabled] says yes (UIFont (TFNUIFontGroup) in
+// XServiceLibraries, X 12.44); otherwise they use the system font, which is
+// what happens with a Korean or Japanese device. The Chirp files inside this
+// IPA are swapped for fonts that cover those languages (Pretendard JP, or the
+// user's own from the font swap page), so Chirp is turned on everywhere.
+static BOOL gChirpEnabledHooked = NO;
+static BOOL gChirpEnabledOriginal = NO;
+
+NSString* NFBChirpFontDebugText(void) {
+    return [NSString stringWithFormat:@"chirpEnabled hook=%d original=%d", gChirpEnabledHooked,
+                                      gChirpEnabledOriginal];
+}
+
+%group ChirpEverywhere
+%hook UIFont
++ (BOOL)tfn_isChirpFontEnabled {
+    gChirpEnabledOriginal = %orig;
+    return YES;
+}
+%end
+%end
+
+%ctor {
+    %init;
+    if (class_getClassMethod([UIFont class], NSSelectorFromString(@"tfn_isChirpFontEnabled"))) {
+        %init(ChirpEverywhere);
+        gChirpEnabledHooked = YES;
+    }
+}

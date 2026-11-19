@@ -3,6 +3,7 @@
 //  NeoFreeBird
 //
 
+#import <CoreText/CoreText.h>
 #import "HookHelpers.h"
 
 // MARK: - View tree dump (volume down)
@@ -661,11 +662,68 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
 }
 
 // Builds the outline of what's on screen and puts it on the pasteboard.
+// Which file each Chirp font really comes from, and whose font it is. The fonts
+// can be swapped inside the IPA; this shows whether the installed app has the
+// swapped files and which copy X ends up drawing with.
+static NSString* FontCopyright(CTFontRef font) {
+    CFStringRef copyright = CTFontCopyName(font, kCTFontCopyrightNameKey);
+    NSString* text = copyright ? [(__bridge_transfer NSString*)copyright copy] : @"-";
+    return text.length > 70 ? [text substringToIndex:70] : text;
+}
+
+static void DumpFonts(NSMutableString* out) {
+    [out appendFormat:@"== FONTS ==%c", 10];
+    NSString* bundle = [[NSBundle mainBundle] pathForResource:@"TwitterSharedResources_TFNUIAppResources"
+                                                       ofType:@"bundle"];
+    for (NSString* file in @[ @"Chirp-Regular.otf", @"Chirp-Bold.otf",
+                              @"Chirp-UI-VF-With-Overriden-Emoji-202601.ttf" ]) {
+        NSString* path = [bundle stringByAppendingPathComponent:file];
+        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+        NSString* who = @"-";
+        CGDataProviderRef provider = CGDataProviderCreateWithFilename(path.fileSystemRepresentation);
+        if (provider) {
+            CGFontRef cgFont = CGFontCreateWithDataProvider(provider);
+            if (cgFont) {
+                CTFontRef font = CTFontCreateWithGraphicsFont(cgFont, 12, NULL, NULL);
+                if (font) {
+                    who = FontCopyright(font);
+                    CFRelease(font);
+                }
+                CGFontRelease(cgFont);
+            }
+            CGDataProviderRelease(provider);
+        }
+        [out appendFormat:@"file %@ %@ bytes, %@%c", file,
+                          attrs ? attrs[NSFileSize] : @"missing", who, 10];
+    }
+    for (NSString* name in @[ @"Chirp-Regular", @"Chirp-Bold", @"ChirpUIVF202601" ]) {
+        UIFont* font = [UIFont fontWithName:name size:12];
+        if (!font) {
+            [out appendFormat:@"use %@: none%c", name, 10];
+            continue;
+        }
+        CTFontRef ct = (__bridge CTFontRef)font;
+        NSURL* url = (__bridge_transfer NSURL*)CTFontCopyAttribute(ct, kCTFontURLAttribute);
+        [out appendFormat:@"use %@: %@ (%@)%c", name, url.lastPathComponent ?: @"?", FontCopyright(ct), 10];
+        CTFontDescriptorRef wanted = CTFontDescriptorCreateWithNameAndSize((__bridge CFStringRef)name, 12);
+        NSArray* all = (__bridge_transfer NSArray*)CTFontDescriptorCreateMatchingFontDescriptors(wanted, NULL);
+        CFRelease(wanted);
+        if (all.count > 1) {
+            for (id descriptor in all) {
+                NSURL* other = (__bridge_transfer NSURL*)CTFontDescriptorCopyAttribute(
+                    (__bridge CTFontDescriptorRef)descriptor, kCTFontURLAttribute);
+                [out appendFormat:@"  also %@%c", other.path ?: @"?", 10];
+            }
+        }
+    }
+}
+
 static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(window.frame)];
     NSUInteger mediaCount = 0;
     // First, so it survives a paste that gets cut short.
+    DumpFonts(out);
     DumpRowProbe(window, out);
     // How the screen is put together: view controllers, and everything in the top part of the
     // screen (where a row of tabs lives) with its text.

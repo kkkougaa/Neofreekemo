@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.106",
+      "subtitle": "NeoFreeBird version 7.3.107",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.107",
+          "buildVersion": "107",
+          "date": "2026-11-19T03:01:13Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.107/NeoFreeBird-Twitter-sideloaded_7.3.107_12.44.ipa",
+          "size": 270849093,
+          "minOSVersion": "15.0",
+          "localizedDescription": "볼륨 다운 덤프 맨 위에 폰트 정보(== FONTS ==) 추가: 설치된 Chirp 폰트 파일의 크기·저작권, X가 실제로 그리는 폰트 파일, 같은 이름으로 등록된 다른 폰트."
+        },
         {
           "version": "7.3.106",
           "buildVersion": "106",

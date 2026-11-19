@@ -84,7 +84,48 @@ static NSString* const kCustomSendSoundNameKey = @"custom_send_sound_name";
     return [self labelForTimeout:[BHTSettings integerForKey:@"undo_tweet_timeout"]];
 }
 
+// With a sound chosen the row first asks: another one, or none (until
+// 7.3.105 a sound, once chosen, could only be replaced, never removed).
 - (void)importTweetSound:(NSDictionary*)sender {
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    if ([defaults stringForKey:kCustomSendSoundPathKey].length == 0) {
+        [self pickTweetSound];
+        return;
+    }
+    BHTBundle* bundle = [BHTBundle sharedBundle];
+    UIAlertController* alert =
+        [UIAlertController alertControllerWithTitle:[defaults stringForKey:kCustomSendSoundNameKey]
+                                            message:nil
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:[bundle localizedStringForKey:@"CUSTOM_SEND_SOUND_CHOOSE"]
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                [weakSelf pickTweetSound];
+                                            }]];
+    [alert addAction:[UIAlertAction actionWithTitle:[bundle localizedStringForKey:@"CUSTOM_SEND_SOUND_REMOVE"]
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction* action) {
+                                                [weakSelf removeTweetSound];
+                                            }]];
+    [alert addAction:[UIAlertAction actionWithTitle:[bundle localizedStringForKey:@"CANCEL_ACTION_LABEL"]
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)removeTweetSound {
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    NSString* path = [defaults stringForKey:kCustomSendSoundPathKey];
+    if (path.length > 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    }
+    [defaults removeObjectForKey:kCustomSendSoundPathKey];
+    [defaults removeObjectForKey:kCustomSendSoundNameKey];
+    [self.tableView reloadData];
+}
+
+- (void)pickTweetSound {
     UIDocumentPickerViewController* picker = [[UIDocumentPickerViewController alloc]
         initForOpeningContentTypes:@[UTTypeAudio]
                             asCopy:YES];

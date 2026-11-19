@@ -422,6 +422,8 @@
 
 "CUSTOM_SEND_SOUND_TITLE" = "전송 효과음 가져오기";
 "CUSTOM_SEND_SOUND_DEFAULT" = "선택된 사용자 지정 효과음 없음";
+"CUSTOM_SEND_SOUND_CHOOSE" = "다른 효과음 고르기";
+"CUSTOM_SEND_SOUND_REMOVE" = "효과음 제거";
 "CUSTOM_SEND_SOUND_FAILED_TITLE" = "전송 효과음 가져오기 실패";
 "CUSTOM_SEND_SOUND_TOO_LONG" = "선택한 사운드가 너무 깁니다. 7초 이하여야 합니다.";
 
@@ -484,22 +486,16 @@
 "KEMO_EVENT_NAME_PLACEHOLDER" = "행사 이름";
 "KEMO_EVENT_ACCOUNT_PLACEHOLDER" = "@계정 (선택)";
 "KEMO_EVENT_DATE_PLACEHOLDER" = "날짜";
-"KEMO_KEEP_POSITION_TITLE" = "새로고침해도 보던 위치 유지";
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "이미지 장수 배지 (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
-"KEMO_LOGO_LOADING_TITLE" = "로고 로딩 점 애니메이션";
 "KEMO_PLAIN_REFRESH_TITLE" = "홈 새로고침을 원래 모양으로";
-"KEMO_SHEET_OPEN_TITLE" = "트윗을 시트로 열기";
 "KEMO_HIDE_PARODY_LABEL_TITLE" = "패러디 계정 라벨 숨기기";
-"KEMO_CARD_PRESS_TITLE" = "카드 눌림 효과";
 "KEMO_CORNER_MEDIA_TITLE" = "사진 한 장은 글 옆에";
 "KEMO_THUMB_SIDE" = "작은 사진 크기";
 "KEMO_HEADER_BUBBLE_TITLE" = "로고 말풍선 (새 트윗·DM·알림·D-day)";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "곡이 바뀌면 말풍선으로 알림";
 "KEMO_BUBBLE_MENU_TITLE" = "말풍선";
 "KEMO_BUBBLE_PAGE_TITLE" = "말풍선";
-"KEMO_BUBBLE_NEW_TWEETS_TITLE" = "새 트윗 개수";
-"KEMO_BUBBLE_NOTIFICATIONS_TITLE" = "DM·알림 도착";
 "KEMO_BUBBLE_DDAY_TITLE" = "D-day (D-1부터, 하루 한 번)";
 "KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE" = "곡 확인 간격";
 "KEMO_BUBBLE_SECONDS" = "%ld초";
@@ -507,9 +503,6 @@
 "KEMO_HAPTICS_TITLE" = "새로고침·말풍선 햅틱";
 "KEMO_DRAFT_RESTORE" = "이어 쓰던 글 불러오기";
 "KEMO_DRAFT_DISCARD" = "버리기";
-"KEMO_PAW_LOADING_TITLE" = "로딩 표시를 발자국으로";
-"KEMO_BOOKMARK_WIGGLE_TITLE" = "북마크할 때 아이콘 흔들림";
-"KEMO_IMAGE_REVEAL_TITLE" = "이미지가 흐림에서 선명하게 나타나기";
 "KEMO_RECENT_TWEETS_TITLE" = "방금 본 트윗 기록 (최근 30개)";
 "KEMO_MENU_RECENT" = "방금 본 트윗";
 "KEMO_RECENT_EMPTY" = "아직 기록이 없어요";
@@ -532,8 +525,6 @@
 "KEMO_ACCOUNT_BUBBLES_DETAIL" = "왼쪽 위 프로필 사진을 길게 누른 뒤 계정 위로 끌어 놓거나 눌러서 전환합니다.";
 "KEMO_ACCOUNT_DOCK_TITLE" = "계정 도크";
 "KEMO_ACCOUNT_DOCK_DETAIL" = "하단 탭 바를 위로 끌어올리면 화면이 올라가고, 아래 줄에서 계정을 눌러 전환합니다.";
-"KEMO_LOCAL_SEARCH_TITLE" = "더 당겨서 불러온 트윗에서 찾기";
-"KEMO_LOCAL_SEARCH_PLACEHOLDER" = "불러온 트윗에서 찾기";
 "SETTINGS_CODE_EXPORT_TITLE" = "설정 코드 복사";
 "SETTINGS_CODE_IMPORT_TITLE" = "설정 코드 붙여넣기";
 "SETTINGS_CODE_COPIED" = "클립보드에 복사했어요. 다른 기기에서는 코드를 스캔하거나 붙여넣으세요.";
@@ -541,10 +532,6 @@
 "SETTINGS_CODE_EMPTY" = "클립보드에 설정 코드가 없어요.";
 "SETTINGS_CODE_RESTORED" = "%ld개 설정을 복원했어요";
 
-"KEMO_TIMELINE_CARDS_TITLE" = "홈 타임라인 카드형";
-"KEMO_TIMELINE_CARDS_DETAIL" = "트윗마다 둥근 카드에 담고 카드 사이에 틈을 둬서 트윗끼리 구분이 잘 되게 해요.";
-"KEMO_NOTIFICATION_CARDS_TITLE" = "알림 카드형";
-"KEMO_NOTIFICATION_CARDS_DETAIL" = "알림을 카드로 보여주고, 여러 명이 모인 알림은 카드 더미처럼 보여줘요.";
 "KEMO_NOTIFICATION_SWIPE_REPLY_TITLE" = "알림 밀어서 답글";
 "KEMO_DIM_ACTIONS_TITLE" = "트윗 아래 숫자 줄 흐리게";
 "KEMO_DIM_ACTIONS_DETAIL" = "답글·재게시·마음에 들어요·조회수 줄을 흐리게 해서 글이 먼저 읽히게 해요.";
@@ -552,35 +539,6 @@
 "KEMO_BIGGER_TEXT_DETAIL" = "트윗 본문 글자를 조금 키우고, 프로필 사진과 이름·아이디도 함께 조금 키워 본문과 구분되게 해요. 앱을 다시 열면 모든 트윗에 적용돼요.";
 
 /* Cards and text (7.3.90) */
-"KEMO_CARD_STYLE_TITLE" = "카드·글자 꾸미기";
-"KEMO_CARD_SECTION_CARD" = "카드";
-"KEMO_CARD_SECTION_TEXT" = "글자와 프로필 사진";
-"KEMO_CARD_LOOK_OUTLINED" = "테두리";
-"KEMO_CARD_LOOK_FLOATING" = "떠 있는 카드";
-"KEMO_CARD_RADIUS" = "모서리 곡률";
-"KEMO_CARD_GAP" = "카드 간격";
-"KEMO_CARD_INNER" = "카드 안쪽 여백 (좌우)";
-"KEMO_CARD_INNER_V" = "카드 안쪽 여백 (위아래)";
-"KEMO_CARD_PAGE" = "카드 뒤 바탕";
-"KEMO_CARD_PAGE_DEFAULT" = "기본";
-"KEMO_CARD_PAGE_LIGHT" = "옅게";
-"KEMO_CARD_PAGE_TINT" = "테마색";
-"KEMO_CARD_PAGE_NONE" = "없음";
-"KEMO_CARD_PAPER" = "카드 바탕색";
-"KEMO_CARD_PAPER_DEFAULT" = "기본";
-"KEMO_CARD_PAPER_GRAY" = "회색";
-"KEMO_CARD_PAPER_WARM" = "따뜻한";
-"KEMO_CARD_PAPER_TINT" = "테마색";
-"KEMO_CARD_PAPER_CUSTOM" = "직접";
-"KEMO_CARD_BODY" = "본문 글자 크기";
-"KEMO_CARD_NAME" = "이름·아이디 크기";
-"KEMO_CARD_AVATAR" = "프로필 사진 크기";
-"KEMO_CARD_NAME_GAP" = "이름과 본문 사이 간격";
-"KEMO_CARD_BODY_NOTE" = "본문 글자 크기는 앱을 다시 열면 모든 트윗에 적용돼요. 나머지는 바로 바뀌어요.";
-"KEMO_CARD_RESET" = "처음 값으로 되돌리기";
-"KEMO_CARD_PREVIEW_BODY1" = "카드 모양을 바꾸면 여기 미리보기가 바로 바뀌어요.";
-"KEMO_CARD_PREVIEW_BODY2" = "이어진 트윗은 한 카드로 묶여요.";
-"KEMO_CARD_PREVIEW_BODY3" = "답글은 안쪽 상자에 들어가요.";
 
 "KEMO_SHARE_DUMP_TITLE" = "마지막 덤프 파일로 보내기";
 "KEMO_SHARE_DUMP_NONE" = "아직 뜬 덤프가 없어요. 볼륨 아래 버튼을 눌러 먼저 덤프를 떠 주세요.";

@@ -13,7 +13,6 @@
 #import "Settings/ModernSettingsCells.h"
 #import "Settings/Pages/KemoAliasListViewController.h"
 #import "Settings/Pages/KemoBubbleSettingsViewController.h"
-#import "Settings/Pages/KemoCardStyleViewController.h"
 #import "Settings/Pages/KemoHistorySettingsViewController.h"
 #import "Settings/Pages/KemoMediaSettingsViewController.h"
 #import "Settings/Pages/KemoEventListViewController.h"
@@ -94,12 +93,6 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 - (void)openKemoMedia:(NSDictionary*)sender {
     [self.navigationController pushViewController:[[KemoMediaSettingsViewController alloc] initWithAccount:self.account]
                                          animated:YES];
-}
-
-// "Cards and text": card look, corner radius, gaps, colour and text sizes
-// (until 7.3.96 a button at the bottom of the media page).
-- (void)openCardStyle:(NSDictionary*)sender {
-    [self.navigationController pushViewController:[KemoCardStyleViewController new] animated:YES];
 }
 
 - (void)openKemoHistory:(NSDictionary*)sender {

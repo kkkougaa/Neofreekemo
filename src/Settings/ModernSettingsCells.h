@@ -44,6 +44,7 @@
 @property (nonatomic, strong) UILabel* titleLabel;
 @property (nonatomic, strong) UILabel* valueLabel;
 @property (nonatomic, strong) UISlider* slider;
+@property (nonatomic, copy) NSString* unit; // after the value; "%" when not set
 - (void)configureWithTitle:(NSString*)title
                    minimum:(float)minimum
                    maximum:(float)maximum

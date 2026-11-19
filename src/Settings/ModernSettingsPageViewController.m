@@ -155,6 +155,7 @@
         ModernSettingsSliderCell* cell =
             [tableView dequeueReusableCellWithIdentifier:@"SliderCell" forIndexPath:indexPath];
         NSString* key = toggleData[@"key"];
+        cell.unit = toggleData[@"unit"];
         [cell configureWithTitle:[self localizedTitleForEntry:toggleData]
                          minimum:[toggleData[@"min"] floatValue]
                          maximum:[toggleData[@"max"] floatValue]
@@ -279,7 +280,7 @@
     if (!key) {
         return;
     }
-    // Whole percents only.
+    // Whole steps only.
     NSInteger value = lroundf(sender.value);
     sender.value = value;
     [[NSUserDefaults standardUserDefaults] setInteger:value forKey:key];

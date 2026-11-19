@@ -467,6 +467,8 @@
 
 "CUSTOM_SEND_SOUND_TITLE" = "Import send sound";
 "CUSTOM_SEND_SOUND_DEFAULT" = "No custom sound selected";
+"CUSTOM_SEND_SOUND_CHOOSE" = "Choose another sound";
+"CUSTOM_SEND_SOUND_REMOVE" = "Remove the sound";
 "CUSTOM_SEND_SOUND_FAILED_TITLE" = "Send sound import failed";
 "CUSTOM_SEND_SOUND_TOO_LONG" = "The sound you selected is too long. It must be 7 seconds or shorter.";
 
@@ -529,22 +531,16 @@
 "KEMO_EVENT_NAME_PLACEHOLDER" = "Event name";
 "KEMO_EVENT_ACCOUNT_PLACEHOLDER" = "@account (optional)";
 "KEMO_EVENT_DATE_PLACEHOLDER" = "Date";
-"KEMO_KEEP_POSITION_TITLE" = "Keep my place when refreshing";
 "KEMO_MEDIA_COUNT_BADGE_TITLE" = "Image count badge (1/4)";
 "KEMO_DDAY_HEADER" = "D-day";
-"KEMO_LOGO_LOADING_TITLE" = "Loading dots on the logo";
 "KEMO_PLAIN_REFRESH_TITLE" = "Plain pull to refresh on Home";
-"KEMO_SHEET_OPEN_TITLE" = "Open a tweet as a sheet";
 "KEMO_HIDE_PARODY_LABEL_TITLE" = "Hide parody account labels";
-"KEMO_CARD_PRESS_TITLE" = "Cards press in";
 "KEMO_CORNER_MEDIA_TITLE" = "A single photo beside the text";
 "KEMO_THUMB_SIDE" = "Small photo size";
 "KEMO_HEADER_BUBBLE_TITLE" = "Logo speech bubble";
 "KEMO_BUBBLE_SPOTIFY_TITLE" = "Bubble when the Spotify song changes";
 "KEMO_BUBBLE_MENU_TITLE" = "Speech bubble";
 "KEMO_BUBBLE_PAGE_TITLE" = "Speech bubble";
-"KEMO_BUBBLE_NEW_TWEETS_TITLE" = "New tweet count";
-"KEMO_BUBBLE_NOTIFICATIONS_TITLE" = "New DMs and notifications";
 "KEMO_BUBBLE_DDAY_TITLE" = "D-day (from D-1, once a day)";
 "KEMO_BUBBLE_SPOTIFY_INTERVAL_TITLE" = "Song check interval";
 "KEMO_BUBBLE_SECONDS" = "%ld s";
@@ -552,9 +548,6 @@
 "KEMO_HAPTICS_TITLE" = "Haptics for refresh and bubble";
 "KEMO_DRAFT_RESTORE" = "Restore draft";
 "KEMO_DRAFT_DISCARD" = "Discard";
-"KEMO_PAW_LOADING_TITLE" = "Paw prints for loading spinners";
-"KEMO_BOOKMARK_WIGGLE_TITLE" = "Bookmark icon wiggle";
-"KEMO_IMAGE_REVEAL_TITLE" = "Images fade in from a blur";
 "KEMO_RECENT_TWEETS_TITLE" = "Remember recently viewed tweets (last 30)";
 "KEMO_MENU_RECENT" = "Recently viewed";
 "KEMO_RECENT_EMPTY" = "Nothing here yet";
@@ -577,8 +570,6 @@
 "KEMO_ACCOUNT_BUBBLES_DETAIL" = "Long-press your profile picture at the top left, then drag onto an account or tap one to switch.";
 "KEMO_ACCOUNT_DOCK_TITLE" = "Account dock";
 "KEMO_ACCOUNT_DOCK_DETAIL" = "Drag the tab bar up to lift the screen, then tap an account in the row below to switch.";
-"KEMO_LOCAL_SEARCH_TITLE" = "Pull further to search loaded tweets";
-"KEMO_LOCAL_SEARCH_PLACEHOLDER" = "Search loaded tweets";
 "SETTINGS_CODE_EXPORT_TITLE" = "Copy settings code";
 "SETTINGS_CODE_IMPORT_TITLE" = "Paste settings code";
 "SETTINGS_CODE_COPIED" = "Copied to the clipboard. Scan the code on another device, or paste it there.";
@@ -589,10 +580,6 @@
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "Welcome!";
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "Make sure that you installed NeoFreeBird from our official GitHub. We can't help with issues from other iPAs, and you may not know whether your version is free from harmful code. If you have any questions, please make a GitHub issue.";
 
-"KEMO_TIMELINE_CARDS_TITLE" = "Home timeline cards";
-"KEMO_TIMELINE_CARDS_DETAIL" = "Puts every tweet on its own rounded card with a gap around it, so tweets are easier to tell apart.";
-"KEMO_NOTIFICATION_CARDS_TITLE" = "Notification cards";
-"KEMO_NOTIFICATION_CARDS_DETAIL" = "Shows notifications as cards, with grouped ones drawn as a small pile.";
 "KEMO_NOTIFICATION_SWIPE_REPLY_TITLE" = "Pull a notification to reply";
 "KEMO_DIM_ACTIONS_TITLE" = "Fade the row under tweets";
 "KEMO_DIM_ACTIONS_DETAIL" = "Fades the reply, repost, like and view counts so the text is read first.";
@@ -600,35 +587,6 @@
 "KEMO_BIGGER_TEXT_DETAIL" = "Makes tweet text a little larger, with a slightly bigger avatar and name line so the name still stands out. Reopen the app for it to apply to every tweet.";
 
 /* Cards and text (7.3.90) */
-"KEMO_CARD_STYLE_TITLE" = "Cards and text";
-"KEMO_CARD_SECTION_CARD" = "Cards";
-"KEMO_CARD_SECTION_TEXT" = "Text and avatars";
-"KEMO_CARD_LOOK_OUTLINED" = "Outlined";
-"KEMO_CARD_LOOK_FLOATING" = "Floating";
-"KEMO_CARD_RADIUS" = "Corner radius";
-"KEMO_CARD_GAP" = "Gap between cards";
-"KEMO_CARD_INNER" = "Room inside a card (left and right)";
-"KEMO_CARD_INNER_V" = "Room inside a card (above and below)";
-"KEMO_CARD_PAGE" = "Behind the cards";
-"KEMO_CARD_PAGE_DEFAULT" = "Default";
-"KEMO_CARD_PAGE_LIGHT" = "Lighter";
-"KEMO_CARD_PAGE_TINT" = "Tint";
-"KEMO_CARD_PAGE_NONE" = "None";
-"KEMO_CARD_PAPER" = "Card colour";
-"KEMO_CARD_PAPER_DEFAULT" = "Default";
-"KEMO_CARD_PAPER_GRAY" = "Grey";
-"KEMO_CARD_PAPER_WARM" = "Warm";
-"KEMO_CARD_PAPER_TINT" = "Theme";
-"KEMO_CARD_PAPER_CUSTOM" = "Custom";
-"KEMO_CARD_BODY" = "Tweet text size";
-"KEMO_CARD_NAME" = "Name and handle size";
-"KEMO_CARD_AVATAR" = "Avatar size";
-"KEMO_CARD_NAME_GAP" = "Space between name and text";
-"KEMO_CARD_BODY_NOTE" = "Tweet text size applies to every tweet after reopening the app. Everything else changes at once.";
-"KEMO_CARD_RESET" = "Reset to defaults";
-"KEMO_CARD_PREVIEW_BODY1" = "This preview changes as you adjust the cards.";
-"KEMO_CARD_PREVIEW_BODY2" = "Tweets in a thread share one card.";
-"KEMO_CARD_PREVIEW_BODY3" = "Replies sit in the inner box.";
 
 "KEMO_SHARE_DUMP_TITLE" = "Send the last dump as a file";
 "KEMO_SHARE_DUMP_NONE" = "No dump yet. Press volume down to make one first.";

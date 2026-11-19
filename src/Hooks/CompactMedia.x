@@ -3,6 +3,7 @@
 //  NeoFreeBird
 //
 
+#import <os/lock.h>
 #import "HookHelpers.h"
 
 // MARK: - Small media in timeline tweets
@@ -45,12 +46,19 @@ static Class gLayoutStateClass = Nil;
 static Class gLayoutMetricsClass = Nil;
 static CGFloat gLastMediaWidth = 0;
 
+// While X lays one tweet out (see "The text beside the photo" below). Rows
+// are laid out off the main thread too, so these are per thread.
+static __thread BOOL tInTweet = NO;       // inside the layout of a row's own tweet
+static __thread CGFloat tTextRight = 0;   // how much narrower that tweet's text is laid out
+static __thread NSInteger tNested = 0;    // inside the layout of what a tweet carries (a quoted tweet, a card)
+static __thread BOOL tTextMiss = NO;      // the text was to be narrower and X did not take it
+
 static BOOL NFBCompactMedia(void) {
     return [BHTSettings boolForKey:kCompactKey] && ![BHTSettings boolForKey:kSensitiveKey];
 }
 
 // 7.3.99: 92 points was large next to a line or two of text; 56 is about three
-// lines. Chosen on the "Cards and text" page.
+// lines. Chosen with the slider on the media settings page.
 static CGFloat ThumbSide(void) {
     id value = [[NSUserDefaults standardUserDefaults] objectForKey:kThumbKey];
     CGFloat side = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 56;
@@ -177,8 +185,12 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 }
 
 // Layout states are cached per row; one made in the other mode is stale.
+// What a tweet carries (a quoted tweet with a text of its own) is laid out in
+// here: that text is not the one that sits beside the photo.
 - (id)layoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
+    tNested++;
     id state = %orig;
+    tNested--;
     if (state) {
         gLayoutStateClass = [state class];
         objc_setAssociatedObject(state, kLayoutModeKey, @(NFBMediaMode()),
@@ -344,9 +356,8 @@ static UIView* SmallSquare(UIView* view, int depth) {
 // short the text: most of that line was empty. With "kemo_corner_media" it
 // sits at the top right, beside the name line and the first lines of text:
 //
-//  - where X makes the row's layout, the tweet's text is made narrower on the
-//    right by the photo and a gap (Readability.x does that, with the reply
-//    indent, in its hook on +[T1StatusCell cellLayoutForViewModel:...]);
+//  - the tweet's text, and only its text, is laid out narrower on the right by
+//    the photo and a gap (see "The text beside the photo" below);
 //  - X's layout for the row is read (its TFNVerticalLayout items): where the
 //    photo's place is, and what sits between the name line and the photo. The
 //    photo goes up beside the first of those, the row loses what that saves
@@ -369,17 +380,16 @@ static const void* kCornerNoteKey = &kCornerNoteKey; // on a row's layout: {side
 static BOOL gPlacingCorner = NO;
 static NSInteger gCornerPlaced = 0, gCornerSkipped = 0;
 static NSString* gCornerLog = @"-";
+// Set once the hooks that lay the text out narrower are in (see the constructor).
+// Without them the photo stays under the text, at the right end.
+static BOOL gTextHooked = NO;
 
 // The side of the photo that goes beside the text for this tweet, or 0.
-CGFloat NFBCornerThumbFor(id viewModel) {
-    if (!viewModel || !NFBCompactMedia() || ![BHTSettings boolForKey:kCornerKey]) {
+static CGFloat NFBCornerThumbFor(id viewModel) {
+    if (!viewModel || !gTextHooked || !NFBCompactMedia() || ![BHTSettings boolForKey:kCornerKey]) {
         return 0;
     }
     return NFBMediaCount(viewModel) == 1 ? ThumbSide() : 0;
-}
-
-CGFloat NFBCornerGap(void) {
-    return kCornerGap;
 }
 
 static CGRect ItemFrame(id item) {
@@ -428,7 +438,7 @@ static id FindThumbItem(id layout, CGFloat thumb, int depth) {
 // up beside the text saves. Safe to call again on a layout X hands out a
 // second time. The note on the layout is {side, taken off the height, how far
 // up the photo goes}.
-void NFBCornerAdjustLayout(id layout, CGFloat thumb) {
+static void NFBCornerAdjustLayout(id layout, CGFloat thumb) {
     if (!layout) {
         return;
     }
@@ -521,8 +531,8 @@ static BOOL StillPlaced(UIView* view) {
            fabs(CGRectGetWidth(given) - CGRectGetWidth(now)) < 0.5 && fabs(CGRectGetHeight(given) - CGRectGetHeight(now)) < 0.5;
 }
 
-// Called by Readability.x right after X has laid a tweet out.
-void NFBPlaceCornerMedia(UIView* status) {
+// Called right after X has laid a tweet out.
+static void NFBPlaceCornerMedia(UIView* status) {
     UITableViewCell* cell = nil;
     int depth = 0;
     for (UIView* up = status.superview; up && depth < 8; up = up.superview, depth++) {
@@ -606,6 +616,245 @@ void NFBPlaceCornerMedia(UIView* status) {
         gCornerPlaced++;
     }
 }
+
+// MARK: The text beside the photo
+// The photo needs room at the right of the text, so the text is laid out
+// narrower by the photo and a gap.
+//
+// 7.3.99-7.3.104 did that with the row's layout metrics (more content inset on
+// the right, where X makes the row's layout). A tweet on screen works its
+// layout out again by itself, from the list's metrics; X keeps the text's old
+// layout while it still holds (so the text stayed narrow) and lays the rest
+// out anew, which is why the name line, the "..." button and the action row
+// kept their full width. But whenever X did lay the text out again it went
+// back to the full width, under the photo. 7.3.105 gave the tweet's own
+// layout the row's narrower metrics as well: then everything was narrower,
+// the "..." button and the action row too, and the photo, which sits at the
+// right end of the name line, was that far from the edge.
+//
+// Now the metrics of the row and of the tweet are left alone. Each part of a
+// tweet is laid out by an adapter of its own, and only the text's
+// (T1StandardStatusBodyViewAdapter) gets narrower metrics, wherever a row's
+// tweet is laid out: in +[T1StatusCell cellLayoutForViewModel:...] (the row
+// and its height), in the tweet view's own update, and in the layout state
+// generator both go through. A text layout carries how much narrower it was
+// made, and one made for another width is no longer valid.
+
+static UIEdgeInsets MetricInsets(id metrics, NSString* name) {
+    SEL selector = NSSelectorFromString(name);
+    return [metrics respondsToSelector:selector] ? ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(metrics, selector)
+                                                 : UIEdgeInsetsZero;
+}
+
+static CGFloat MetricNumber(id metrics, NSString* name) {
+    SEL selector = NSSelectorFromString(name);
+    return [metrics respondsToSelector:selector] ? ((CGFloat (*)(id, SEL))objc_msgSend)(metrics, selector) : 0;
+}
+
+// X's metrics with `right` more room at the right of the content, or nil
+// when X does not take it. The last answer is kept: rows are laid out in
+// runs, and a copy of the metrics per tweet is slow.
+static os_unfair_lock gNarrowLock = OS_UNFAIR_LOCK_INIT;
+static id gNarrowSource = nil, gNarrowResult = nil;
+static CGFloat gNarrowRight = -1;
+
+static id NarrowedMetrics(id metrics, CGFloat right) {
+    if (!metrics || right <= 0) {
+        return nil;
+    }
+    id result = nil;
+    os_unfair_lock_lock(&gNarrowLock);
+    if (gNarrowResult && fabs(gNarrowRight - right) < 0.01 &&
+        (gNarrowSource == metrics || [gNarrowSource isEqual:metrics])) {
+        result = gNarrowResult;
+    }
+    os_unfair_lock_unlock(&gNarrowLock);
+    if (result) {
+        return result;
+    }
+    SEL selector = NSSelectorFromString(@"layoutMetricsWithContentEdgeInsets:");
+    if (![metrics respondsToSelector:selector]) {
+        return nil;
+    }
+    CGFloat before = MetricNumber(metrics, @"contentWidth");
+    UIEdgeInsets content = MetricInsets(metrics, @"contentEdgeInsets");
+    content.right += right;
+    result = ((id (*)(id, SEL, UIEdgeInsets))objc_msgSend)(metrics, selector, content);
+    if (!result || MetricNumber(result, @"contentWidth") > before - right / 2) {
+        return nil;
+    }
+    os_unfair_lock_lock(&gNarrowLock);
+    gNarrowSource = metrics;
+    gNarrowResult = result;
+    gNarrowRight = right;
+    os_unfair_lock_unlock(&gNarrowLock);
+    return result;
+}
+
+static const void* kTextRightKey = &kTextRightKey; // on a text layout: how much narrower it was made
+static Class gGeneratorClass = Nil, gStatusViewClass = Nil;
+static BOOL gRowHooked = NO, gStateHooked = NO;
+static NSInteger gTweetLayouts = 0, gStateUpdates = 0, gTextNarrowed = 0, gTextMisses = 0, gTextStale = 0;
+static NSInteger gAvatarShrinksKept = 0;
+
+// What the text of this tweet is narrower by, for the time X lays the tweet
+// out. `was` keeps what was set before (layouts can nest).
+typedef struct {
+    BOOL inTweet;
+    CGFloat right;
+} NFBTextScope;
+
+static NFBTextScope EnterTweet(id viewModel) {
+    NFBTextScope was = {tInTweet, tTextRight};
+    CGFloat thumb = NFBCornerThumbFor(viewModel);
+    tInTweet = YES;
+    tTextRight = thumb > 0 ? thumb + kCornerGap : 0;
+    return was;
+}
+
+static void LeaveTweet(NFBTextScope was) {
+    tInTweet = was.inTweet;
+    tTextRight = was.right;
+}
+
+%group CornerText
+
+// Only a row's own tweet: quoted tweets, the tweet a conversation is about and
+// tweets in messages have generators of their own.
+%hook T1StandardStatusViewLayoutStateGenerator
+
+- (id)layoutStateForViewModel:(id)viewModel
+                      options:(NSUInteger)options
+                      account:(id)account
+                layoutMetrics:(id)layoutMetrics
+      withPreviousLayoutState:(id)previousLayoutState {
+    if (tNested > 0 || object_getClass(self) != gGeneratorClass) {
+        return %orig;
+    }
+    gTweetLayouts++;
+    NFBTextScope was = EnterTweet(viewModel);
+    id state = %orig;
+    LeaveTweet(was);
+    return state;
+}
+
+%end
+
+%hook T1StandardStatusBodyViewAdapter
+
+- (id)layoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
+    CGFloat right = (tInTweet && tNested == 0) ? tTextRight : 0;
+    id narrowed = right > 0 ? NarrowedMetrics(layoutMetrics, right) : nil;
+    if (right > 0 && !narrowed) {
+        tTextMiss = YES;
+        gTextMisses++;
+    }
+    id state = narrowed ? %orig(viewModel, narrowed) : %orig;
+    if (state) {
+        if (narrowed) {
+            gTextNarrowed++;
+            objc_setAssociatedObject(state, kTextRightKey, @(right), OBJC_ASSOCIATION_RETAIN);
+        } else if (objc_getAssociatedObject(state, kTextRightKey)) {
+            objc_setAssociatedObject(state, kTextRightKey, nil, OBJC_ASSOCIATION_RETAIN);
+        }
+    }
+    return state;
+}
+
+// X asks this before it keeps a text layout it already has. Inside a row's
+// tweet the layout must have been made for the width wanted now; anywhere
+// else it is checked against the metrics it was made with.
+- (BOOL)isLayoutState:(id)state validForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics {
+    NSNumber* stamp = state ? objc_getAssociatedObject(state, kTextRightKey) : nil;
+    CGFloat made = stamp ? stamp.doubleValue : 0;
+    if (tInTweet && tNested == 0 && fabs(made - tTextRight) > 0.01) {
+        gTextStale++;
+        return NO;
+    }
+    id narrowed = made > 0 ? NarrowedMetrics(layoutMetrics, made) : nil;
+    return narrowed ? %orig(state, viewModel, narrowed) : %orig;
+}
+
+%end
+
+%end
+
+// The row: its layout (and height) is made here, with the tweet's inside it.
+%group CornerRow
+
+%hook T1StatusCell
+
++ (id)cellLayoutForViewModel:(id)viewModel
+                     options:(NSUInteger)options
+                     account:(id)account
+               layoutMetrics:(id)layoutMetrics
+          withPreviousLayout:(id)previousLayout {
+    CGFloat thumb = NFBCornerThumbFor(viewModel);
+    BOOL missBefore = tTextMiss;
+    tTextMiss = NO;
+    NFBTextScope was = EnterTweet(viewModel);
+    id layout = %orig;
+    LeaveTweet(was);
+    BOOL miss = tTextMiss;
+    tTextMiss = missBefore;
+    // The photo only goes up beside the text when the text made room for it.
+    NFBCornerAdjustLayout(layout, miss ? 0 : thumb);
+    return layout;
+}
+
+%end
+
+%end
+
+// A tweet on screen working its layout out again (a like count changed).
+%group CornerState
+
+%hook T1StandardStatusView
+
+- (id)_t1_updateLayoutStateWithLayoutMetrics:(id)metrics {
+    if (object_getClass(self) != gStatusViewClass) {
+        return %orig;
+    }
+    gStateUpdates++;
+    SEL modelSelector = NSSelectorFromString(@"viewModel");
+    id viewModel = [(id)self respondsToSelector:modelSelector] ? ((id (*)(id, SEL))objc_msgSend)(self, modelSelector) : nil;
+    NFBTextScope was = EnterTweet(viewModel);
+    id state = %orig;
+    LeaveTweet(was);
+    return state;
+}
+
+%end
+
+%end
+
+// After X has laid a tweet out, its photo goes up beside the text. Quoted
+// tweets and other kinds of tweet view keep X's layout.
+%hook T1StandardStatusView
+
+- (void)layoutSubviews {
+    %orig;
+    if (gStatusViewClass && object_getClass(self) == gStatusViewClass) {
+        NFBPlaceCornerMedia((UIView*)self);
+    }
+}
+
+%end
+
+// X shrinks a tweet's avatar so a wide strip of photos can pass under it.
+// With small media the strip is short and never reaches the avatar, so the
+// avatar keeps its size.
+%hook T1TappableStatusFleetLineItemView
+
+- (void)setTransform:(CGAffineTransform)transform {
+    if (!CGAffineTransformIsIdentity(transform) && NFBCompactMedia()) {
+        gAvatarShrinksKept++;
+        return;
+    }
+    %orig;
+}
+
+%end
 
 %hook T1StatusViewAttachmentContainerView
 
@@ -763,13 +1012,35 @@ static void TidyCover(UIView* cover) {
 // MARK: Mode changes
 
 static void NFBReloadTimelines(UIView* view) {
-    if ([view isKindOfClass:[UITableView class]] && view.window) {
-        [(UITableView*)view reloadData];
+    if ([view isKindOfClass:[UITableView class]]) {
+        // X's lists are subclasses (TFNTableView). A plain table is one of
+        // our settings pages: reloading it would take the slider out from
+        // under the finger that is moving it.
+        if (view.class != [UITableView class]) {
+            [(UITableView*)view reloadData];
+        }
         return;
     }
     for (UIView* sub in view.subviews) {
         NFBReloadTimelines(sub);
     }
+}
+
+// The lists that are not on screen: the photo's size is chosen on a settings
+// page, with the timeline under it, out of the window. They measure their
+// rows again too, so the timeline is right when the reader goes back.
+static void NFBReloadHidden(UIViewController* controller, int depth) {
+    if (!controller || depth > 12) {
+        return;
+    }
+    UIView* view = controller.viewIfLoaded;
+    if (view && !view.window) {
+        NFBReloadTimelines(view);
+    }
+    for (UIViewController* child in controller.childViewControllers) {
+        NFBReloadHidden(child, depth + 1);
+    }
+    NFBReloadHidden(controller.presentedViewController, depth + 1);
 }
 
 static void NFBWatchMode(void) {
@@ -787,15 +1058,27 @@ static void NFBWatchMode(void) {
                     if (NFBMediaMode() == lastMode) {
                         return;
                     }
+                    // A slider on the settings page changes the mode many
+                    // times a second: the lists are told once it has settled.
+                    static BOOL waiting = NO;
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        NSInteger mode = NFBMediaMode();
-                        if (mode == lastMode) {
+                        if (waiting) {
                             return;
                         }
-                        lastMode = mode;
-                        for (UIWindow* window in UIApplication.sharedApplication.windows) {
-                            NFBReloadTimelines(window);
-                        }
+                        waiting = YES;
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                                       dispatch_get_main_queue(), ^{
+                                           waiting = NO;
+                                           NSInteger mode = NFBMediaMode();
+                                           if (mode == lastMode) {
+                                               return;
+                                           }
+                                           lastMode = mode;
+                                           for (UIWindow* window in UIApplication.sharedApplication.windows) {
+                                               NFBReloadTimelines(window);
+                                               NFBReloadHidden(window.rootViewController, 0);
+                                           }
+                                       });
                     });
                 }];
 }
@@ -805,14 +1088,18 @@ NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
                                       @"strips=%ld carouselCalls=%ld cardCalls=%ld adaptiveOff=%ld vertical=%ld "
                                       @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) side=%.0f corner=%d "
-                                      @"cornerPlaced=%ld cornerSkipped=%ld (%@) lastViewModel=%@",
+                                      @"cornerPlaced=%ld cornerSkipped=%ld (%@) lastViewModel=%@\n"
+                                      @"text: hooks=%d%d%d tweetLayouts=%ld stateUpdates=%ld narrowed=%ld misses=%ld stale=%ld "
+                                      @"avatarShrinksKept=%ld",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
                                       (long)gCardCalls, (long)gAdaptiveOff, (long)gVertical, (long)gVerticalVideos,
                                       gVerticalVideoHooked, (long)gRightContainers, (long)gRightAligned, gRightLog,
                                       ThumbSide(), [BHTSettings boolForKey:kCornerKey], (long)gCornerPlaced,
-                                      (long)gCornerSkipped, gCornerLog, gLastViewModelClass ?: @"-"];
+                                      (long)gCornerSkipped, gCornerLog, gLastViewModelClass ?: @"-", gTextHooked,
+                                      gRowHooked, gStateHooked, (long)gTweetLayouts, (long)gStateUpdates,
+                                      (long)gTextNarrowed, (long)gTextMisses, (long)gTextStale, (long)gAvatarShrinksKept];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.
@@ -854,6 +1141,29 @@ CGFloat NFBLastMediaWidth(void) {
     if (objc_getClass("HFSensitiveTweetBlurredInterstitialView")) {
         %init(SensitiveCover);
     }
+    // One photo beside the text. The methods were read from X 12.44's class
+    // list; each hook only goes in where its method exists. Without the first
+    // two the text cannot be made narrower, and the photo stays under it.
+    Class generator = objc_getClass("T1StandardStatusViewLayoutStateGenerator");
+    Class body = objc_getClass("T1StandardStatusBodyViewAdapter");
+    Class statusCell = objc_getClass("T1StatusCell");
+    Class statusView = objc_getClass("T1StandardStatusView");
+    gGeneratorClass = generator;
+    gStatusViewClass = statusView;
+    if (generator && body && statusCell &&
+        class_getInstanceMethod(generator, NSSelectorFromString(@"layoutStateForViewModel:options:account:layoutMetrics:withPreviousLayoutState:")) &&
+        class_getInstanceMethod(body, NSSelectorFromString(@"layoutStateForViewModel:layoutMetrics:")) &&
+        class_getInstanceMethod(body, NSSelectorFromString(@"isLayoutState:validForViewModel:layoutMetrics:")) &&
+        class_getClassMethod(statusCell, NSSelectorFromString(@"cellLayoutForViewModel:options:account:layoutMetrics:withPreviousLayout:"))) {
+        %init(CornerText);
+        %init(CornerRow);
+        gTextHooked = YES;
+        gRowHooked = YES;
+        if (statusView && class_getInstanceMethod(statusView, NSSelectorFromString(@"_t1_updateLayoutStateWithLayoutMetrics:"))) {
+            %init(CornerState);
+            gStateHooked = YES;
+        }
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         NFBWatchMode();
     });
@@ -869,9 +1179,15 @@ CGFloat NFBLastMediaWidth(void) {
                            }
                        }
                        NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+                       // 7.3.106: and the settings of the cards (7.3.86-7.3.105).
                        for (NSString* key in @[ @"nsfw_ai_blur", @"nsfw_ai_threshold",
                                                  @"nsfw_anime_threshold", @"nfb_nsfw_blur_before",
-                                                 @"kemo_double_tap_like" ]) {
+                                                 @"kemo_double_tap_like", @"kemo_timeline_cards",
+                                                 @"kemo_notification_cards", @"kemo_card_look", @"kemo_card_radius",
+                                                 @"kemo_card_gap", @"kemo_card_inner", @"kemo_card_inner_v",
+                                                 @"kemo_card_page", @"kemo_card_body", @"kemo_card_name",
+                                                 @"kemo_card_avatar", @"kemo_card_name_gap", @"kemo_card_paper",
+                                                 @"kemo_card_paper_rgb", @"kemo_thread_indent_measured" ]) {
                            if ([defaults objectForKey:key]) {
                                [defaults removeObjectForKey:key];
                            }

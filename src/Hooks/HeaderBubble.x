@@ -594,102 +594,6 @@ void NFBShowBubble(NSString* text) {
     NFBShowBubbleWithIcon(text, nil);
 }
 
-// MARK: New tweets (stays until they have been scrolled past)
-
-static __weak id gNewController;
-static NSDictionary<NSString*, NSNumber*>* gNewIndex; // tweet id -> position in the list
-static NSArray<NSNumber*>* gNewPositions;               // positions of the new tweets
-static NSUInteger gNewCount;
-static NSDate* gNewAt;
-
-static NSString* NewTweetsText(NSUInteger count) {
-    return [NSString stringWithFormat:@"새 트윗 %lu건", (unsigned long)count];
-}
-
-static void ClearNewTweets(void) {
-    gNewCount = 0;
-    gNewShown = 0;
-    gNewController = nil;
-    gNewIndex = nil;
-    gNewPositions = nil;
-    gPersistentText = nil;
-    RenderBubble();
-}
-
-void NFBSetNewTweets(id controller, NSArray<NSString*>* entryIDs, NSArray<NSNumber*>* positions) {
-    NSUInteger count = positions.count;
-    if (!BubbleEnabled() || ![BHTSettings boolForKey:@"kemo_bubble_new_tweets"] || count == 0) {
-        return;
-    }
-    NSMutableDictionary<NSString*, NSNumber*>* index = [NSMutableDictionary dictionary];
-    for (NSUInteger i = 0; i < entryIDs.count; i++) {
-        NSString* entryID = entryIDs[i];
-        index[[entryID hasPrefix:@"tweet-"] ? [entryID substringFromIndex:6] : entryID] = @(i);
-    }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        gNewController = controller;
-        gNewIndex = index;
-        gNewPositions = positions;
-        gNewCount = count;
-        gNewShown = count;
-        gNewAt = [NSDate date];
-        gPersistentText = NewTweetsText(count);
-        RenderBubble();
-    });
-}
-
-// How many of the new tweets are still above the screen: at the very top it is none,
-// otherwise the position of the first tweet in view.
-static void UpdateNewTweets(void) {
-    if (gNewCount == 0) {
-        return;
-    }
-    if (-[gNewAt timeIntervalSinceNow] > 600) {
-        ClearNewTweets();
-        return;
-    }
-    UITableView* table = [gNewController valueForKey:@"tableView"];
-    if (![table isKindOfClass:[UITableView class]] || !table.window) {
-        return;
-    }
-
-    NSUInteger remaining = gNewCount;
-    CGFloat top = table.contentOffset.y + table.adjustedContentInset.top;
-    if (top <= 4) {
-        remaining = 0;
-    } else {
-        CGFloat best = CGFLOAT_MAX;
-        NSNumber* position = nil;
-        for (UITableViewCell* cell in table.visibleCells) {
-            NSNumber* index = gNewIndex[cell.accessibilityIdentifier ?: @""];
-            if (index && CGRectGetMaxY(cell.frame) > top && CGRectGetMinY(cell.frame) < best) {
-                best = CGRectGetMinY(cell.frame);
-                position = index;
-            }
-        }
-        if (position) {
-            // New tweets above the first one in view (they need not be all at the top).
-            remaining = 0;
-            for (NSNumber* newPosition in gNewPositions) {
-                if (newPosition.unsignedIntegerValue < position.unsignedIntegerValue) {
-                    remaining++;
-                }
-            }
-        }
-    }
-
-    if (remaining == gNewShown) {
-        return;
-    }
-    gNewShown = remaining;
-    if (remaining == 0) {
-        ClearNewTweets();
-    } else {
-        gPersistentText = NewTweetsText(remaining);
-        RenderBubble();
-    }
-}
-
 // MARK: Refresh marker
 
 static NSDate* gRefreshAt;
@@ -793,18 +697,15 @@ void NFBNewTweetsLog(NSString* line) {
 
 NSString* NFBBubbleDebugText(void) {
     NSMutableString* out = [NSMutableString string];
-    [out appendFormat:@"bubble=%d newTweets=%d notifications=%d dday=%d spotify=%d interval=%ld%c",
-                      BubbleEnabled(), [BHTSettings boolForKey:@"kemo_bubble_new_tweets"],
-                      [BHTSettings boolForKey:@"kemo_bubble_notifications"],
+    [out appendFormat:@"bubble=%d dday=%d spotify=%d interval=%ld%c",
+                      BubbleEnabled(),
                       [BHTSettings boolForKey:@"kemo_bubble_dday"],
                       [BHTSettings boolForKey:@"kemo_bubble_spotify"],
                       (long)[BHTSettings integerForKey:@"kemo_bubble_spotify_interval"], 10];
     [out appendFormat:@"logoShift: %@%c", gLogoShiftDebug, 10];
     [out appendFormat:@"spotify: connected=%d last=%@%c", [BHTSpotify shared].isConnected, gSpotifyLog, 10];
-    [out appendFormat:@"keepPosition=%d mediaOnly=%d%c", [BHTSettings boolForKey:@"kemo_keep_position"], [BHTSettings boolForKey:@"kemo_media_only"], 10];
+    [out appendFormat:@"mediaOnly=%d%c", [BHTSettings boolForKey:@"kemo_media_only"], 10];
     [out appendFormat:@"account=%@ badgeLast=%@ lastScan=%@%c", gAccountKey, gBadgeLast, gLastScanText, 10];
-    [out appendFormat:@"newCount=%lu shown=%lu persistent=%@%c", (unsigned long)gNewCount,
-                      (unsigned long)gNewShown, gPersistentText, 10];
     for (NSString* line in gNewTweetsLog) {
         [out appendFormat:@"newTweets: %@%c", line, 10];
     }
@@ -868,13 +769,7 @@ static void CheckBadges(UIWindow* window) {
     }
     for (NSString* kind in now) {
         NSInteger count = [now[kind] integerValue];
-        NSInteger last = [gBadgeLast[kind] integerValue];
-        if (gBadgeLast[kind] && count > last && [BHTSettings boolForKey:@"kemo_bubble_notifications"]) {
-            NSString* text = [kind isEqualToString:@"dm"]
-                                 ? [NSString stringWithFormat:@"새 DM %ld건", (long)(count - last)]
-                                 : [NSString stringWithFormat:@"새 알림 %ld건", (long)(count - last)];
-            NFBShowBubbleWithIcon(text, [kind isEqualToString:@"dm"] ? @"dm" : @"bell");
-        }
+        // (Until 7.3.105 a rise was said in the bubble: "새 DM 2건".)
         gBadgeLast[kind] = @(count);
     }
 }
@@ -986,7 +881,6 @@ static void Tick(void) {
     if (headerLogo) {
         ApplyLogoShift(headerLogo.superview.superview);
     }
-    UpdateNewTweets();
     CheckSpotify();
     if (gTicks % 8 == 0) {
         CheckBadges(window);

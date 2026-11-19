@@ -130,6 +130,32 @@ static BOOL IsRecentController(id controller) {
     return [NSStringFromClass([controller class]) containsString:@"NFBRecent"];
 }
 
+// X fills its articles page after it is shown: once the reader has read an
+// article the list of articles arrives later and lands above our page, which
+// then showed X's articles again (until 7.3.105 the page was only told apart
+// by X's "nothing read yet" text, which is not there once there are articles).
+// Our page is put back on top whenever the page under it is laid out.
+static UIViewController* RecentChildOf(UIViewController* page) {
+    for (UIViewController* child in page.childViewControllers) {
+        if ([NSStringFromClass([child class]) containsString:@"NFBRecent"]) {
+            return child;
+        }
+    }
+    return nil;
+}
+
+static void KeepOnTop(UIViewController* page, UIViewController* recent) {
+    if (!recent.isViewLoaded || recent.view.superview != page.view) {
+        return;
+    }
+    if (!CGRectEqualToRect(recent.view.frame, page.view.bounds)) {
+        recent.view.frame = page.view.bounds;
+    }
+    if (page.view.subviews.lastObject != recent.view) {
+        [page.view bringSubviewToFront:recent.view];
+    }
+}
+
 static void CoverPage(UIViewController* page, id owner) {
     if (!page.isViewLoaded) {
         return;
@@ -147,6 +173,7 @@ static void CoverPage(UIViewController* page, id owner) {
         [recent didMoveToParentViewController:page];
     }
     recent.view.frame = page.view.bounds;
+    KeepOnTop(page, recent);
 }
 
 %hook _TtC10TFNUISwift29LegacySegmentedViewController
@@ -208,6 +235,12 @@ static void CoverPage(UIViewController* page, id owner) {
     %orig;
     UIViewController* page = (UIViewController*)self;
     if (![BHTSettings boolForKey:@"kemo_history_tabs"] || !page.isViewLoaded) {
+        return;
+    }
+    // Covered already: stay above what X has added since.
+    UIViewController* covering = RecentChildOf(page);
+    if (covering) {
+        KeepOnTop(page, covering);
         return;
     }
     __block BOOL articles = NO;

@@ -5,26 +5,20 @@
 
 #import "HookHelpers.h"
 
-// MARK: - Header logo loading dots
+// MARK: - The header logo
 
-// While the timeline refreshes, the bird inside the logo's speech bubble is swapped for
-// dots that count . .. ...; when the refresh ends the bird comes back and the logo pops.
-// Refresh start/end comes from the pull-to-refresh control.
+// Finding the logo in the top bar and drawing it from the bundled SVGs, for
+// the header bubble and the logo menu. (Until 7.3.105 the bird inside the logo
+// was swapped for counting dots while the timeline refreshed.)
 
 @interface TFNPullToRefreshControl : UIView
 - (BOOL)loading;
 @end
 
-extern void NFBNoteRefreshStarted(void);
-extern void NFBKeepPositionBegin(UIView* control);
-extern void NFBKeepPositionEnd(void);
 // Readability.x: notes what the pull looked like, for the shake dump.
 extern void NFBNotePullStatus(UIView* control, unsigned long long status);
 
-static const NSInteger kLogoDotsTag = 0x4E464C44;
 static const CGFloat kLogoViewBox = 1024.0;
-// Middle of the bubble hole (x 53-445, y 66-401 in the 1024 logo units).
-static const CGPoint kBubbleCenter = {249.0, 232.0};
 
 UIImageView* HeaderLogoInWindow(UIWindow* window) {
     NSMutableArray<UIView*>* queue = [NSMutableArray arrayWithObject:window];
@@ -106,142 +100,11 @@ UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color) {
     }];
 }
 
-@interface NFBLogoDots : UIView
-@property (nonatomic, strong) NSTimer* timer;
-@property (nonatomic, assign) NSInteger count;
-@property (nonatomic, strong) UIImage* originalImage;
-@property (nonatomic, strong) NSArray<UIView*>* dots;
-@end
-
-@implementation NFBLogoDots
-
-- (void)tick {
-    NSInteger previous = self.count;
-    self.count = self.count % 3 + 1;
-    for (NSUInteger i = 0; i < self.dots.count; i++) {
-        BOOL visible = (NSInteger)i < self.count;
-        UIView* dot = self.dots[i];
-        if (visible && dot.alpha < 0.5 && previous != 0) {
-            // The dot that just appeared pops in a little, and that is all.
-            dot.alpha = 1;
-            dot.transform = CGAffineTransformMakeScale(0.5, 0.5);
-            [UIView animateWithDuration:0.22
-                                  delay:0
-                 usingSpringWithDamping:0.6
-                  initialSpringVelocity:0
-                                options:0
-                             animations:^{
-                                 dot.transform = CGAffineTransformIdentity;
-                             }
-                             completion:nil];
-        } else {
-            dot.alpha = visible ? 1.0 : 0.0;
-        }
-    }
-}
-
-- (void)start {
-    [self.timer invalidate];
-    self.count = 0;
-    [self tick];
-    __weak NFBLogoDots* weakSelf = self;
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:0.35
-                                                 repeats:YES
-                                                   block:^(NSTimer* timer) {
-                                                       [weakSelf tick];
-                                                   }];
-}
-
-- (void)stop {
-    [self.timer invalidate];
-    self.timer = nil;
-    [self removeFromSuperview];
-}
-
-@end
-
-static void StartLogoLoading(void) {
-    if (![BHTSettings boolForKey:@"kemo_logo_loading"]) {
-        return;
-    }
-    UIWindow* window = NFBKeyWindow();
-    UIImageView* logo = window ? HeaderLogoInWindow(window) : nil;
-    if (!logo || !logo.image || [logo viewWithTag:kLogoDotsTag]) {
-        return;
-    }
-
-    UIColor* color = logo.tintColor ?: CurrentAccentColor();
-    UIImage* empty = NFBRenderLogoSVG(@"logo_loading.svg", logo.bounds.size, color);
-    if (!empty) {
-        return;
-    }
-
-    CGFloat width = CGRectGetWidth(logo.bounds);
-    CGFloat unit = width / kLogoViewBox;
-    // The bubble hole is about 392 of the 1024 logo units wide; the dots take about two thirds of it.
-    CGFloat bubbleWidth = 392.0 * unit;
-    CGFloat diameter = bubbleWidth * 0.16;
-    CGFloat gap = bubbleWidth * 0.26;
-    CGPoint center = CGPointMake(kBubbleCenter.x * unit, kBubbleCenter.y * unit);
-
-    NFBLogoDots* holder = [[NFBLogoDots alloc] initWithFrame:logo.bounds];
-    holder.tag = kLogoDotsTag;
-    holder.userInteractionEnabled = NO;
-    holder.originalImage = logo.image;
-    NSMutableArray<UIView*>* dots = [NSMutableArray array];
-    for (NSInteger i = 0; i < 3; i++) {
-        UIView* dot = [[UIView alloc]
-            initWithFrame:CGRectMake(center.x + (i - 1) * gap - diameter / 2, center.y - diameter / 2,
-                                     diameter, diameter)];
-        dot.backgroundColor = color;
-        dot.layer.cornerRadius = diameter / 2;
-        [holder addSubview:dot];
-        [dots addObject:dot];
-    }
-    holder.dots = dots;
-
-    logo.image = empty;
-    [logo addSubview:holder];
-    [holder start];
-}
-
-static void StopLogoLoading(void) {
-    UIWindow* window = NFBKeyWindow();
-    UIImageView* logo = window ? HeaderLogoInWindow(window) : nil;
-    NFBLogoDots* holder = (NFBLogoDots*)[logo viewWithTag:kLogoDotsTag];
-    if (![holder isKindOfClass:[NFBLogoDots class]]) {
-        return;
-    }
-    logo.image = holder.originalImage;
-    [holder stop];
-
-    // A small, soft swell as a layer animation only: nothing changes on the view itself, so
-    // UIKit has nothing to react to (a transform on the logo made it re-measure the title).
-    CABasicAnimation* swell = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
-    swell.fromValue = @1.0;
-    swell.toValue = @1.07;
-    swell.duration = 0.28;
-    swell.autoreverses = YES;
-    swell.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-    [logo.layer addAnimation:swell forKey:@"nfbSwell"];
-}
-
 %hook TFNPullToRefreshControl
 
 - (void)_setStatus:(unsigned long long)status fromScrolling:(BOOL)fromScrolling {
-    BOOL wasActive = [self loading];
-
     %orig;
     NFBNotePullStatus(self, status);
-
-    if (status == 1 && !wasActive) {
-        NFBNoteRefreshStarted();
-        NFBKeepPositionBegin(self);
-        StartLogoLoading();
-    } else if (status == 0 && wasActive) {
-        NFBKeepPositionEnd();
-        StopLogoLoading();
-    }
 }
 
 %end

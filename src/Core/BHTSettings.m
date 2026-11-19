@@ -328,12 +328,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
-                        @"key": @"kemo_card_style_page",
-                        @"titleKey": @"KEMO_CARD_STYLE_TITLE",
-                        @"action": @"openCardStyle:"
-                    },
-                    @{
-                        @"type": @"compactButton",
                         @"key": @"kemo_history_page",
                         @"titleKey": @"KEMO_HISTORY_PAGE_TITLE",
                         @"action": @"openKemoHistory:"
@@ -350,11 +344,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"key": @"kemo_account_dock",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_local_search",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
@@ -429,18 +418,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_bubble_new_tweets",
-                        @"default": @YES,
-                        @"type": @"toggle",
-                        @"parentKey": @"kemo_header_bubble"
-                    },
-                    @{
-                        @"key": @"kemo_bubble_notifications",
-                        @"default": @YES,
-                        @"type": @"toggle",
-                        @"parentKey": @"kemo_header_bubble"
-                    },
-                    @{
                         @"key": @"kemo_bubble_dday",
                         @"default": @YES,
                         @"type": @"toggle",
@@ -461,32 +438,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_bubble_spotify"
                     },
                     @{
-                        @"key": @"kemo_logo_loading",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
                         @"key": @"kemo_plain_refresh",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
                     @{
-                        @"key": @"kemo_sheet_open",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
                         @"key": @"kemo_hide_parody_label",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_paw_loading",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_bookmark_wiggle",
                         @"default": @YES,
                         @"type": @"toggle"
                     }
@@ -508,6 +465,16 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_compact_media"
                     },
                     @{
+                        @"key": @"kemo_thumb_side",
+                        @"titleKey": @"KEMO_THUMB_SIDE",
+                        @"default": @56,
+                        @"type": @"slider",
+                        @"min": @32,
+                        @"max": @92,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_compact_media"
+                    },
+                    @{
                         @"key": @"kemo_media_only",
                         @"default": @NO,
                         @"type": @"toggle"
@@ -515,21 +482,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{
                         @"key": @"kemo_media_count_badge",
                         @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_image_reveal",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_timeline_cards",
-                        @"default": @NO,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_notification_cards",
-                        @"default": @NO,
                         @"type": @"toggle"
                     },
                     @{
@@ -563,11 +515,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_recent_list",
                         @"titleKey": @"KEMO_RECENT_LIST_TITLE",
                         @"action": @"openRecentTweets:"
-                    },
-                    @{
-                        @"key": @"kemo_keep_position",
-                        @"default": @NO,
-                        @"type": @"toggle"
                     }
                 ]
             },
@@ -683,7 +630,7 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"restore_reply_context",
                         @"default": @YES,
                         @"type": @"toggle"
-                    },
+                    }
                 ]
             },
             @"search": @{

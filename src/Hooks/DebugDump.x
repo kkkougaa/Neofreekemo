@@ -24,12 +24,10 @@ extern NSString* NFBTimelineProbeText(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
-extern NSString* NFBLocalSearchDebugText(void);
 extern NSString* NFBReadabilityDebugText(void);
 extern NSArray<NSString*>* NFBRowLayoutClasses(void);
 extern CGFloat NFBLastMediaWidth(void);
 extern NSString* NFBPullAnimationDebugText(void);
-extern NSString* NFBTweetSheetDebugText(void);
 extern NSString* NFBParodyLabelDebugText(void);
 
 static const NSUInteger kMaxLines = 200;
@@ -556,8 +554,8 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
-    [out appendFormat:@"== HEADER ==%c%@%c%@%csheet: %@%cparodyLabel: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(),
-                      10, NFBTweetSheetDebugText(), 10, NFBParodyLabelDebugText(), 10];
+    [out appendFormat:@"== HEADER ==%c%@%c%@%cparodyLabel: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(),
+                      10, NFBParodyLabelDebugText(), 10];
     // The top navigation bar (where the logo is), hidden pieces included, with
     // which picture each image view shows.
     UIView* navBar = FindViewByClassParts(window, @[ @"XNavigation", @"Bar" ]);
@@ -749,7 +747,6 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
-    [out appendFormat:@"== LOCAL SEARCH ==%c%@%c", 10, NFBLocalSearchDebugText(), 10];
     [out appendFormat:@"== LAST CRASH ==%c%@%c", 10, NFBLastCrashText(), 10];
 
     // The drawer's controller: which methods it has (to see who rebuilds the menu list).

@@ -70,7 +70,7 @@
 }
 
 - (void)updateValueLabel {
-    self.valueLabel.text = [NSString stringWithFormat:@"%d%%", (int)lroundf(self.slider.value)];
+    self.valueLabel.text = [NSString stringWithFormat:@"%d%@", (int)lroundf(self.slider.value), self.unit ?: @"%"];
 }
 
 - (void)applyTheme {

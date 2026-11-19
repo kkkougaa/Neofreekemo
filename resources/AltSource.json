@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.108",
+      "subtitle": "NeoFreeBird version 7.3.109",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.109",
+          "buildVersion": "109",
+          "date": "2026-11-19T03:29:39Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.109/NeoFreeBird-Twitter-sideloaded_7.3.109_12.44.ipa",
+          "size": 270865139,
+          "minOSVersion": "15.0",
+          "localizedDescription": "외관 > 내 폰트 쓰기: 일반·볼드 폰트 파일(.otf/.ttf)을 고르면 앱을 다시 켤 때 Chirp 자리에 등록해 타임라인까지 그 폰트로 그림(나머지 굵기는 자동). 글자를 만들 때마다 바꿔치기하던 예전 사용자 지정 글꼴은 크래시 때문에 없앰. 폰트를 켠 채 실행이 실패하면 다음 실행은 원래 폰트로 켜짐."
+        },
         {
           "version": "7.3.108",
           "buildVersion": "108",

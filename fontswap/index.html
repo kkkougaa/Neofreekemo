@@ -116,6 +116,15 @@ code { font-family: var(--font-mono); font-size: 13px; }
       <li>SideStore에서 + 를 눌러 그 IPA를 설치해. 서명은 SideStore가 새로 해.</li>
     </ol>
   </section>
+
+  <section>
+    <span class="step">확인</span>
+    <h2>만든 IPA 검사하기</h2>
+    <p class="muted">저장한 IPA를 고르면 안에 든 X 폰트가 실제로 어떤 폰트인지 보여줘. 폰트가 안 바뀐 것 같을 때 써.</p>
+    <label class="pick" for="check-input">IPA 파일 선택<input id="check-input" type="file"></label>
+    <p class="file" id="check-name">아직 안 골랐어</p>
+    <div class="rows" id="check-rows"></div>
+  </section>
 </main>
 
 <script>
@@ -163,7 +172,7 @@ async function parseZip(file) {
     list.push({
       rec: cd.slice(q, q + 46 + n + m + k), nameBytes, name: dec.decode(nameBytes),
       verMade: v.getUint16(q + 4, true), method: v.getUint16(q + 10, true),
-      csize: v.getUint32(q + 20, true), extAttr: v.getUint32(q + 38, true), off: v.getUint32(q + 42, true),
+      csize: v.getUint32(q + 20, true), usize: v.getUint32(q + 24, true), extAttr: v.getUint32(q + 38, true), off: v.getUint32(q + 42, true),
     });
     q += 46 + n + m + k;
   }
@@ -192,20 +201,21 @@ function fontInfo(u8) {
       const r = 12 + 16 * i;
       tables[String.fromCharCode(u8[r], u8[r + 1], u8[r + 2], u8[r + 3])] = v.getUint32(r + 8);
     }
-    let ps = null;
+    const names = {};
     if (tables.name != null) {
       const off = tables.name, count = v.getUint16(off + 2), so = off + v.getUint16(off + 4);
-      for (let j = 0; j < count && !ps; j++) {
+      for (let j = 0; j < count; j++) {
         const b = off + 6 + 12 * j;
         const pid = v.getUint16(b), nid = v.getUint16(b + 6), len = v.getUint16(b + 8), o = v.getUint16(b + 10);
-        if (nid !== 6) continue;
+        if ((nid !== 0 && nid !== 6) || names[nid]) continue;
         const s = u8.subarray(so + o, so + o + len);
-        if (pid === 3 || pid === 0) { let t = ""; for (let k = 0; k + 1 < s.length; k += 2) t += String.fromCharCode((s[k] << 8) | s[k + 1]); ps = t; }
-        else if (pid === 1) ps = String.fromCharCode(...s);
+        if (pid === 3 || pid === 0) { let t = ""; for (let k = 0; k + 1 < s.length; k += 2) t += String.fromCharCode((s[k] << 8) | s[k + 1]); names[nid] = t; }
+        else if (pid === 1) names[nid] = String.fromCharCode(...s);
       }
     }
+    const ps = names[6] || null;
     const weight = tables["OS/2"] != null ? v.getUint16(tables["OS/2"] + 4) : null;
-    return { ps, weight, variable: tables.fvar != null };
+    return { ps, weight, variable: tables.fvar != null, copyright: names[0] || "" };
   } catch (_) { return { ps: null, weight: null, variable: false }; }
 }
 
@@ -476,6 +486,58 @@ $("#go").addEventListener("click", async () => {
   } finally {
     state.busy = false;
     render();
+  }
+});
+
+// ---------- check a saved IPA ----------
+function maker(info) {
+  const c = info.copyright || "";
+  if (/pretendard|kil hyung-jin/i.test(c)) return ["warn", "Pretendard JP (안 바뀐 기본 폰트)"];
+  if (/grilli|twitter|x corp/i.test(c)) return ["warn", "X 원래 폰트"];
+  return ["ok", "바꾼 폰트"];
+}
+
+$("#check-input").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  const box = $("#check-rows");
+  box.textContent = "";
+  if (!file) return;
+  $("#check-name").textContent = `${file.name} (${mb(file.size)}) 읽는 중…`;
+  try {
+    const zip = await parseZip(file);
+    const fonts = zip.list.filter((e) => e.name.includes(".app/" + BUNDLE) && /\.(otf|ttf)$/i.test(e.name) && e.name.split("/").length === 4);
+    if (!fonts.length) throw new SwapError("이 IPA에서 X 폰트 폴더를 못 찾았어.");
+    $("#check-name").textContent = `${file.name} (${mb(file.size)}) · 폰트 ${fonts.length}개`;
+    for (const e of fonts) {
+      const data = await entryData(file, e);
+      const info = data ? fontInfo(data) : { ps: null, weight: null, variable: false, copyright: "" };
+      const row = document.createElement("div");
+      row.className = "row";
+      const name = document.createElement("span");
+      name.className = "fname";
+      name.textContent = baseName(e.name);
+      const meta = document.createElement("dl");
+      meta.className = "meta";
+      const add = (k, val) => { const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.textContent = val; meta.append(dt, dd); };
+      add("폰트", describe(info));
+      add("크기", mb(e.usize ?? (data ? data.length : 0)));
+      add("저작권", info.copyright || "없음");
+      const chips = document.createElement("div");
+      chips.className = "chips";
+      const [cls, text] = maker(info);
+      const c = document.createElement("span");
+      c.className = "chip " + cls;
+      c.textContent = text;
+      chips.append(c);
+      row.append(name, meta, chips);
+      box.append(row);
+    }
+  } catch (err) {
+    $("#check-name").textContent = file.name;
+    const p = document.createElement("p");
+    p.className = "status bad";
+    p.textContent = err instanceof SwapError ? err.message : "IPA를 읽다가 문제가 생겼어: " + err.message;
+    box.append(p);
   }
 });
 

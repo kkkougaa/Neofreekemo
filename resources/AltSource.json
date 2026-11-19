@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.105",
+      "subtitle": "NeoFreeBird version 7.3.106",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.106",
+          "buildVersion": "106",
+          "date": "2026-11-19T02:36:38Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.106/NeoFreeBird-Twitter-sideloaded_7.3.106_12.44.ipa",
+          "size": 270848383,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 타임라인·알림의 카드 모양을 없앰(카드 설정 페이지와 카드 전용 글·이름줄·프로필 사진 크기 설정도 같이 제거). 글 옆 작은 사진은 글만 비켜 주고 이름줄·… 버튼·액션 줄은 원래 폭 그대로. 작은 사진 크기 조절은 미디어 페이지로 옮김. 버블의 새 트윗 수·DM/알림 표시, 로고 로딩 점, 트윗 시트, 발바닥 스피너, 북마크 흔들림, 이미지 나타나기, 새로고침 때 위치 유지, 당겨서 검색 제거."
+        },
         {
           "version": "7.3.105",
           "buildVersion": "105",

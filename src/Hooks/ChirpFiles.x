@@ -10,8 +10,9 @@
 //  instances ChirpUIVF-{XS,S,M,L}{Light,Regular,Medium,Bold,Heavy} (names read
 //  from XServiceLibraries). Each picked font is copied once per name with its
 //  'name' table rewritten to that name, and those copies are registered when
-//  this library loads, before X registers its own. X's registration of a name
-//  that is already taken fails, so UIFont hands back the user's font.
+//  this library loads. X has already registered its own Chirp-* and
+//  ChirpUIVF202601 by then, so those are unregistered first and the user's
+//  copies take their names; the ChirpUIVF-<size><weight> names are new.
 //
 //  A launch that dies while this is in effect turns it off for the next launch.
 //
@@ -267,6 +268,35 @@ void NFBChirpResetFonts(void) {
 
 // MARK: - Launch
 
+static NSUInteger gReplaced = 0;
+
+// Unregisters the font X registered under `ps`, by its file when it has one,
+// else by its graphics font. Returns NO when nothing was taken out.
+static BOOL UnregisterExisting(NSString* ps) {
+    CTFontRef existing = CTFontCreateWithName((__bridge CFStringRef)ps, 12, NULL);
+    if (!existing) return NO;
+    NSString* found = (__bridge_transfer NSString*)CTFontCopyPostScriptName(existing);
+    if (![found isEqualToString:ps]) {
+        // CoreText handed back a stand-in, so nothing is registered under the name.
+        CFRelease(existing);
+        return NO;
+    }
+    BOOL done = NO;
+    NSURL* url = (__bridge_transfer NSURL*)CTFontCopyAttribute(existing, kCTFontURLAttribute);
+    if (url) {
+        done = CTFontManagerUnregisterFontsForURL((__bridge CFURLRef)url, kCTFontManagerScopeProcess, NULL);
+    }
+    if (!done) {
+        CGFontRef graphics = CTFontCopyGraphicsFont(existing, NULL);
+        if (graphics) {
+            done = CTFontManagerUnregisterGraphicsFont(graphics, NULL);
+            CGFontRelease(graphics);
+        }
+    }
+    CFRelease(existing);
+    return done;
+}
+
 static void RegisterBuiltFonts(void) {
     NSString* built = [FontsFolder() stringByAppendingPathComponent:@"built"];
     NSArray* names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:built error:nil];
@@ -286,7 +316,18 @@ static void RegisterBuiltFonts(void) {
         CGFontRef font = provider ? CGFontCreateWithDataProvider(provider) : NULL;
         if (provider) CGDataProviderRelease(provider);
         CFErrorRef error = NULL;
-        if (font && CTFontManagerRegisterGraphicsFont(font, &error)) {
+        BOOL ok = font && CTFontManagerRegisterGraphicsFont(font, &error);
+        // X registers Chirp-Light ... Chirp-Heavy and ChirpUIVF202601 before this
+        // library loads (the dump showed error 305, kCTFontManagerErrorDuplicatedName,
+        // for those six). Take X's copy out and put the user's in its place.
+        if (!ok && font && error && CFErrorGetCode(error) == kCTFontManagerErrorDuplicatedName &&
+            UnregisterExisting(ps)) {
+            CFRelease(error);
+            error = NULL;
+            ok = CTFontManagerRegisterGraphicsFont(font, &error);
+            if (ok) gReplaced++;
+        }
+        if (ok) {
             [gRegistered addObject:ps];
         } else {
             [gFailed addObject:[NSString stringWithFormat:@"%@(%ld)", ps, error ? (long)CFErrorGetCode(error) : -1L]];
@@ -303,7 +344,10 @@ NSString* NFBChirpFontsDebugText(void) {
         NSString* name = [[NSUserDefaults standardUserDefaults] stringForKey:NFBChirpSlotNameKey(slot)];
         if (name) [text appendFormat:@" %@=%@", slot, name];
     }
-    if (gRegistered) [text appendFormat:@"\nuserFonts registered=%lu", (unsigned long)gRegistered.count];
+    if (gRegistered) {
+        [text appendFormat:@"\nuserFonts registered=%lu replacedX=%lu", (unsigned long)gRegistered.count,
+                           (unsigned long)gReplaced];
+    }
     if (gFailed.count) [text appendFormat:@" failed=%@", [gFailed componentsJoinedByString:@","]];
     return text;
 }

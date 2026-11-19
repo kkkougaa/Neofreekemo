@@ -720,12 +720,69 @@ static void DumpFonts(NSMutableString* out) {
     }
 }
 
+// What the timeline's tweet text is really drawn with: the fonts in the first
+// rows' TFNAttributedTextView text, and what X's own font getters hand out.
+static NSString* FontLine(UIFont* font) {
+    if (![font isKindOfClass:[UIFont class]]) return @"nil";
+    NSURL* url = (__bridge_transfer NSURL*)CTFontCopyAttribute((__bridge CTFontRef)font, kCTFontURLAttribute);
+    return [NSString stringWithFormat:@"%@ %.1f (%@)", font.fontName, font.pointSize, url.lastPathComponent ?: @"?"];
+}
+
+static void CollectTextViews(UIView* view, NSMutableArray<UIView*>* found, int depth) {
+    if (found.count >= 4 || depth > 30) return;
+    if ([NSStringFromClass(view.class) isEqualToString:@"TFNAttributedTextView"]) {
+        [found addObject:view];
+        return;
+    }
+    for (UIView* sub in view.subviews) CollectTextViews(sub, found, depth + 1);
+}
+
+static void DumpBodyFonts(UIWindow* window, NSMutableString* out) {
+    [out appendFormat:@"== BODY FONTS ==%c", 10];
+    Class catalog = objc_getClass("XFontCatalog");
+    if (catalog && [catalog respondsToSelector:NSSelectorFromString(@"contentFontWithOffset:weight:")]) {
+        UIFont* (*content)(id, SEL, CGFloat, NSInteger) = (void*)objc_msgSend;
+        [out appendFormat:@"catalog content: %@%c", FontLine(content(catalog, NSSelectorFromString(@"contentFontWithOffset:weight:"), 0, 0)), 10];
+    }
+    id group = [objc_getClass("TFNUIDefaultFontGroup") respondsToSelector:@selector(sharedFontGroup)]
+                   ? [objc_getClass("TFNUIDefaultFontGroup") performSelector:@selector(sharedFontGroup)]
+                   : nil;
+    if (group && [group respondsToSelector:NSSelectorFromString(@"bodyFont")]) {
+        [out appendFormat:@"group body: %@%c", FontLine([group valueForKey:@"bodyFont"]), 10];
+    }
+    NSMutableArray<UIView*>* cells = [NSMutableArray array];
+    EnumerateSubviewsRecursively(window, ^(UIView* view) {
+        if (cells.count < 2 && [NSStringFromClass(view.class) isEqualToString:@"T1StatusCell"]) [cells addObject:view];
+    });
+    for (UIView* cell in cells) {
+        NSMutableArray<UIView*>* texts = [NSMutableArray array];
+        CollectTextViews(cell, texts, 0);
+        for (UIView* text in texts) {
+            id model = [text respondsToSelector:NSSelectorFromString(@"textModel")] ? [text valueForKey:@"textModel"] : nil;
+            NSAttributedString* string = [model respondsToSelector:NSSelectorFromString(@"attributedString")]
+                                             ? [model valueForKey:@"attributedString"]
+                                             : nil;
+            if (![string isKindOfClass:[NSAttributedString class]] || string.length == 0) continue;
+            NSMutableOrderedSet* fonts = [NSMutableOrderedSet orderedSet];
+            [string enumerateAttribute:NSFontAttributeName
+                               inRange:NSMakeRange(0, string.length)
+                               options:0
+                            usingBlock:^(id value, NSRange range, BOOL* stop) {
+                                if (fonts.count < 3) [fonts addObject:FontLine(value)];
+                            }];
+            NSString* head = string.string.length > 16 ? [string.string substringToIndex:16] : string.string;
+            [out appendFormat:@"text \"%@\": %@%c", head, [fonts.array componentsJoinedByString:@" | "], 10];
+        }
+    }
+}
+
 static void PerformDump(UIWindow* window) {
     NSMutableString* out = [NSMutableString
         stringWithFormat:@"%s\nwindow %@\n", NFB_VERSION_STRING, NSStringFromCGRect(window.frame)];
     NSUInteger mediaCount = 0;
     // First, so it survives a paste that gets cut short.
     DumpFonts(out);
+    DumpBodyFonts(window, out);
     DumpRowProbe(window, out);
     // How the screen is put together: view controllers, and everything in the top part of the
     // screen (where a row of tabs lives) with its text.

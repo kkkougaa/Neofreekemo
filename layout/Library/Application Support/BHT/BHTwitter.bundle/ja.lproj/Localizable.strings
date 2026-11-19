@@ -580,7 +580,7 @@
 
 /* Your own fonts in Chirp's place */
 "KEMO_CHIRP_FONTS_TITLE" = "自分のフォントを使う";
-"KEMO_CHIRP_FONTS_DETAIL" = "Chirpの代わりに使うフォントファイルを太さごとに選びます。アプリの再起動後に反映されます。";
+"KEMO_CHIRP_FONTS_DETAIL" = "Chirpの代わりに使うフォントを標準と太字の2つ選ぶだけで、ほかの太さは自動で合わせます。アプリの再起動後に反映されます。";
 "KEMO_CHIRP_FONT_LIGHT_TITLE" = "細め";
 "KEMO_CHIRP_FONT_REGULAR_TITLE" = "標準（必須）";
 "KEMO_CHIRP_FONT_MEDIUM_TITLE" = "中";

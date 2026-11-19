@@ -545,11 +545,11 @@
 
 /* Your own fonts in Chirp's place */
 "KEMO_CHIRP_FONTS_TITLE" = "내 폰트 쓰기";
-"KEMO_CHIRP_FONTS_DETAIL" = "Chirp 대신 쓸 폰트 파일을 굵기별로 골라요. 앱을 다시 시작하면 적용돼요.";
+"KEMO_CHIRP_FONTS_DETAIL" = "Chirp 대신 쓸 폰트를 일반과 볼드 두 개만 고르면 나머지 굵기는 알아서 맞춰요. 앱을 다시 시작하면 적용돼요.";
 "KEMO_CHIRP_FONT_LIGHT_TITLE" = "가늘게";
-"KEMO_CHIRP_FONT_REGULAR_TITLE" = "보통 (필수)";
+"KEMO_CHIRP_FONT_REGULAR_TITLE" = "일반 (필수)";
 "KEMO_CHIRP_FONT_MEDIUM_TITLE" = "중간";
-"KEMO_CHIRP_FONT_BOLD_TITLE" = "굵게";
+"KEMO_CHIRP_FONT_BOLD_TITLE" = "볼드";
 "KEMO_CHIRP_FONT_HEAVY_TITLE" = "아주 굵게";
 "KEMO_CHIRP_FONT_NONE_SUBTITLE" = "고르지 않음";
 "KEMO_CHIRP_FONT_RESET_TITLE" = "고른 폰트 모두 지우기";

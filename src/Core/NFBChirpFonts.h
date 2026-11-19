@@ -11,6 +11,7 @@
 #import <Foundation/Foundation.h>
 
 // Slots, by weight. Regular is needed; a missing slot uses the nearest one.
+// The settings offer Regular and Bold only.
 extern NSString* const NFBChirpSlotLight;
 extern NSString* const NFBChirpSlotRegular;
 extern NSString* const NFBChirpSlotMedium;

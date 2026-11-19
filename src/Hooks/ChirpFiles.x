@@ -77,13 +77,15 @@ static NSDictionary<NSString*, NSArray<NSString*>*>* Targets(void) {
     return targets;
 }
 
-// The slot whose file stands in for `slot` when it has none of its own.
+// The slot whose file stands in for `slot` when it has none of its own. The
+// settings only offer Regular and Bold (as the old picker did): Light and
+// Medium are drawn with Regular, Heavy with Bold.
 static NSString* ResolvedSlot(NSString* slot, NSSet<NSString*>* present) {
     NSDictionary* order = @{
         NFBChirpSlotLight: @[ NFBChirpSlotLight, NFBChirpSlotRegular ],
         NFBChirpSlotRegular: @[ NFBChirpSlotRegular ],
         NFBChirpSlotMedium: @[ NFBChirpSlotMedium, NFBChirpSlotRegular ],
-        NFBChirpSlotBold: @[ NFBChirpSlotBold, NFBChirpSlotMedium, NFBChirpSlotRegular ],
+        NFBChirpSlotBold: @[ NFBChirpSlotBold, NFBChirpSlotRegular ],
         NFBChirpSlotHeavy: @[ NFBChirpSlotHeavy, NFBChirpSlotBold, NFBChirpSlotRegular ],
     };
     for (NSString* candidate in order[slot]) {

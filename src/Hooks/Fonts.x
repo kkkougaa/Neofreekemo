@@ -142,7 +142,11 @@ static NSString* UsableFontName(id name) {
 
 static void LoadFontNamesLocked(void) {
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    BOOL enabled = [defaults boolForKey:@"custom_fonts"];
+    // The picker that swapped fonts here as X made them is gone from the settings
+    // (it raced X's font cache and crashed the timeline). Fonts are now put in
+    // Chirp's place at launch (ChirpFiles.x), so this path stays off even for
+    // someone who had it on.
+    BOOL enabled = NO;
     gRegularFontName = enabled ? UsableFontName([defaults objectForKey:@"bhtwitter_font_1"]) : nil;
     gBoldFontName = enabled ? UsableFontName([defaults objectForKey:@"bhtwitter_font_2"]) : nil;
     gFontNamesLoaded = YES;

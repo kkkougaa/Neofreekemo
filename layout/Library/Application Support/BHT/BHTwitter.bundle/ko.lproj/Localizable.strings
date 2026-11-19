@@ -542,3 +542,20 @@
 
 "KEMO_SHARE_DUMP_TITLE" = "마지막 덤프 파일로 보내기";
 "KEMO_SHARE_DUMP_NONE" = "아직 뜬 덤프가 없어요. 볼륨 아래 버튼을 눌러 먼저 덤프를 떠 주세요.";
+
+/* Your own fonts in Chirp's place */
+"KEMO_CHIRP_FONTS_TITLE" = "내 폰트 쓰기";
+"KEMO_CHIRP_FONTS_DETAIL" = "Chirp 대신 쓸 폰트 파일을 굵기별로 골라요. 앱을 다시 시작하면 적용돼요.";
+"KEMO_CHIRP_FONT_LIGHT_TITLE" = "가늘게";
+"KEMO_CHIRP_FONT_REGULAR_TITLE" = "보통 (필수)";
+"KEMO_CHIRP_FONT_MEDIUM_TITLE" = "중간";
+"KEMO_CHIRP_FONT_BOLD_TITLE" = "굵게";
+"KEMO_CHIRP_FONT_HEAVY_TITLE" = "아주 굵게";
+"KEMO_CHIRP_FONT_NONE_SUBTITLE" = "고르지 않음";
+"KEMO_CHIRP_FONT_RESET_TITLE" = "고른 폰트 모두 지우기";
+"KEMO_CHIRP_FONT_RESTART_MESSAGE" = "앱을 다시 시작하면 바뀌어요.";
+"KEMO_CHIRP_FONT_ERROR_READ" = "파일을 읽지 못했어요.";
+"KEMO_CHIRP_FONT_ERROR_COLLECTION" = "여러 폰트가 묶인 .ttc 파일은 쓸 수 없어요. .otf나 .ttf 파일을 골라 주세요.";
+"KEMO_CHIRP_FONT_ERROR_WOFF" = "웹 폰트(.woff)는 쓸 수 없어요. .otf나 .ttf 파일을 골라 주세요.";
+"KEMO_CHIRP_FONT_ERROR_OPEN" = "폰트로 열 수 없는 파일이에요.";
+"KEMO_CHIRP_FONT_ERROR_RENAME" = "이 폰트는 Chirp 이름으로 바꿔 등록할 수 없는 형식이에요.";

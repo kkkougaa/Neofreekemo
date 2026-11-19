@@ -88,25 +88,64 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"titleKey": @"KEMO_THEME_RESET_TITLE",
                         @"action": @"resetThemeColors:"
                     },
-                    @{@"key": @"custom_fonts",
+                    @{@"key": @"kemo_chirp_fonts",
                       @"default": @NO},
                     @{
                         @"type": @"compactButton",
-                        @"parentKey": @"custom_fonts",
-                        @"key": @"regular_font_button",
-                        @"titleKey": @"REGULAR_FONTS_PICKER_OPTION_TITLE",
-                        @"action": @"showRegularFontPicker:",
-                        @"prefKeyForSubtitle": @"bhtwitter_font_1",
-                        @"subtitleDefaultKey": @"FONT_SYSTEM_DEFAULT_SUBTITLE"
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_light_button",
+                        @"slot": @"light",
+                        @"titleKey": @"KEMO_CHIRP_FONT_LIGHT_TITLE",
+                        @"action": @"showChirpFontPicker:",
+                        @"prefKeyForSubtitle": @"kemo_chirp_font_name_light",
+                        @"subtitleDefaultKey": @"KEMO_CHIRP_FONT_NONE_SUBTITLE"
                     },
                     @{
                         @"type": @"compactButton",
-                        @"parentKey": @"custom_fonts",
-                        @"key": @"bold_font_button",
-                        @"titleKey": @"BOLD_FONTS_PICKER_OPTION_TITLE",
-                        @"action": @"showBoldFontPicker:",
-                        @"prefKeyForSubtitle": @"bhtwitter_font_2",
-                        @"subtitleDefaultKey": @"FONT_SYSTEM_DEFAULT_SUBTITLE"
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_regular_button",
+                        @"slot": @"regular",
+                        @"titleKey": @"KEMO_CHIRP_FONT_REGULAR_TITLE",
+                        @"action": @"showChirpFontPicker:",
+                        @"prefKeyForSubtitle": @"kemo_chirp_font_name_regular",
+                        @"subtitleDefaultKey": @"KEMO_CHIRP_FONT_NONE_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_medium_button",
+                        @"slot": @"medium",
+                        @"titleKey": @"KEMO_CHIRP_FONT_MEDIUM_TITLE",
+                        @"action": @"showChirpFontPicker:",
+                        @"prefKeyForSubtitle": @"kemo_chirp_font_name_medium",
+                        @"subtitleDefaultKey": @"KEMO_CHIRP_FONT_NONE_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_bold_button",
+                        @"slot": @"bold",
+                        @"titleKey": @"KEMO_CHIRP_FONT_BOLD_TITLE",
+                        @"action": @"showChirpFontPicker:",
+                        @"prefKeyForSubtitle": @"kemo_chirp_font_name_bold",
+                        @"subtitleDefaultKey": @"KEMO_CHIRP_FONT_NONE_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_heavy_button",
+                        @"slot": @"heavy",
+                        @"titleKey": @"KEMO_CHIRP_FONT_HEAVY_TITLE",
+                        @"action": @"showChirpFontPicker:",
+                        @"prefKeyForSubtitle": @"kemo_chirp_font_name_heavy",
+                        @"subtitleDefaultKey": @"KEMO_CHIRP_FONT_NONE_SUBTITLE"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"parentKey": @"kemo_chirp_fonts",
+                        @"key": @"kemo_chirp_font_reset_button",
+                        @"titleKey": @"KEMO_CHIRP_FONT_RESET_TITLE",
+                        @"action": @"resetChirpFonts:"
                     }
                 ]
             },

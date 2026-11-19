@@ -590,3 +590,20 @@
 
 "KEMO_SHARE_DUMP_TITLE" = "Send the last dump as a file";
 "KEMO_SHARE_DUMP_NONE" = "No dump yet. Press volume down to make one first.";
+
+/* Your own fonts in Chirp's place */
+"KEMO_CHIRP_FONTS_TITLE" = "Your own fonts";
+"KEMO_CHIRP_FONTS_DETAIL" = "Pick font files to draw Twitter with in place of Chirp, one per weight. Applies after restarting the app.";
+"KEMO_CHIRP_FONT_LIGHT_TITLE" = "Light";
+"KEMO_CHIRP_FONT_REGULAR_TITLE" = "Regular (needed)";
+"KEMO_CHIRP_FONT_MEDIUM_TITLE" = "Medium";
+"KEMO_CHIRP_FONT_BOLD_TITLE" = "Bold";
+"KEMO_CHIRP_FONT_HEAVY_TITLE" = "Heavy";
+"KEMO_CHIRP_FONT_NONE_SUBTITLE" = "Not picked";
+"KEMO_CHIRP_FONT_RESET_TITLE" = "Remove picked fonts";
+"KEMO_CHIRP_FONT_RESTART_MESSAGE" = "Restart the app to see the change.";
+"KEMO_CHIRP_FONT_ERROR_READ" = "The file could not be read.";
+"KEMO_CHIRP_FONT_ERROR_COLLECTION" = "Font collections (.ttc) can't be used. Pick an .otf or .ttf file.";
+"KEMO_CHIRP_FONT_ERROR_WOFF" = "Web fonts (.woff) can't be used. Pick an .otf or .ttf file.";
+"KEMO_CHIRP_FONT_ERROR_OPEN" = "This file can't be opened as a font.";
+"KEMO_CHIRP_FONT_ERROR_RENAME" = "This font is in a format that can't be renamed for Chirp.";

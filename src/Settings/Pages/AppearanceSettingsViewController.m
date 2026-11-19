@@ -12,9 +12,12 @@
 #import "Headers/TWHeaders.h"
 #import "Settings/ModernSettingsCells.h"
 #import "ThemeColor/BHTDimPalette.h"
+#import "Core/NFBChirpFonts.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface AppearanceSettingsViewController () <UIFontPickerViewControllerDelegate,
-                                                UIColorPickerViewControllerDelegate>
+                                                UIColorPickerViewControllerDelegate,
+                                                UIDocumentPickerDelegate>
 @end
 
 static NSString* const kThemeColorKeyAssociation = @"nfbThemeColorKey";
@@ -287,6 +290,65 @@ static NSString* const kThemeColorKeyAssociation = @"nfbThemeColorKey";
                            [strongSelf showRestartAlert];
                        }
                    });
+}
+
+#pragma mark - Fonts in Chirp's place
+
+static char kChirpSlotKey;
+
+- (void)showChirpFontPicker:(NSDictionary*)sender {
+    NSString* slot = sender[@"slot"];
+    if (!slot) {
+        return;
+    }
+    NSMutableArray<UTType*>* types = [NSMutableArray arrayWithObject:UTTypeFont];
+    for (NSString* extension in @[ @"otf", @"ttf" ]) {
+        UTType* type = [UTType typeWithFilenameExtension:extension];
+        if (type) {
+            [types addObject:type];
+        }
+    }
+    UIDocumentPickerViewController* picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    objc_setAssociatedObject(picker, &kChirpSlotKey, slot, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController*)controller
+    didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls {
+    NSString* slot = objc_getAssociatedObject(controller, &kChirpSlotKey);
+    NSURL* url = urls.firstObject;
+    if (!slot || !url) {
+        return;
+    }
+    NSString* message = nil;
+    BOOL ok = NFBChirpImportFont(url, slot, &message);
+    BHTBundle* bundle = [BHTBundle sharedBundle];
+    UIAlertController* alert = [UIAlertController
+        alertControllerWithTitle:[bundle localizedStringForKey:@"KEMO_CHIRP_FONTS_TITLE"]
+                         message:ok ? [bundle localizedStringForKey:@"KEMO_CHIRP_FONT_RESTART_MESSAGE"] : message
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:[bundle localizedStringForKey:@"OK_ACTION_LABEL"]
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+    [self.tableView reloadData];
+}
+
+- (void)resetChirpFonts:(NSDictionary*)sender {
+    NFBChirpResetFonts();
+    [self.tableView reloadData];
+    BHTBundle* bundle = [BHTBundle sharedBundle];
+    UIAlertController* alert = [UIAlertController
+        alertControllerWithTitle:[bundle localizedStringForKey:@"KEMO_CHIRP_FONTS_TITLE"]
+                         message:[bundle localizedStringForKey:@"KEMO_CHIRP_FONT_RESTART_MESSAGE"]
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:[bundle localizedStringForKey:@"OK_ACTION_LABEL"]
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Font Pickers

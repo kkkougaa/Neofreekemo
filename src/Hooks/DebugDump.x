@@ -31,6 +31,7 @@ extern CGFloat NFBLastMediaWidth(void);
 extern NSString* NFBPullAnimationDebugText(void);
 extern NSString* NFBParodyLabelDebugText(void);
 extern NSString* NFBChirpFontDebugText(void);
+#import "Core/NFBChirpFonts.h"
 
 static const NSUInteger kMaxLines = 200;
 static const int kMaxDepth = 16;
@@ -673,7 +674,7 @@ static NSString* FontCopyright(CTFontRef font) {
 }
 
 static void DumpFonts(NSMutableString* out) {
-    [out appendFormat:@"== FONTS ==%c%@%c", 10, NFBChirpFontDebugText(), 10];
+    [out appendFormat:@"== FONTS ==%c%@%c%@%c", 10, NFBChirpFontDebugText(), 10, NFBChirpFontsDebugText(), 10];
     NSString* bundle = [[NSBundle mainBundle] pathForResource:@"TwitterSharedResources_TFNUIAppResources"
                                                        ofType:@"bundle"];
     for (NSString* file in @[ @"Chirp-Regular.otf", @"Chirp-Bold.otf",

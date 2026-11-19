@@ -577,3 +577,20 @@
 
 "GITHUB_DOWNLOAD_WARNING_TITLE" = "ようこそ！";	
 "GITHUB_DOWNLOAD_WARNING_MESSAGE" = "NeoFreeBirdが公式のGitHubからインストールされていることをご確認ください。他の配布元（IPA）による問題についてはサポートいたしかねます。また、お使いのバージョンに悪意のあるコードが含まれていないか確認できません。ご不明な点がございましたら、GitHubでIssuesを作成してお問い合わせください。";
+
+/* Your own fonts in Chirp's place */
+"KEMO_CHIRP_FONTS_TITLE" = "自分のフォントを使う";
+"KEMO_CHIRP_FONTS_DETAIL" = "Chirpの代わりに使うフォントファイルを太さごとに選びます。アプリの再起動後に反映されます。";
+"KEMO_CHIRP_FONT_LIGHT_TITLE" = "細め";
+"KEMO_CHIRP_FONT_REGULAR_TITLE" = "標準（必須）";
+"KEMO_CHIRP_FONT_MEDIUM_TITLE" = "中";
+"KEMO_CHIRP_FONT_BOLD_TITLE" = "太字";
+"KEMO_CHIRP_FONT_HEAVY_TITLE" = "極太";
+"KEMO_CHIRP_FONT_NONE_SUBTITLE" = "未選択";
+"KEMO_CHIRP_FONT_RESET_TITLE" = "選んだフォントをすべて削除";
+"KEMO_CHIRP_FONT_RESTART_MESSAGE" = "アプリを再起動すると反映されます。";
+"KEMO_CHIRP_FONT_ERROR_READ" = "ファイルを読み込めませんでした。";
+"KEMO_CHIRP_FONT_ERROR_COLLECTION" = "複数のフォントをまとめた.ttcファイルは使えません。.otfか.ttfファイルを選んでください。";
+"KEMO_CHIRP_FONT_ERROR_WOFF" = "Webフォント（.woff）は使えません。.otfか.ttfファイルを選んでください。";
+"KEMO_CHIRP_FONT_ERROR_OPEN" = "フォントとして開けないファイルです。";
+"KEMO_CHIRP_FONT_ERROR_RENAME" = "このフォントはChirpの名前に変えて登録できない形式です。";

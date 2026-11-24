@@ -624,7 +624,7 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_clicker_dock_y",
                         @"default": @40,
                         @"type": @"slider",
-                        @"min": @0,
+                        @"min": @-320,
                         @"max": @300,
                         @"unit": @"pt",
                         @"parentKey": @"kemo_clicker_dock"

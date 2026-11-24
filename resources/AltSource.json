@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.117",
+      "subtitle": "NeoFreeBird version 7.3.118",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.118",
+          "buildVersion": "118",
+          "date": "2026-11-24T06:06:16Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.118/NeoFreeBird-Twitter-sideloaded_7.3.118_12.44.ipa",
+          "size": 273544535,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: 입력바를 눌렀다 취소하면 캐릭터가 반투명해지던 문제를 고쳤습니다. 손가락으로 누를 때 말풍선이 잘 나오게 했습니다. 설정의 '타임라인에서 직접 맞추기'로 실제 화면 위에서 크기와 위치를 맞출 수 있습니다 (−/+로 1pt씩). 흔들기 덤프에 클리커 상태가 남습니다."
+        },
         {
           "version": "7.3.117",
           "buildVersion": "117",

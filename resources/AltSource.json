@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.111",
+      "subtitle": "NeoFreeBird version 7.3.112",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.112",
+          "buildVersion": "112",
+          "date": "2026-11-24T00:58:16Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.112/NeoFreeBird-Twitter-sideloaded_7.3.112_12.44.ipa",
+          "size": 270890487,
+          "minOSVersion": "15.0",
+          "localizedDescription": "원본 NeoFreeBird의 리팩토링 반영(기능별 폴더 구조). 원본 새 기능: AI·홍보 트윗 숨기기, t.co 추적 건너뛰기, 네트워크 21초 멈춤 수정, Dim 테마가 시스템 다크모드를 따라가고 바로 적용, 라이브 배너 사각형, 탭바 줄어듦 수정, CallessKit. 7.3.69에 뺐던 기능 복구: 미디어 미리보기 숨기기, 몰입형 플레이어 더블탭 좋아요 끄기, 통화 메뉴 숨기기, 아이패드 메시지 바, 입력 중 표시는 X 내부 방식으로(채팅 진단은 흔들기 덤프 켰을 때만). 새 RTL 처리는 계속 제외. iOS 26.5 SDK로 빌드."
+        },
         {
           "version": "7.3.111",
           "buildVersion": "111",

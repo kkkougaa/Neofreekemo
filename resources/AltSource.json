@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.119",
+      "subtitle": "NeoFreeBird version 7.3.120",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.120",
+          "buildVersion": "120",
+          "date": "2026-11-24T06:43:26Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.120/NeoFreeBird-Twitter-sideloaded_7.3.120_12.44.ipa",
+          "size": 273547418,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: 캐릭터 화면이 980px 데스크톱 폭으로 그려져 줄어 보이던 문제를 고쳤습니다. 말풍선이 제자리에 나오고, 머리 위 빈 곳의 터치가 아래 화면으로 넘어갑니다. 캐릭터가 이전보다 커 보이면 크기를 다시 맞춰 주세요."
+        },
         {
           "version": "7.3.119",
           "buildVersion": "119",

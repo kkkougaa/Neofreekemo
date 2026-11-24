@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.122",
+      "subtitle": "NeoFreeBird version 7.3.123",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.123",
+          "buildVersion": "123",
+          "date": "2026-11-24T07:11:35Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.123/NeoFreeBird-Twitter-sideloaded_7.3.123_12.44.ipa",
+          "size": 273561193,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: 스포티파이 곡이 바뀌면 캐릭터가 말풍선과 음표로 알려 줍니다. 곡 빠르기(BPM)를 Deezer에서 찾거나 30초 미리듣기로 재서 박자에 맞춰 까딱입니다. X 동영상 소리에 맞춰 까딱(실험)을 추가했습니다."
+        },
         {
           "version": "7.3.122",
           "buildVersion": "122",

@@ -61,6 +61,9 @@
     };
   }
   function noop() {}
+  function note(text) {
+    send('log', [String(text).slice(0, 300)]);
+  }
   function none() {
     return Promise.resolve(null);
   }
@@ -148,6 +151,9 @@
 
     /* 눌리는 자리 — 그림이 있는 칸 지도와 알림 같은 덧붙은 자리 */
     sendMask: function (id, mask) {
+      var on = 0;
+      if (mask && mask.bits) for (var i = 0; i < mask.bits.length; i++) on += mask.bits[i] ? 1 : 0;
+      note('mask ' + (mask && mask.gw) + 'x' + (mask && mask.gh) + ' on=' + on);
       send('mask', [mask]);
     },
     hot: function (id, rect, key) {
@@ -180,8 +186,12 @@
     avoid: function () {
       return Promise.resolve({ hard: [], soft: [] });
     },
-    bubbleShown: noop,
-    bubbleHidden: noop,
+    bubbleShown: function (id, r, ms) {
+      note('bubble shown ' + (r ? [r.l, r.t, r.r, r.b].map(Math.round).join(',') : '-') + ' ' + ms + 'ms');
+    },
+    bubbleHidden: function () {
+      note('bubble hidden');
+    },
     capToggle: noop,
     capOpt: noop,
     capShot: noop,
@@ -198,6 +208,56 @@
     undo: noop,
     redo: noop
   };
+
+  /* 손가락은 마우스보다 떨린다. pet.js 는 4px 넘게 움직이면 끌기로 보고 누르기(말풍선)를 건너뛰므로,
+     누른 자리에서 10px 안의 움직임은 pet.js 에 넘기지 않는다. 넘어서면 그때부터는 그대로 넘긴다. */
+  var TAP_SLOP = 10;
+  var press = null;
+  window.addEventListener(
+    'pointerdown',
+    function (e) {
+      press = e.pointerType === 'mouse' ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, free: false };
+    },
+    true
+  );
+  window.addEventListener(
+    'pointermove',
+    function (e) {
+      if (!press || press.free || e.pointerId !== press.id) return;
+      if (Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y) < TAP_SLOP) e.stopImmediatePropagation();
+      else press.free = true;
+    },
+    true
+  );
+  ['pointerup', 'pointercancel'].forEach(function (t) {
+    window.addEventListener(
+      t,
+      function (e) {
+        if (press && e.pointerId === press.id) press = null;
+        if (t === 'pointercancel') note('pointercancel');
+      },
+      true
+    );
+  });
+
+  /* 흔들기 덤프(DebugDump)에 실기기 기록을 남긴다 — 오류와 말풍선 · 지도 소식만 */
+  window.addEventListener('error', function (e) {
+    note('error ' + (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    note('rejection ' + String((e.reason && e.reason.message) || e.reason));
+  });
+  ['error', 'warn'].forEach(function (k) {
+    var orig = console[k];
+    console[k] = function () {
+      try {
+        note(k + ' ' + Array.prototype.map.call(arguments, function (a) {
+          return a && a.message ? a.message : String(a);
+        }).join(' '));
+      } catch (e) {}
+      return orig.apply(console, arguments);
+    };
+  });
 
   /* 길게 누를 때 뜨는 확대경 · 복사 메뉴 · 끌어서 저장을 막는다 */
   function noCallout() {

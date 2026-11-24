@@ -527,3 +527,12 @@
 "KEMO_CLICKER_COMPOSE_Y_TITLE" = "작성 화면: 높이";
 "KEMO_CLICKER_TYPING_TITLE" = "타자에 맞춰 까딱";
 "KEMO_CLICKER_TYPING_DETAIL" = "글자를 칠 때마다 움직입니다. 어떤 글자를 쳤는지는 읽지 않습니다.";
+"KEMO_CLICKER_ADJUST_HERE_TITLE" = "타임라인에서 직접 맞추기";
+"KEMO_CLICKER_ADJUST_HERE_DETAIL" = "홈 화면(또는 트윗 작성 화면)으로 돌아가면 위쪽에 조정 패널이 뜹니다. 실제 화면을 보면서 크기와 위치를 맞추고 '완료'를 누르세요.";
+"KEMO_CLICKER_ADJUST_BAR" = "입력바 위";
+"KEMO_CLICKER_ADJUST_FREE" = "자유 위치";
+"KEMO_CLICKER_ADJUST_COMPOSE" = "작성 화면";
+"KEMO_CLICKER_ADJUST_DONE" = "완료";
+"KEMO_CLICKER_ADJUST_SIZE" = "크기";
+"KEMO_CLICKER_ADJUST_X" = "좌우";
+"KEMO_CLICKER_ADJUST_Y" = "높이";

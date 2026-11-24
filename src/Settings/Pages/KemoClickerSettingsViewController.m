@@ -98,6 +98,12 @@
     [self presentSheet:sheet from:sender];
 }
 
+// Sliders over the real timeline (Clicker.x NFBClickerAdjustPanel) until its Done.
+- (void)startClickerAdjust:(NSDictionary*)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"kemo_clicker_adjust"];
+    [self showMessage:[self text:@"KEMO_CLICKER_ADJUST_HERE_TITLE"] detail:[self text:@"KEMO_CLICKER_ADJUST_HERE_DETAIL"]];
+}
+
 - (void)importClickerCharacter:(NSDictionary*)sender {
     UIDocumentPickerViewController* picker =
         [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];

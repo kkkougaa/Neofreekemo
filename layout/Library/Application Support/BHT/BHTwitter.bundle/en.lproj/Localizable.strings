@@ -525,3 +525,12 @@
 "KEMO_CLICKER_COMPOSE_Y_TITLE" = "Composer: height";
 "KEMO_CLICKER_TYPING_TITLE" = "Nod along with typing";
 "KEMO_CLICKER_TYPING_DETAIL" = "Moves with each keystroke. What you type is never read.";
+"KEMO_CLICKER_ADJUST_HERE_TITLE" = "Adjust on the timeline";
+"KEMO_CLICKER_ADJUST_HERE_DETAIL" = "Go back to the home screen (or the composer) and a panel appears at the top. Set the size and position while looking at the real screen, then tap Done.";
+"KEMO_CLICKER_ADJUST_BAR" = "On the bar";
+"KEMO_CLICKER_ADJUST_FREE" = "Free position";
+"KEMO_CLICKER_ADJUST_COMPOSE" = "Composer";
+"KEMO_CLICKER_ADJUST_DONE" = "Done";
+"KEMO_CLICKER_ADJUST_SIZE" = "Size";
+"KEMO_CLICKER_ADJUST_X" = "X";
+"KEMO_CLICKER_ADJUST_Y" = "Y";

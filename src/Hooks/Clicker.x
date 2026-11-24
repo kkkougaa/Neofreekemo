@@ -43,9 +43,11 @@ static NSString* const kClickerCompose = @"kemo_clicker_compose";
 static NSString* const kClickerComposeX = @"kemo_clicker_compose_x";
 static NSString* const kClickerComposeY = @"kemo_clicker_compose_y";
 static NSString* const kClickerTyping = @"kemo_clicker_typing";
+// Set by the settings page's "adjust on the timeline" row, cleared by the panel's Done.
+static NSString* const kClickerAdjust = @"kemo_clicker_adjust";
 
 typedef struct {
-    BOOL on, free, flip, lock, sound, compose, typing;
+    BOOL on, free, flip, lock, sound, compose, typing, adjust;
     NSInteger size, barX, barY, freeX, freeY, composeX, composeY, charIndex;
 } ClickerPrefs;
 
@@ -72,6 +74,7 @@ static ClickerPrefs ReadClickerPrefs(void) {
     p.composeX = [BHTSettings integerForKey:kClickerComposeX];
     p.composeY = [BHTSettings integerForKey:kClickerComposeY];
     p.charIndex = [NFBClickerStore selectedIndex];
+    p.adjust = [[NSUserDefaults standardUserDefaults] boolForKey:kClickerAdjust];
     return p;
 }
 
@@ -297,6 +300,27 @@ static NSString* ClickerJSON(id obj) {
 @end
 
 static void ClickerTick(void);
+static void ClickerAdjustPanelUpdate(UIWindow* window, BOOL compose);
+static void ClickerAdjustPanelRemove(void);
+
+// The page's last words for the shake dump (errors, bubbles, masks), and the placement state.
+static NSMutableArray<NSString*>* gClickerLog;
+static NSString* gClickerState = @"";
+
+static void ClickerLog(NSString* line) {
+    if (!gClickerLog) {
+        gClickerLog = [NSMutableArray array];
+    }
+    static NSDateFormatter* time;
+    if (!time) {
+        time = [NSDateFormatter new];
+        time.dateFormat = @"HH:mm:ss.SSS";
+    }
+    [gClickerLog addObject:[NSString stringWithFormat:@"%@ %@", [time stringFromDate:[NSDate date]], line]];
+    if (gClickerLog.count > 40) {
+        [gClickerLog removeObjectAtIndex:0];
+    }
+}
 
 @implementation NFBClickerView
 
@@ -414,6 +438,9 @@ static void ClickerTick(void);
 - (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
     if (self.hidden || self.alpha < 0.05 || !self.ready) {
         return nil;
+    }
+    if (self.dragging && !self.tracker.down) {
+        self.dragging = NO; // the page never said the drag ended
     }
     if (!self.dragging && ![self wantsPoint:point]) {
         return nil;
@@ -622,6 +649,10 @@ static void ClickerTick(void);
         } else {
             [d setInteger:gPrefs.barX forKey:kClickerBarX];
         }
+    } else if ([op isEqualToString:@"log"]) {
+        if (args.count > 0 && [args[0] isKindOfClass:[NSString class]]) {
+            ClickerLog(args[0]);
+        }
     } else if ([op isEqualToString:@"charInfo"]) {
         NSString* key = args.count > 0 && [args[0] isKindOfClass:[NSString class]] ? args[0] : nil;
         if (!key) {
@@ -674,7 +705,6 @@ static NSHashTable<UIView*>* gComposeBars;
 static NFBClickerView* gHost;
 static CADisplayLink* gLink;
 static __weak UIView* gLastAnchor;
-static CGFloat gAnchorMaxWidth;
 static NSInteger gHostSize;
 static BOOL gHostOnCompose;
 
@@ -688,6 +718,7 @@ static BOOL gHostOnCompose;
 @end
 
 static void ClickerHide(void) {
+    ClickerAdjustPanelRemove();
     if (gHost && !gHost.hidden) {
         gHost.hidden = YES;
         gHost.dragging = NO;
@@ -732,7 +763,12 @@ static UIView* ClickerCurrentAnchor(BOOL* compose) {
 
 // How much of the bar is really showing: hidden or faded ancestors, clipping ancestors, the
 // screen edge, and the bar shrinking (the tab bar minimizing on scroll) all count.
-static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect frame) {
+// How much of the bar is really showing: hidden or faded ancestors, clipping ancestors and the
+// screen edge count. On the home bar its width counts too: when the Liquid Glass tab bar
+// minimizes on scroll the bar shrinks into the row beside it, and the character leaves.
+// The width is measured against the window (7.3.116 used the widest width seen, which stuck
+// at the bar's expanded size after tapping it and left the character half faded).
+static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect frame, BOOL compose) {
     CGFloat alpha = 1;
     CGRect visible = frame;
     CALayer* wp = window.layer.presentationLayer ?: window.layer;
@@ -751,9 +787,14 @@ static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect 
         return 0;
     }
     CGFloat shown = visible.size.height / frame.size.height;
-    CGFloat wide = gAnchorMaxWidth > 0 ? frame.size.width / gAnchorMaxWidth : 1;
-    CGFloat widthFade = MAX(0, MIN(1, (wide - 0.75) / 0.2));
-    return MAX(0, MIN(1, alpha * shown * widthFade));
+    CGFloat widthFade = 1;
+    if (!compose && window.bounds.size.width > 0) {
+        CGFloat wide = frame.size.width / window.bounds.size.width;
+        widthFade = MAX(0, MIN(1, (wide - 0.72) / 0.1));
+    }
+    // Faded to nearly nothing counts as gone, nearly opaque as fully there.
+    CGFloat v = alpha * shown * widthFade;
+    return v < 0.05 ? 0 : v > 0.95 ? 1 : v;
 }
 
 static void ClickerTick(void) {
@@ -788,15 +829,13 @@ static void ClickerTick(void) {
 
     if (anchor != gLastAnchor) {
         gLastAnchor = anchor;
-        gAnchorMaxWidth = 0;
         gHost.dragging = NO;
     }
     gOnCompose = compose;
     CALayer* al = anchor.layer.presentationLayer ?: anchor.layer;
     CALayer* wl = window.layer.presentationLayer ?: window.layer;
     CGRect bar = [al convertRect:al.bounds toLayer:wl];
-    gAnchorMaxWidth = MAX(gAnchorMaxWidth, bar.size.width);
-    CGFloat visibility = ClickerAnchorVisibility(anchor, window, bar);
+    CGFloat visibility = ClickerAnchorVisibility(anchor, window, bar, compose);
 
     CGPoint feet;
     if (compose) {
@@ -822,6 +861,15 @@ static void ClickerTick(void) {
     gHost.hidden = alpha < 0.02;
     gHost.alpha = alpha;
     [gHost sendArea];
+    gClickerState = [NSString
+        stringWithFormat:@"anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
+                         @"ready=%d dragging=%d mask=%ldx%ld hots=%lu char=%@#%ld",
+                         NSStringFromClass(anchor.class), compose, gPrefs.free, NSStringFromCGRect(bar),
+                         NSStringFromCGSize(window.bounds.size), visibility, NSStringFromCGRect(gHost.frame),
+                         gHost.alpha, gHost.hidden, gHost.ready, gHost.dragging, (long)gHost.maskW,
+                         (long)gHost.maskH, (unsigned long)gHost.hots.count,
+                         gCharEntry.length ? gCharEntry : @"default", (long)gPrefs.charIndex];
+    ClickerAdjustPanelUpdate(window, compose);
 }
 
 static void ClickerAddBar(NSHashTable<UIView*>* __strong* table, UIView* bar) {
@@ -860,6 +908,7 @@ static void ClickerPrefsChanged(void) {
         ClickerStartLink();
     }
     ClickerTick();
+    ClickerAdjustPanelRefresh();
 }
 
 // Typing in X while the character is on the composer toolbar.
@@ -872,6 +921,224 @@ static void ClickerTextChanged(NSNotification* note) {
         return;
     }
     [gHost typed];
+}
+
+// MARK: - Adjust panel
+
+// Size and position sliders over the real timeline (or composer), so the character can be
+// placed while looking at it. Each row also has -/+ for single points. Values go straight to
+// the same settings the Clicker page shows.
+typedef NS_ENUM(NSInteger, ClickerAdjustMode) {
+    ClickerAdjustBar = 0,
+    ClickerAdjustFree = 1,
+    ClickerAdjustCompose = 2,
+};
+
+@interface NFBClickerAdjustPanel : UIView
+@property (nonatomic) NSInteger mode;
+@property (nonatomic, strong) UILabel* title;
+@property (nonatomic, strong) NSArray<NSString*>* keys;
+@property (nonatomic, strong) NSMutableArray<UISlider*>* sliders;
+@property (nonatomic, strong) NSMutableArray<UILabel*>* values;
+- (void)configure:(NSInteger)mode;
+- (void)refresh;
+@end
+
+@implementation NFBClickerAdjustPanel
+
+static NSString* ClickerText(NSString* key) {
+    return [[BHTBundle sharedBundle] localizedStringForKey:key];
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.mode = -1;
+        self.layer.cornerRadius = 18;
+        self.layer.cornerCurve = kCACornerCurveContinuous;
+        self.clipsToBounds = YES;
+        UIVisualEffectView* blur =
+            [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
+        blur.frame = self.bounds;
+        blur.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:blur];
+    }
+    return self;
+}
+
+- (UIButton*)button:(NSString*)title action:(SEL)action tag:(NSInteger)tag {
+    UIButton* b = [UIButton buttonWithType:UIButtonTypeSystem];
+    [b setTitle:title forState:UIControlStateNormal];
+    b.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+    b.tag = tag;
+    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    b.translatesAutoresizingMaskIntoConstraints = NO;
+    [b.widthAnchor constraintEqualToConstant:34].active = YES;
+    return b;
+}
+
+- (void)configure:(NSInteger)mode {
+    self.mode = mode;
+    for (UIView* v in self.subviews.copy) {
+        if (![v isKindOfClass:[UIVisualEffectView class]]) {
+            [v removeFromSuperview];
+        }
+    }
+    NSArray* keys;
+    NSString* titleKey;
+    if (mode == ClickerAdjustCompose) {
+        keys = @[kClickerSize, kClickerComposeX, kClickerComposeY];
+        titleKey = @"KEMO_CLICKER_ADJUST_COMPOSE";
+    } else if (mode == ClickerAdjustFree) {
+        keys = @[kClickerSize, kClickerFreeX, kClickerFreeY];
+        titleKey = @"KEMO_CLICKER_ADJUST_FREE";
+    } else {
+        keys = @[kClickerSize, kClickerBarX, kClickerBarY];
+        titleKey = @"KEMO_CLICKER_ADJUST_BAR";
+    }
+    self.keys = keys;
+    self.sliders = [NSMutableArray array];
+    self.values = [NSMutableArray array];
+
+    UIStackView* rows = [[UIStackView alloc] init];
+    rows.axis = UILayoutConstraintAxisVertical;
+    rows.spacing = 6;
+    rows.translatesAutoresizingMaskIntoConstraints = NO;
+    [self addSubview:rows];
+    [NSLayoutConstraint activateConstraints:@[
+        [rows.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
+        [rows.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-14],
+        [rows.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
+        [rows.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-10],
+    ]];
+
+    UIStackView* head = [[UIStackView alloc] init];
+    head.axis = UILayoutConstraintAxisHorizontal;
+    UILabel* title = [UILabel new];
+    title.text = ClickerText(titleKey);
+    title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    self.title = title;
+    UIButton* done = [UIButton buttonWithType:UIButtonTypeSystem];
+    [done setTitle:ClickerText(@"KEMO_CLICKER_ADJUST_DONE") forState:UIControlStateNormal];
+    done.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [done addTarget:self action:@selector(done) forControlEvents:UIControlEventTouchUpInside];
+    [head addArrangedSubview:title];
+    [head addArrangedSubview:done];
+    [rows addArrangedSubview:head];
+
+    NSArray* names = @[@"KEMO_CLICKER_ADJUST_SIZE", @"KEMO_CLICKER_ADJUST_X", @"KEMO_CLICKER_ADJUST_Y"];
+    for (NSUInteger i = 0; i < keys.count; i++) {
+        NSDictionary* entry = [BHTSettings settingForKey:keys[i]];
+        UIStackView* row = [[UIStackView alloc] init];
+        row.axis = UILayoutConstraintAxisHorizontal;
+        row.alignment = UIStackViewAlignmentCenter;
+        row.spacing = 4;
+        UILabel* name = [UILabel new];
+        name.text = ClickerText(names[i]);
+        name.font = [UIFont systemFontOfSize:13];
+        [name.widthAnchor constraintEqualToConstant:40].active = YES;
+        UISlider* slider = [UISlider new];
+        slider.minimumValue = [entry[@"min"] floatValue];
+        slider.maximumValue = [entry[@"max"] floatValue];
+        slider.tag = i;
+        [slider addTarget:self action:@selector(slid:) forControlEvents:UIControlEventValueChanged];
+        UILabel* value = [UILabel new];
+        value.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightRegular];
+        value.textAlignment = NSTextAlignmentRight;
+        [value.widthAnchor constraintEqualToConstant:44].active = YES;
+        [row addArrangedSubview:name];
+        [row addArrangedSubview:[self button:@"−" action:@selector(step:) tag:-(NSInteger)(i + 1)]];
+        [row addArrangedSubview:slider];
+        [row addArrangedSubview:[self button:@"+" action:@selector(step:) tag:(NSInteger)(i + 1)]];
+        [row addArrangedSubview:value];
+        [rows addArrangedSubview:row];
+        [self.sliders addObject:slider];
+        [self.values addObject:value];
+    }
+    [self refresh];
+}
+
+- (void)write:(NSInteger)value index:(NSUInteger)i {
+    UISlider* slider = self.sliders[i];
+    value = MAX((NSInteger)slider.minimumValue, MIN((NSInteger)slider.maximumValue, value));
+    [[NSUserDefaults standardUserDefaults] setInteger:value forKey:self.keys[i]];
+    self.values[i].text = [NSString stringWithFormat:@"%ld", (long)value];
+}
+
+- (void)slid:(UISlider*)slider {
+    [self write:lroundf(slider.value) index:(NSUInteger)slider.tag];
+}
+
+- (void)step:(UIButton*)button {
+    NSUInteger i = (NSUInteger)(labs(button.tag) - 1);
+    NSInteger now = [BHTSettings integerForKey:self.keys[i]];
+    [self write:now + (button.tag > 0 ? 1 : -1) index:i];
+    self.sliders[i].value = [BHTSettings integerForKey:self.keys[i]];
+}
+
+- (void)refresh {
+    for (NSUInteger i = 0; i < self.keys.count; i++) {
+        NSInteger v = [BHTSettings integerForKey:self.keys[i]];
+        if (!self.sliders[i].tracking) {
+            self.sliders[i].value = v;
+        }
+        self.values[i].text = [NSString stringWithFormat:@"%ld", (long)v];
+    }
+}
+
+- (void)done {
+    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:kClickerAdjust];
+    [self removeFromSuperview];
+}
+
+@end
+
+static NFBClickerAdjustPanel* gPanel;
+
+static void ClickerAdjustPanelRemove(void) {
+    [gPanel removeFromSuperview];
+}
+
+static void ClickerAdjustPanelUpdate(UIWindow* window, BOOL compose) {
+    if (!gPrefs.adjust || !gHost || gHost.hidden) {
+        ClickerAdjustPanelRemove();
+        return;
+    }
+    if (!gPanel) {
+        gPanel = [[NFBClickerAdjustPanel alloc] initWithFrame:CGRectZero];
+    }
+    NSInteger mode = compose ? ClickerAdjustCompose : gPrefs.free ? ClickerAdjustFree : ClickerAdjustBar;
+    if (gPanel.mode != mode) {
+        [gPanel configure:mode];
+    }
+    if (gPanel.superview != window) {
+        [window addSubview:gPanel];
+    } else if (window.subviews.lastObject != gPanel) {
+        [window bringSubviewToFront:gPanel];
+    }
+    CGFloat width = MIN(window.bounds.size.width - 24, 420);
+    CGRect frame = CGRectMake(round((window.bounds.size.width - width) / 2), window.safeAreaInsets.top + 8, width, 168);
+    if (!CGRectEqualToRect(gPanel.frame, frame)) {
+        gPanel.frame = frame;
+    }
+}
+
+// Settings changed (a slider here, or the page): keep the numbers in step.
+static void ClickerAdjustPanelRefresh(void) {
+    if (gPanel.superview) {
+        [gPanel refresh];
+    }
+}
+
+NSString* NFBClickerDebugText(void) {
+    NSMutableString* out = [NSMutableString string];
+    [out appendFormat:@"on=%d adjust=%d homeBars=%lu composeBars=%lu link=%d%c", gPrefs.on, gPrefs.adjust,
+                      (unsigned long)gHomeBars.allObjects.count, (unsigned long)gComposeBars.allObjects.count,
+                      gLink != nil, 10];
+    [out appendFormat:@"%@%c", gClickerState, 10];
+    for (NSString* line in gClickerLog) {
+        [out appendFormat:@"  %@%c", line, 10];
+    }
+    return out;
 }
 
 %hook _TtC13QuickComposer21QuickComposerSlotView

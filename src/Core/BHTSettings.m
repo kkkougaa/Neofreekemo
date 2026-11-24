@@ -583,6 +583,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
+                        @"key": @"kemo_clicker_adjust_here",
+                        @"parentKey": @"kemo_clicker",
+                        @"action": @"startClickerAdjust:"
+                    },
+                    @{
+                        @"type": @"compactButton",
                         @"key": @"kemo_clicker_import",
                         @"parentKey": @"kemo_clicker",
                         @"action": @"importClickerCharacter:"

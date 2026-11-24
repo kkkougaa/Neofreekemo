@@ -32,6 +32,7 @@ extern CGFloat NFBLastMediaWidth(void);
 extern NSString* NFBPullAnimationDebugText(void);
 extern NSString* NFBParodyLabelDebugText(void);
 extern NSString* NFBChirpFontDebugText(void);
+extern NSString* NFBClickerDebugText(void);
 #import "Core/NFBChirpFonts.h"
 
 static const NSUInteger kMaxLines = 200;
@@ -557,6 +558,7 @@ static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== COMPACT MEDIA ==%c%@ mediaWidth=%.1f%c", 10, NFBCompactMediaDebugText(), NFBLastMediaWidth(), 10];
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     [out appendFormat:@"== VERTICAL TAB BAR ==%c%@%c", 10, NFBVerticalTabBarDebugText(), 10];
+    [out appendFormat:@"== CLICKER ==%c%@", 10, NFBClickerDebugText()];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
     [out appendFormat:@"== HEADER ==%c%@%c%@%cparodyLabel: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(),

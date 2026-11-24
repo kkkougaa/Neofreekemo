@@ -762,14 +762,9 @@ static UIView* ClickerCurrentAnchor(BOOL* compose) {
     return ClickerBarIn(gHomeBars);
 }
 
-// How much of the bar is really showing: hidden or faded ancestors, clipping ancestors, the
-// screen edge, and the bar shrinking (the tab bar minimizing on scroll) all count.
 // How much of the bar is really showing: hidden or faded ancestors, clipping ancestors and the
-// screen edge count. On the home bar its width counts too: when the Liquid Glass tab bar
-// minimizes on scroll the bar shrinks into the row beside it, and the character leaves.
-// The width is measured against the window (7.3.116 used the widest width seen, which stuck
-// at the bar's expanded size after tapping it and left the character half faded).
-static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect frame, BOOL compose) {
+// screen edge count.
+static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect frame) {
     CGFloat alpha = 1;
     CGRect visible = frame;
     CALayer* wp = window.layer.presentationLayer ?: window.layer;
@@ -787,15 +782,44 @@ static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect 
     if (CGRectIsNull(visible) || frame.size.height <= 0) {
         return 0;
     }
-    CGFloat shown = visible.size.height / frame.size.height;
-    CGFloat widthFade = 1;
-    if (!compose && window.bounds.size.width > 0) {
-        CGFloat wide = frame.size.width / window.bounds.size.width;
-        widthFade = MAX(0, MIN(1, (wide - 0.72) / 0.1));
+    return alpha * visible.size.height / frame.size.height;
+}
+
+static BOOL ClickerChainAnimating(UIView* view, UIWindow* window) {
+    for (UIView* v = view; v && v != window; v = v.superview) {
+        if (v.layer.animationKeys.count > 0) {
+            return YES;
+        }
     }
-    // Faded to nearly nothing counts as gone, nearly opaque as fully there.
-    CGFloat v = alpha * shown * widthFade;
-    return v < 0.05 ? 0 : v > 0.95 ? 1 : v;
+    return NO;
+}
+
+// The home bar's width at rest, learned: the widest width it held still (no animation
+// anywhere above it, fully shown) for half a second. When the Liquid Glass tab bar minimizes
+// on scroll the bar shrinks and the character fades with it. 7.3.116 took the widest width
+// ever seen (the bar grows while tapping it opens the composer, so that stuck); 7.3.118 took
+// the window width (the bar shares its row with the + button, so it read as shrunk).
+static CGFloat gRestWidth;
+static CGFloat gStableWidth;
+static NSInteger gStableFrames;
+static CGFloat gRestWindowWidth;
+
+static CGFloat ClickerHomeWidthFade(UIView* anchor, UIWindow* window, CGRect bar, CGFloat shown) {
+    if (gRestWindowWidth != window.bounds.size.width) {
+        gRestWindowWidth = window.bounds.size.width; // rotated: learn again
+        gRestWidth = 0;
+    }
+    BOOL still = shown > 0.95 && !ClickerChainAnimating(anchor, window) && fabs(bar.size.width - gStableWidth) < 0.5;
+    gStableFrames = still ? gStableFrames + 1 : 0;
+    gStableWidth = bar.size.width;
+    if (gStableFrames >= 30 && bar.size.width > gRestWidth) {
+        gRestWidth = bar.size.width;
+    }
+    if (gRestWidth <= 0) {
+        return 1;
+    }
+    CGFloat wide = bar.size.width / gRestWidth;
+    return MAX(0, MIN(1, (wide - 0.75) / 0.2));
 }
 
 static void ClickerTick(void) {
@@ -830,13 +854,18 @@ static void ClickerTick(void) {
 
     if (anchor != gLastAnchor) {
         gLastAnchor = anchor;
+        gRestWidth = 0;
+        gStableFrames = 0;
         gHost.dragging = NO;
     }
     gOnCompose = compose;
     CALayer* al = anchor.layer.presentationLayer ?: anchor.layer;
     CALayer* wl = window.layer.presentationLayer ?: window.layer;
     CGRect bar = [al convertRect:al.bounds toLayer:wl];
-    CGFloat visibility = ClickerAnchorVisibility(anchor, window, bar, compose);
+    CGFloat shown = ClickerAnchorVisibility(anchor, window, bar);
+    CGFloat visibility = compose ? shown : shown * ClickerHomeWidthFade(anchor, window, bar, shown);
+    // Faded to nearly nothing counts as gone, nearly opaque as fully there.
+    visibility = visibility < 0.05 ? 0 : visibility > 0.95 ? 1 : visibility;
 
     CGPoint feet;
     if (compose) {
@@ -864,12 +893,12 @@ static void ClickerTick(void) {
     [gHost sendArea];
     gClickerState = [NSString
         stringWithFormat:@"anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
-                         @"ready=%d dragging=%d mask=%ldx%ld hots=%lu char=%@#%ld",
+                         @"ready=%d dragging=%d mask=%ldx%ld hots=%lu char=%@#%ld restWidth=%.1f",
                          NSStringFromClass(anchor.class), compose, gPrefs.free, NSStringFromCGRect(bar),
                          NSStringFromCGSize(window.bounds.size), visibility, NSStringFromCGRect(gHost.frame),
                          gHost.alpha, gHost.hidden, gHost.ready, gHost.dragging, (long)gHost.maskW,
                          (long)gHost.maskH, (unsigned long)gHost.hots.count,
-                         gCharEntry.length ? gCharEntry : @"default", (long)gPrefs.charIndex];
+                         gCharEntry.length ? gCharEntry : @"default", (long)gPrefs.charIndex, gRestWidth];
     ClickerAdjustPanelUpdate(window, compose);
 }
 
@@ -1147,6 +1176,35 @@ NSString* NFBClickerDebugText(void) {
 - (void)didMoveToWindow {
     %orig;
     ClickerAddBar(&gHomeBars, self);
+}
+
+%end
+
+// The composer's bottom row is TFNButtonBarView in the classic composer and
+// TCRComposerToolbarView in the redesign; ask the controller for whichever it has.
+static void ClickerComposeBars(UIViewController* controller) {
+    for (NSString* name in @[@"composerToolbarView", @"buttonBarView"]) {
+        SEL sel = NSSelectorFromString(name);
+        if (![controller respondsToSelector:sel]) {
+            continue;
+        }
+        UIView* bar = ((id(*)(id, SEL))objc_msgSend)(controller, sel);
+        if ([bar isKindOfClass:[UIView class]] && bar.window) {
+            ClickerAddBar(&gComposeBars, bar);
+        }
+    }
+}
+
+%hook T1TweetComposeViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ClickerComposeBars(self);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    ClickerComposeBars(self);
 }
 
 %end

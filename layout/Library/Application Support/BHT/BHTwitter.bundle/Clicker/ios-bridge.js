@@ -60,6 +60,29 @@
       (subs[ch] = subs[ch] || []).push(fn);
     };
   }
+  var bubbleProbes = 0;
+  function probeBubble() {
+    try {
+      var b = document.getElementById('bubble');
+      if (!b) return note('probe no #bubble');
+      var cs = getComputedStyle(b);
+      var r = b.getBoundingClientRect();
+      var cx = r.left + r.width / 2;
+      var cy = r.top + r.height / 2;
+      var top = document.elementFromPoint(cx, cy);
+      var bt = b.querySelector('.bt');
+      note(
+        'probe cls=' + b.className + ' op=' + cs.opacity + ' vis=' + cs.visibility + ' disp=' + cs.display +
+          ' z=' + cs.zIndex + ' tf=' + cs.transform + ' bg=' + cs.backgroundColor + ' fg=' + cs.color +
+          ' rect=' + [r.left, r.top, r.width, r.height].map(Math.round).join(',') +
+          ' text="' + (bt ? bt.textContent : '').slice(0, 20) + '" textop=' + (bt ? getComputedStyle(bt).opacity : '-') +
+          ' atCenter=' + (top ? top.tagName + '#' + top.id + '.' + top.className : 'none') +
+          ' view=' + innerWidth + 'x' + innerHeight + ' body=' + document.body.className
+      );
+    } catch (e) {
+      note('probe failed ' + e.message);
+    }
+  }
   function noop() {}
   function note(text) {
     send('log', [String(text).slice(0, 300)]);
@@ -188,6 +211,8 @@
     },
     bubbleShown: function (id, r, ms) {
       note('bubble shown ' + (r ? [r.l, r.t, r.r, r.b].map(Math.round).join(',') : '-') + ' ' + ms + 'ms');
+      /* 실기기에서 "떴다는데 안 보인다" 를 가리기 위해, 실제로 그려진 모양을 한 번 남긴다 */
+      if (bubbleProbes++ < 3) setTimeout(probeBubble, 260);
     },
     bubbleHidden: function () {
       note('bubble hidden');

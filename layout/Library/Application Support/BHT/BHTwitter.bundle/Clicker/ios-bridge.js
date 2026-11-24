@@ -284,13 +284,36 @@
     };
   });
 
+  /* pet.html 은 데스크톱(Electron)용이라 viewport 가 없다. 그러면 iOS WebKit 은 페이지를 980px 폭으로
+     그리고 창 크기(약 500pt)로 줄여 보여 준다. 그림 · 말풍선은 980px 기준으로 자리를 잡고, 눌리는 칸 지도는
+     창 기준이라 둘이 어긋났다(7.3.118 덤프: WKContentView 안 980x735). 문서 시작 때 창 폭 그대로 그리게 한다. */
+  var vp = document.createElement('meta');
+  vp.name = 'viewport';
+  vp.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+  /* 문서 시작 때는 아직 <html> 도 없다. <head> 가 생기는 순간 맨 앞에 넣는다(그래야 첫 배치부터 맞다). */
+  function placeViewport() {
+    if (!document.head) return false;
+    if (vp.parentNode !== document.head) document.head.insertBefore(vp, document.head.firstChild);
+    return true;
+  }
+  if (!placeViewport()) {
+    var watch = new MutationObserver(function () {
+      if (placeViewport()) watch.disconnect();
+    });
+    watch.observe(document, { childList: true, subtree: true });
+    document.addEventListener('DOMContentLoaded', function () {
+      watch.disconnect();
+      placeViewport();
+    });
+  }
+
   /* 길게 누를 때 뜨는 확대경 · 복사 메뉴 · 끌어서 저장을 막는다 */
   function noCallout() {
     var s = document.createElement('style');
     s.textContent =
       'html,body,*{-webkit-touch-callout:none!important;-webkit-user-select:none!important;user-select:none!important;' +
       '-webkit-user-drag:none!important;-webkit-tap-highlight-color:transparent!important}' +
-      'html,body{background:transparent!important;overflow:hidden!important}' +
+      'html,body{background:transparent!important;overflow:hidden!important;-webkit-text-size-adjust:100%!important}' +
       '#stack{touch-action:none}';
     (document.head || document.documentElement).appendChild(s);
   }

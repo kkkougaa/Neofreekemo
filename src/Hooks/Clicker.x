@@ -372,6 +372,10 @@ static void ClickerLog(NSString* line) {
         web.scrollView.backgroundColor = UIColor.clearColor;
         web.scrollView.scrollEnabled = NO;
         web.scrollView.bounces = NO;
+        // Never zoom: the page must stay 1 CSS px = 1 pt, like the hit mask (see ios-bridge.js).
+        web.scrollView.minimumZoomScale = 1;
+        web.scrollView.maximumZoomScale = 1;
+        web.scrollView.pinchGestureRecognizer.enabled = NO;
         web.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
         if (@available(iOS 16.4, *)) {
             web.inspectable = YES;

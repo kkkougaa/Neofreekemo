@@ -491,3 +491,21 @@
 "KEMO_VERTICAL_TAB_BAR_DETAIL" = "하단 탭바를 화면 오른쪽에 세로로 놓고, + 버튼은 그 아래로 내립니다. 리퀴드 글래스, iOS 27.1 이상 아이폰 전용. 재시작 후 적용됩니다.";
 "KEMO_TAB_BAR_PAGE_TITLE" = "탭바";
 "KEMO_TAB_BAR_PAGE_SUBTITLE" = "세로 탭바, 입력창, 계정 도크";
+
+/* Clicker */
+"KEMO_CLICKER_PAGE_TITLE" = "클리커";
+"KEMO_CLICKER_PAGE_SUBTITLE" = "홈 타임라인의 입력바 위에 BUG Clicker 캐릭터를 앉힙니다. 누르면 반응하고, 끌어서 옮길 수 있습니다.";
+"KEMO_CLICKER_TITLE" = "클리커 캐릭터";
+"KEMO_CLICKER_DETAIL" = "\"무슨 일이 일어나고 있나요?\" 입력바가 보일 때만 나타나고, 스크롤로 입력바가 숨으면 같이 사라집니다.";
+"KEMO_CLICKER_SIZE_TITLE" = "크기";
+"KEMO_CLICKER_FREE_TITLE" = "자유 위치";
+"KEMO_CLICKER_FREE_DETAIL" = "입력바 위가 아니라 화면의 정한 자리에 세웁니다. 입력바가 보일 때만 나타나는 건 같습니다.";
+"KEMO_CLICKER_BAR_X_TITLE" = "입력바 위 좌우 위치";
+"KEMO_CLICKER_BAR_Y_TITLE" = "입력바 위 높이";
+"KEMO_CLICKER_FREE_X_TITLE" = "자유 위치: 왼쪽에서";
+"KEMO_CLICKER_FREE_Y_TITLE" = "자유 위치: 아래에서";
+"KEMO_CLICKER_FLIP_TITLE" = "좌우 뒤집기";
+"KEMO_CLICKER_LOCK_TITLE" = "위치 잠금";
+"KEMO_CLICKER_LOCK_DETAIL" = "끌어도 움직이지 않습니다. 누르기 반응은 그대로입니다.";
+"KEMO_CLICKER_SOUND_TITLE" = "누를 때 소리";
+"KEMO_CLICKER_SOUND_DETAIL" = "캐릭터를 누를 때 딸깍 소리를 냅니다.";

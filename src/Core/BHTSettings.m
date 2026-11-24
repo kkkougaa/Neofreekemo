@@ -355,6 +355,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openKemoTabBar:"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_clicker_page",
+                        @"titleKey": @"KEMO_CLICKER_PAGE_TITLE",
+                        @"action": @"openKemoClicker:"
+                    },
+                    @{
                         @"key": @"kemo_return_read",
                         @"default": @YES,
                         @"type": @"toggle"
@@ -554,6 +560,86 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     @{
                         @"key": @"kemo_account_dock",
                         @"default": @YES,
+                        @"type": @"toggle"
+                    }
+                ]
+            },
+            @"kemo_clicker": @{
+                @"titleKey": @"KEMO_CLICKER_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_CLICKER_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"kemo_clicker",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_size",
+                        @"default": @100,
+                        @"type": @"slider",
+                        @"min": @48,
+                        @"max": @320,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_free",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_bar_x",
+                        @"default": @120,
+                        @"type": @"slider",
+                        @"min": @-200,
+                        @"max": @200,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_bar_y",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @-80,
+                        @"max": @160,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_free_x",
+                        @"default": @300,
+                        @"type": @"slider",
+                        @"min": @0,
+                        @"max": @500,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker_free"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_free_y",
+                        @"default": @220,
+                        @"type": @"slider",
+                        @"min": @0,
+                        @"max": @1000,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker_free"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_flip",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_lock",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_sound",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @NO,
                         @"type": @"toggle"
                     }
                 ]

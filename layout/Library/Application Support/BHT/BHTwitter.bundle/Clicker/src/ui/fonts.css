@@ -1,0 +1,34 @@
+
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: local("Pretendard Variable"), local("PretendardVariable"),
+       url("../../assets/fonts/PretendardVariable.woff2") format("woff2-variations"),
+       url("../../assets/fonts/PretendardVariable.woff2") format("woff2");
+}
+:root {
+  --ff: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", "Noto Sans KR", sans-serif;
+}
+:root:lang(ja) {
+  --ff: "Pretendard Variable", Pretendard, "Yu Gothic UI", "Meiryo", "Noto Sans JP", "Malgun Gothic", sans-serif;
+}
+
+
+:root:lang(ko) body, :root:lang(en) body { word-break: keep-all; overflow-wrap: break-word; }
+:root:lang(ja) body { line-break: strict; }
+
+:root:lang(ja) body, :root:lang(zh) body { word-break: normal; overflow-wrap: anywhere; }
+p, .set-label, .knob__hint, .set-row__sub, .detail-card__main span, .delh, .sheet__help, .gd-text p { text-wrap: pretty; }
+:root:lang(zh) {
+  --ff: "Pretendard Variable", Pretendard, "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", "Noto Sans TC", "Malgun Gothic", sans-serif;
+}
+:root:lang(zh) body { line-break: strict; }
+
+
+img { -webkit-user-drag: none; user-select: none; }
+
+
+.appbar__brand, .brand__sub, .gd-step, .btn, .chip, .tab, .tslot__name, .knob__label, .ly-row__name, .hist__btn { white-space: nowrap; }
+.brand__sub, .gd-step { flex-shrink: 0; }

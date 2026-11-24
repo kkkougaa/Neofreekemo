@@ -489,3 +489,21 @@
 "KEMO_VERTICAL_TAB_BAR_DETAIL" = "Puts the tab bar in a column on the right of the screen, with the + button at its bottom. Liquid Glass, iPhone on iOS 27.1 or later. Takes effect after a restart.";
 "KEMO_TAB_BAR_PAGE_TITLE" = "Tab Bar";
 "KEMO_TAB_BAR_PAGE_SUBTITLE" = "Vertical tab bar, compose bar, account dock";
+
+/* Clicker */
+"KEMO_CLICKER_PAGE_TITLE" = "Clicker";
+"KEMO_CLICKER_PAGE_SUBTITLE" = "A BUG Clicker character sitting on the home timeline's compose bar. Tap it to make it react, drag it to move it.";
+"KEMO_CLICKER_TITLE" = "Clicker character";
+"KEMO_CLICKER_DETAIL" = "Shows only while the \"What's happening?\" bar is up, and leaves with it when scrolling hides the bar.";
+"KEMO_CLICKER_SIZE_TITLE" = "Size";
+"KEMO_CLICKER_FREE_TITLE" = "Free position";
+"KEMO_CLICKER_FREE_DETAIL" = "Stands at a fixed spot on screen instead of on the bar. It still shows only while the bar is up.";
+"KEMO_CLICKER_BAR_X_TITLE" = "Position along the bar";
+"KEMO_CLICKER_BAR_Y_TITLE" = "Height above the bar";
+"KEMO_CLICKER_FREE_X_TITLE" = "Free position: from the left";
+"KEMO_CLICKER_FREE_Y_TITLE" = "Free position: from the bottom";
+"KEMO_CLICKER_FLIP_TITLE" = "Flip horizontally";
+"KEMO_CLICKER_LOCK_TITLE" = "Lock position";
+"KEMO_CLICKER_LOCK_DETAIL" = "Dragging does not move it. Tapping still works.";
+"KEMO_CLICKER_SOUND_TITLE" = "Sound on tap";
+"KEMO_CLICKER_SOUND_DETAIL" = "Plays a click when you tap the character.";

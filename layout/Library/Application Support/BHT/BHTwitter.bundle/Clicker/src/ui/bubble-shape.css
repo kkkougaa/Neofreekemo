@@ -1,0 +1,20 @@
+
+.is-shape { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.is-shape::after { display: none !important; }
+svg.bb-shape { position: absolute; pointer-events: none; z-index: 0; overflow: visible; }
+.is-shape > .bt { position: relative; z-index: 1; }
+img.bb-corner { position: absolute; z-index: 2; pointer-events: none; object-fit: contain; -webkit-user-drag: none; }
+#bubble.pop img.bb-corner.is-pop, .tb-bubble.on img.bb-corner.is-pop { animation: bbCorner .34s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes bbCorner { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+
+
+[data-clayer] { isolation: isolate; }
+[data-clayer] > .bt { position: relative; z-index: 2; }
+[data-clayer="front"] > img.bb-corner { z-index: 3; }
+[data-clayer="mid"] > img.bb-corner { z-index: 1; }
+[data-clayer="back"] > img.bb-corner { z-index: -1; }
+
+.has-skin { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.has-skin::after, .has-skin::before { display: none !important; }
+.has-skin > svg.bb-shape { display: none !important; }
+div.bb-skin { position: absolute; z-index: 0; pointer-events: none; box-sizing: border-box; border-style: solid; border-color: transparent; }

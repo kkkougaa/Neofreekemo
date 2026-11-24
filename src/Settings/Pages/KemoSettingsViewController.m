@@ -16,6 +16,7 @@
 #import "Settings/Pages/KemoHistorySettingsViewController.h"
 #import "Settings/Pages/KemoMediaSettingsViewController.h"
 #import "Settings/Pages/KemoTabBarSettingsViewController.h"
+#import "Settings/Pages/KemoClickerSettingsViewController.h"
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
@@ -103,6 +104,11 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 
 - (void)openKemoTabBar:(NSDictionary*)sender {
     [self.navigationController pushViewController:[[KemoTabBarSettingsViewController alloc] initWithAccount:self.account]
+                                         animated:YES];
+}
+
+- (void)openKemoClicker:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[[KemoClickerSettingsViewController alloc] initWithAccount:self.account]
                                          animated:YES];
 }
 

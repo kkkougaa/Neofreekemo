@@ -1,0 +1,36 @@
+
+.rad { position: absolute; inset: 0; z-index: 8; pointer-events: none; display: none; font-family: var(--ff); } 
+.rad.on { display: block; }
+.rad__it {
+  position: absolute; width: var(--b, 52px); height: var(--b, 52px); margin: calc(var(--b, 52px) / -2) 0 0 calc(var(--b, 52px) / -2);
+  border-radius: 50%; border: 1px solid #2e2e2e; background: #1e1e1e; color: #ececec; padding: 0;
+  display: grid; place-items: center; cursor: pointer; pointer-events: auto;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35); outline: none;
+  transition: border-color .12s, background-color .12s;
+}
+.rad__it { box-sizing: border-box; }
+.rad__it svg { display: block; width: var(--ic, 22px); height: var(--ic, 22px); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rad__it:hover, .rad__it:focus-visible, .rad__it.is-open { border-color: #d0d0d0; background: #2a2a2a; }
+.rad__it svg .f { fill: currentColor; stroke: none; }
+
+.rad__it svg .cut { stroke: #1e1e1e; stroke-width: 4.6; }
+.rad__it:hover svg .cut, .rad__it:focus-visible svg .cut, .rad__it.is-open svg .cut { stroke: #2a2a2a; }
+.rad__it:focus-visible { box-shadow: 0 0 0 2px #d0d0d0, 0 6px 18px rgba(0, 0, 0, .35); }
+.rad__it.is-on::after, .rad__it.is-pick::after {
+  content: ""; position: absolute; right: 3px; top: 3px; width: 9px; height: 9px; border-radius: 50%;
+  background: #6FD39B; box-shadow: 0 0 0 2px #1e1e1e;
+}
+.rad__it.is-off { color: #707070; }
+.rad__it.has-sub::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; border: 1px dashed #4a4a4a; pointer-events: none; }
+.rad__it.is-open::before { border-color: #8a8a8a; }
+
+.rad__sw { position: absolute; left: 50%; bottom: 5px; width: 12px; height: 4px; margin-left: -6px; border-radius: 2px; background: var(--sw); }
+.rad__tip {
+  position: absolute; left: 0; top: 0; padding: 5px 11px; border-radius: 999px; background: #0e0e0e; border: 1px solid #2e2e2e; color: #ececec;
+  font-size: 13px; font-weight: 600; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s; z-index: 2;
+}
+.rad__tip.on { opacity: 1; }
+
+.rad__it.k-top svg { transition: transform .2s cubic-bezier(.34,1.56,.64,1); }
+.rad__it.k-top.is-off svg { transform: rotate(35deg); }
+@media (prefers-reduced-motion: reduce) { .rad__it, .rad__tip, .rad__it.k-top svg { transition: none; } }

@@ -1,0 +1,11 @@
+
+svg.bfx-shape { position: absolute; pointer-events: none; z-index: 0; overflow: visible; }
+.bfx-w { display: inline-block; white-space: nowrap; }
+.bfx-c { display: inline-block; white-space: pre; }
+.bfx-cur, .bfx-cur0 { position: relative; }
+.bfx-cur::after, .bfx-cur0::before { content: ""; position: absolute; top: .12em; width: 1.5px; height: 1.05em; background: currentColor; }
+.bfx-cur::after { right: -3px; }
+.bfx-cur0::before { left: -1px; }
+.bfx-gl { position: absolute !important; z-index: 2; pointer-events: none; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; text-align: var(--bb-align, left); }
+[data-shape="caption"]::after, [data-shape="focus"]::after, [data-shape="recall"]::after, [data-shape="dark"]::after, [data-shape="paper"]::after, [data-shape="shout"]::after { display: none !important; }
+[data-shape="dark"] .bt, [data-shape="dark"] .bfx-gl { color: #f2f2f2 !important; }

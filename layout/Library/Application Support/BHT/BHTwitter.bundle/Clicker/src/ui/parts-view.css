@@ -1,0 +1,15 @@
+
+.pt { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.pt[hidden], .pt-sh[hidden] { display: none; }
+.pt-shm { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  -webkit-mask-size: contain; -webkit-mask-position: 50% 100%; -webkit-mask-repeat: no-repeat; }
+.pt-sh { position: absolute; border-radius: 50%; }
+.pt-sh.is-soft { -webkit-mask-image: radial-gradient(closest-side, #000 15%, transparent 100%); }
+.pt-sh.is-png { border-radius: 0; -webkit-mask-size: contain; -webkit-mask-position: 50% 100%; -webkit-mask-repeat: no-repeat; }
+.pt-a { position: absolute; width: 0; height: 0; }
+.pt-hop { position: absolute; transform-origin: 50% 85%; will-change: transform; }
+.pt-hop img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block;
+  object-fit: contain; object-position: 50% 100%; pointer-events: none; -webkit-user-drag: none; }
+.pt-hop img.pt-blink { opacity: 0; }
+.pt-hop.is-blink img { opacity: 0; }
+.pt-hop.is-blink img.pt-blink { opacity: 1; }

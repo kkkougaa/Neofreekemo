@@ -1,0 +1,25 @@
+{
+  "name": "기본 클리커",
+  "head1": "head1.png",
+  "head2": "head2.png",
+  "body": "body.png",
+  "depth": 5,
+  "hold": 110,
+  "squash": 0,
+  "bubbleMs": 1500,
+  "volume": 0.45,
+  "idleMs": 0,
+  "sound": true,
+  "noRepeat": true,
+  "lines": [
+    "딸깍.",
+    "…또 눌렀어?",
+    "이 손, 안 아파?"
+  ],
+  "head3": "head3.png",
+  "head4": "head4.png",
+  "body2": "body2.png",
+  "dragBodyY": -7,
+  "dragOn": true,
+  "dragSwing": 100
+}

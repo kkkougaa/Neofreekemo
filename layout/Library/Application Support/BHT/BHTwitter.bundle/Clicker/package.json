@@ -1,0 +1,9 @@
+{
+  "name": "bug-clicker",
+  "productName": "BUG Clicker",
+  "version": "1.19.7",
+  "description": "바탕화면 위에 떠 있는 클리커 캐릭터",
+  "main": "boot.js",
+  "author": "BUG",
+  "license": "MIT"
+}

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.113",
+      "subtitle": "NeoFreeBird version 7.3.114",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.114",
+          "buildVersion": "114",
+          "date": "2026-11-24T02:48:15Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.114/NeoFreeBird-Twitter-sideloaded_7.3.114_12.44.ipa",
+          "size": 270895457,
+          "minOSVersion": "15.0",
+          "localizedDescription": "실험실(리퀴드 글래스 아래)에 '세로 탭바 (오른쪽)' 추가: 탭바를 화면 오른쪽에 세로로 놓고 + 버튼은 그 아래로 내립니다 (iOS 27.1 이상 아이폰). '빠른 작성 숨기기'도 그 옆으로 옮기고, 이제 입력창을 아예 만들지 않습니다. 둘 다 재시작 후 적용."
+        },
         {
           "version": "7.3.113",
           "buildVersion": "113",

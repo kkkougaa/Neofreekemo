@@ -822,8 +822,11 @@ static CGFloat ClickerHomeWidthFade(UIView* anchor, UIWindow* window, CGRect bar
     if (gRestWidth <= 0) {
         return 1;
     }
+    // Writing in the bar widens it (340 → 400pt) and it can sit still that way, so the widest
+    // rest width is not the usual one; only a real shrink (well under the widest) fades.
+    // 7.3.121 faded from 75%, which left 340 of 400 half faded.
     CGFloat wide = bar.size.width / gRestWidth;
-    return MAX(0, MIN(1, (wide - 0.75) / 0.2));
+    return MAX(0, MIN(1, (wide - 0.6) / 0.15));
 }
 
 static void ClickerTick(void) {
@@ -946,12 +949,17 @@ static void ClickerPrefsChanged(void) {
 }
 
 // Typing in X while the character is on the composer toolbar.
+// Also when writing straight in the home bar (the quick composer's own text view).
 static void ClickerTextChanged(NSNotification* note) {
-    if (!gPrefs.on || !gPrefs.typing || !gOnCompose || !gHost || gHost.hidden) {
+    if (!gPrefs.on || !gPrefs.typing || !gHost || gHost.hidden) {
         return;
     }
     UIView* field = note.object;
     if (![field isKindOfClass:[UIView class]] || field.window != gHost.window) {
+        return;
+    }
+    UIView* anchor = gLastAnchor;
+    if (!gOnCompose && !(anchor && [field isDescendantOfView:anchor])) {
         return;
     }
     [gHost typed];

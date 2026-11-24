@@ -229,6 +229,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"disable_double_tap_like",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"disable_immersive_scroll",
                         @"default": @NO,
                         @"type": @"toggle"
@@ -594,6 +599,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"key": @"disable_media_carousel",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"hide_media_previews",
                         @"default": @NO,
                         @"type": @"toggle"
                     },

@@ -485,7 +485,7 @@ static void RefreshDrawerSnapshot(void) {
 }
 
 + (BOOL)isQuickComposerEnabledWithFeatureSwitches:(id)switches {
-    return NFBLiquidGlassEnabled();
+    return !is_iPad() && NFBLiquidGlassEnabled();
 }
 
 %end

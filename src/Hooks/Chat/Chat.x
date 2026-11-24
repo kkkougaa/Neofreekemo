@@ -1,5 +1,19 @@
 #import "Chat.h"
 
+// MARK: - Hide typing indicator
+
+%hook Subsystem_ios_iosArm64_mainXChatConnectionManagerImpl
+- (void)onMeTypingConversationId:(id)conversationID {
+    if ([BHTSettings boolForKey:@"hide_typing_indicator"]) return;
+    %orig(conversationID);
+}
+%end
+
+// MARK: - Diagnostics (shake dump "== CHAT ==")
+//
+// Everything below only records; it is installed only when the shake dump is on
+// at launch (it watches every network response and the chat socket).
+
 // MARK: - Matching
 
 static BOOL isChatWebSocketURL(NSURL* url) {
@@ -102,6 +116,8 @@ static BOOL IsChatRelatedPath(NSString* path) {
     return NO;
 }
 
+%group ChatDiagnostics
+
 %hook TNLResponseInfo
 
 - (instancetype)initWithFinalURLRequest:(NSURLRequest*)request
@@ -142,8 +158,7 @@ static SendMessageIMP OriginalSendMessageIMP;
 static void nfb_sendMessageReplacement(id self, SEL _cmd, NSURLSessionWebSocketMessage* message,
                                        void (^completionHandler)(NSError* _Nullable)) {
     BOOL tagged = objc_getAssociatedObject(self, ChatSocketTagKey) != nil;
-    BOOL drop = tagged && message.data && isTypingIndicatorFrame(message.data) &&
-                [BHTSettings boolForKey:@"hide_typing_indicator"];
+    BOOL drop = NO;
     if (tagged) {
         @synchronized([NSObject class]) {
             gFramesSent++;
@@ -155,15 +170,8 @@ static void nfb_sendMessageReplacement(id self, SEL _cmd, NSURLSessionWebSocketM
                              ? [NSString stringWithFormat:@"%lu B %@", (unsigned long)message.data.length,
                                                           HexPrefix(message.data, 20)]
                              : [NSString stringWithFormat:@"text %lu chars", (unsigned long)message.string.length];
-        NFBChatNote([NSString stringWithFormat:@"ws out %@ typingShape=%d %@", what,
-                                               message.data ? isTypingIndicatorFrame(message.data) : 0,
-                                               drop ? @"DROPPED" : @"sent"]);
-    }
-    if (drop) {
-        if (completionHandler) {
-            completionHandler(nil);
-        }
-        return;
+        NFBChatNote([NSString stringWithFormat:@"ws out %@ typingShape=%d", what,
+                                               message.data ? isTypingIndicatorFrame(message.data) : 0]);
     }
     OriginalSendMessageIMP(self, _cmd, message, completionHandler);
 }
@@ -239,6 +247,9 @@ static void nfb_swizzleSendMessageIfNeeded(NSURLSessionWebSocketTask* task) {
     return task;
 }
 
+%end
+
+// end of ChatDiagnostics
 %end
 
 // MARK: - Tint chat buttons
@@ -334,3 +345,10 @@ static void nfb_swizzleSendMessageIfNeeded(NSURLSessionWebSocketTask* task) {
 }
 
 %end
+
+%ctor {
+    %init;
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"kemo_shake_dump"]) {
+        %init(ChatDiagnostics);
+    }
+}

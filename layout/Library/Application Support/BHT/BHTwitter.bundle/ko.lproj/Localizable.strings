@@ -434,3 +434,7 @@
 "KEMO_CHIRP_FONT_ERROR_WOFF" = "웹 폰트(.woff)는 쓸 수 없어요. .otf나 .ttf 파일을 골라 주세요.";
 "KEMO_CHIRP_FONT_ERROR_OPEN" = "폰트로 열 수 없는 파일이에요.";
 "KEMO_CHIRP_FONT_ERROR_RENAME" = "이 폰트는 Chirp 이름으로 바꿔 등록할 수 없는 형식이에요.";
+"DISABLE_DOUBLE_TAP_LIKE_TITLE" = "두 번 탭해서 좋아요 끄기";
+"DISABLE_DOUBLE_TAP_LIKE_DETAIL" = "동영상을 두 번 탭해도 좋아요가 눌리지 않게 합니다.";
+"HIDE_MEDIA_PREVIEWS_TITLE" = "미디어 미리보기 숨기기";
+"HIDE_MEDIA_PREVIEWS_DETAIL" = "타임라인에서 사진, 동영상, GIF를 숨깁니다. (데이터 절약 모드)";

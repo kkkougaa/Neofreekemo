@@ -262,8 +262,13 @@ NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
         // Twitter branding is on).
     }
 
+    // iPad: phone navigation, and no quick composer, or the message bar does not
+    // show (NeoFreeBird 69267f8). The quick composer stays on iPhone (7.3.69).
     if ([key isEqualToString:@"ios_ipad_phone_navigation_enabled"]) {
-        return (is_iPad() && ![BHTSettings boolForKey:@"liquid_glass"]) ? @NO : @YES;
+        return @YES;
+    }
+    if ([key isEqualToString:@"ios_liquid_glass_redesign_quick_composer_enabled"] && is_iPad()) {
+        return @NO;
     }
 
     return BHTFeatureSwitchOverrideValue(key, ReportGenuineTabGates,
@@ -325,6 +330,7 @@ NSArray* panelIDsForDashSnapshot(NSArray* panelIDs) {
     }
     claim(@17); // Money
     claim(@20); // News
+    claim(@25); // Calls
 
     return spoofed;
 }

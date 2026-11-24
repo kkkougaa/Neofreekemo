@@ -228,6 +228,8 @@
     },
     bubbleHidden: function () {
       note('bubble hidden');
+      var b = document.getElementById('bubble');
+      if (b) b.classList.remove('clk-mark');
     },
     capToggle: noop,
     capOpt: noop,
@@ -348,8 +350,26 @@
     }
   };
 
-  window.__clkSay = function (text, music) {
+  /* 아이콘은 말풍선 크기를 잴 때부터 들어가야 글자가 밀리지 않는다 — 클래스와 ::before 로 붙이고,
+     이 말풍선이 닫히면 뗀다 */
+  var markStyle = null;
+  window.__clkSay = function (text, music, icon) {
     try {
+      var b = document.getElementById('bubble');
+      if (b) {
+        if (icon) {
+          if (!markStyle) {
+            markStyle = document.createElement('style');
+            (document.head || document.documentElement).appendChild(markStyle);
+          }
+          markStyle.textContent =
+            '#bubble.clk-mark .bt::before{content:"";display:inline-block;width:1.15em;height:1.15em;' +
+            'margin-right:.4em;vertical-align:-.2em;background:url("' + icon + '") center/contain no-repeat}';
+          b.classList.add('clk-mark');
+        } else {
+          b.classList.remove('clk-mark');
+        }
+      }
       if (typeof sayText === 'function') sayText(String(text), 3200);
       if (music && typeof FX !== 'undefined' && FX && FX.burst) FX.burst(3, 'note');
     } catch (e) {

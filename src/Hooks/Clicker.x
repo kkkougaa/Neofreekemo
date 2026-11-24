@@ -1199,7 +1199,14 @@ BOOL NFBClickerSay(NSString* text, BOOL music) {
     if (text.length == 0 || !NFBClickerVisible() || ![BHTSettings boolForKey:@"kemo_clicker_spotify"]) {
         return NO;
     }
-    [gHost js:[NSString stringWithFormat:@"window.__clkSay&&__clkSay(%@,%@)", ClickerJSON(text), music ? @"true" : @"false"]];
+    // The Spotify mark goes in front of the title, as in the header bubble.
+    static NSString* mark;
+    if (music && !mark) {
+        NSData* png = [NSData dataWithContentsOfURL:[[BHTBundle sharedBundle] pathForFile:@"nfb_spotify_logo.png"]];
+        mark = png.length ? [@"data:image/png;base64," stringByAppendingString:[png base64EncodedStringWithOptions:0]] : @"";
+    }
+    [gHost js:[NSString stringWithFormat:@"window.__clkSay&&__clkSay(%@,%@,%@)", ClickerJSON(text), music ? @"true" : @"false",
+                                         ClickerJSON(music ? mark : @"")]];
     ClickerLog([@"say " stringByAppendingString:text]);
     return YES;
 }

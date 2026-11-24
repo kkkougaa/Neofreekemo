@@ -34,7 +34,8 @@ static NSString* const kBPMCache = @"kemo_clicker_bpm_cache";
 // MARK: BPM lookup
 
 static NSString* gTrackKey;    // "title|artist" now playing, nil when nothing
-static double gBPM;            // 0 = unknown (looking up, or Deezer had none)
+static double gBPM;            // the tempo the clock uses; kept from the last song until the new one is known
+static double gFoundBPM;       // this song's own tempo, 0 while unknown
 static NSString* gBPMStatus = @"-";
 static NSUInteger gLookup;     // generation, so a late answer for an old song is dropped
 
@@ -242,26 +243,45 @@ static void FindBPM(NSString* title, NSString* artist, NSUInteger generation, vo
     });
 }
 
+static void LookUpBPM(NSString* title, NSString* artist);
 static void LookUpBPM(NSString* title, NSString* artist) {
     NSString* key = [NSString stringWithFormat:@"%@|%@", title, artist ?: @""];
     NSDictionary* cache = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kBPMCache];
-    if ([cache[key] respondsToSelector:@selector(doubleValue)]) {
-        gBPM = [cache[key] doubleValue];
-        gBPMStatus = gBPM > 0 ? [NSString stringWithFormat:@"%.1f (cached)", gBPM] : @"none (cached)";
+    if ([cache[key] respondsToSelector:@selector(doubleValue)] && [cache[key] doubleValue] > 0) {
+        gFoundBPM = gBPM = [cache[key] doubleValue];
+        gBPMStatus = [NSString stringWithFormat:@"%.1f (cached)", gBPM];
         return;
     }
+    // Until this song's tempo is known the character keeps the last song's (it used to stop).
     NSUInteger generation = ++gLookup;
-    gBPM = 0;
-    gBPMStatus = @"looking up";
+    gFoundBPM = 0;
+    gBPMStatus = gBPM > 0 ? [NSString stringWithFormat:@"looking up, keeping %.1f", gBPM] : @"looking up";
     FindBPM(title, artist, generation, ^(double bpm, NSString* how) {
         if (generation != gLookup) {
             return;
         }
-        gBPM = bpm;
-        gBPMStatus = bpm > 0 ? [NSString stringWithFormat:@"%.1f (%@)", bpm, how] : how;
+        if (bpm > 0) {
+            gFoundBPM = gBPM = bpm;
+            gBPMStatus = [NSString stringWithFormat:@"%.1f (%@)", bpm, how];
+        } else {
+            gBPMStatus = gBPM > 0 ? [NSString stringWithFormat:@"%@, keeping %.1f", how, gBPM] : how;
+        }
         NFBClickerLog([NSString stringWithFormat:@"bpm %@ — %@", gBPMStatus, key]);
-        if (bpm <= 0 && ![how isEqualToString:@"not on Deezer"]) {
-            return; // a network hiccup: try again next song change, do not remember "none"
+        if (bpm <= 0) {
+            // Not remembered: a hiccup (or a slow preview) gets one more try in 20 seconds.
+            static NSMutableSet<NSString*>* retried;
+            if (!retried) {
+                retried = [NSMutableSet set];
+            }
+            if (![retried containsObject:key]) {
+                [retried addObject:key];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if ([key isEqualToString:gTrackKey] && gFoundBPM <= 0) {
+                        LookUpBPM(title, artist);
+                    }
+                });
+            }
+            return;
         }
         NSMutableDictionary* next = [([[NSUserDefaults standardUserDefaults] dictionaryForKey:kBPMCache] ?: @{}) mutableCopy];
         if (next.count > 300) {

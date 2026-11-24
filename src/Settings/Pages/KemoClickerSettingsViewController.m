@@ -7,6 +7,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "Core/BHTBundle.h"
 #import "Core/NFBClickerStore.h"
+#import "Settings/Pages/KemoClickerRemindViewController.h"
 
 // The clicker character on the home timeline and the composer (src/Hooks/Clicker.x). Every
 // row is read live, so the character moves and resizes while the sliders move. The three
@@ -96,6 +97,10 @@
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     [self presentSheet:sheet from:sender];
+}
+
+- (void)openClickerRemind:(NSDictionary*)sender {
+    [self.navigationController pushViewController:[KemoClickerRemindViewController new] animated:YES];
 }
 
 // Sliders over the real timeline (Clicker.x NFBClickerAdjustPanel) until its Done.

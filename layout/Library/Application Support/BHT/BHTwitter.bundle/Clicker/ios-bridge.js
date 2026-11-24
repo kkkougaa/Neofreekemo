@@ -96,7 +96,36 @@
      네이티브에는 "받았다"(charInfo)를 알려 같은 파일을 다시 보내지 않게 한다. */
   var loadedFiles = {};
   var current = null;
+  /* 이 앱 설정을 캐릭터 위에 덮는다 — 말풍선 위치(pt, + 는 위로) · 크기(%) · 혼잣말 간격(ms, 0 = 캐릭터 그대로).
+     pet.js 는 bubbleX/Y 를 캐릭터 크기 200 기준 단위로 쓰고(GEOM.size / 200 배), 글자 크기는 BubbleStyle.fontPx 로 정한다. */
+  var bubbleScale = 1;
+  var fontPatched = false;
+  function patchFont() {
+    if (fontPatched || typeof BubbleStyle === 'undefined' || !BubbleStyle.fontPx) return;
+    var orig = BubbleStyle.fontPx;
+    BubbleStyle.fontPx = function () {
+      return Math.round(orig.apply(this, arguments) * bubbleScale * 2) / 2;
+    };
+    fontPatched = true;
+  }
+  function overlay(p) {
+    if (!p || !p.clk || !p.char) return p;
+    var k = p.clk;
+    var size = (p.geom && p.geom.size) || 160;
+    var unit = 200 / size;
+    var c = Object.assign({}, p.char);
+    c.bubbleX = (Number(c.bubbleX) || 0) + (Number(k.bubbleX) || 0) * unit;
+    c.bubbleY = (Number(c.bubbleY) || 0) - (Number(k.bubbleY) || 0) * unit;
+    if (k.idleMs > 0) c.idleMs = k.idleMs;
+    bubbleScale = Math.max(0.5, Math.min(2, (Number(k.bubbleSize) || 100) / 100));
+    patchFont();
+    return Object.assign({}, p, { char: c });
+  }
+
   function fill(p) {
+    return fill0(p).then(overlay);
+  }
+  function fill0(p) {
     if (p && p.char && !p.charKey && window.ClickerImport && ClickerImport.normalizeBuiltIn) {
       try {
         p = Object.assign({}, p, { char: ClickerImport.normalizeBuiltIn(p.char) });

@@ -6,6 +6,7 @@
 #import <UIKit/UIGestureRecognizerSubclass.h>
 #import "HookHelpers.h"
 #import "Core/NFBClickerStore.h"
+#import "Core/NFBClickerRemind.h"
 
 // MARK: - Clicker
 //
@@ -47,8 +48,9 @@ static NSString* const kClickerTyping = @"kemo_clicker_typing";
 static NSString* const kClickerAdjust = @"kemo_clicker_adjust";
 
 typedef struct {
-    BOOL on, free, flip, lock, sound, compose, typing, adjust;
-    NSInteger size, barX, barY, freeX, freeY, composeX, composeY, charIndex;
+    BOOL on, free, flip, lock, sound, compose, typing, adjust, dock, allTabs;
+    NSInteger size, barX, barY, freeX, freeY, composeX, composeY, charIndex, dockY;
+    NSInteger bubbleX, bubbleY, bubbleSize, idle;
 } ClickerPrefs;
 
 static ClickerPrefs gPrefs;
@@ -75,6 +77,13 @@ static ClickerPrefs ReadClickerPrefs(void) {
     p.composeY = [BHTSettings integerForKey:kClickerComposeY];
     p.charIndex = [NFBClickerStore selectedIndex];
     p.adjust = [[NSUserDefaults standardUserDefaults] boolForKey:kClickerAdjust];
+    p.dock = [BHTSettings boolForKey:@"kemo_clicker_dock"];
+    p.dockY = [BHTSettings integerForKey:@"kemo_clicker_dock_y"];
+    p.allTabs = [BHTSettings boolForKey:@"kemo_clicker_all_tabs"];
+    p.bubbleX = [BHTSettings integerForKey:@"kemo_clicker_bubble_x"];
+    p.bubbleY = [BHTSettings integerForKey:@"kemo_clicker_bubble_y"];
+    p.bubbleSize = MAX(50, MIN(200, [BHTSettings integerForKey:@"kemo_clicker_bubble_size"]));
+    p.idle = MAX(0, [BHTSettings integerForKey:@"kemo_clicker_idle"]);
     return p;
 }
 
@@ -297,6 +306,7 @@ static NSString* ClickerJSON(id obj) {
 - (void)pushData;
 - (void)typed;
 - (void)js:(NSString*)script;
+- (void)emit:(NSString*)channel value:(id)value;
 - (void)sendArea;
 @end
 
@@ -533,6 +543,14 @@ static void ClickerLog(NSString* line) {
             @"update": @{@"auto": @NO}
         }
     } mutableCopy];
+    // Speech bubble offset and size, and the idle-talk interval, are this app's settings laid
+    // over the character; the bridge applies them (ios-bridge.js fill()).
+    p[@"clk"] = @{
+        @"bubbleX": @(gPrefs.bubbleX),
+        @"bubbleY": @(gPrefs.bubbleY),
+        @"bubbleSize": @(gPrefs.bubbleSize),
+        @"idleMs": @(gPrefs.idle * 1000)
+    };
     NSString* entry = gCharEntry;
     if (entry.length) {
         p[@"charKey"] = entry;
@@ -831,9 +849,80 @@ static CGFloat ClickerHomeWidthFade(UIView* anchor, UIWindow* window, CGRect bar
     return MAX(0, MIN(1, (wide - 0.6) / 0.15));
 }
 
+// MARK: Tab bar (other tabs, and the bottom dock)
+
+// X's Liquid Glass tab bar row. On home the quick composer bar sits on top of it; on the other
+// tabs there is no composer bar, so the character keeps the same spot by remembering where
+// the bar was relative to this row.
+static __weak UIView* gTabBar;
+static NSUInteger gTabBarSearch;
+static BOOL gBarOffsetKnown;
+static CGRect gBarOffset; // home bar frame relative to the tab bar's origin
+static CGFloat gLastFullX = NAN;
+
+static UIView* ClickerFindView(UIView* view, NSString* className, int depth) {
+    if (depth > 14) {
+        return nil;
+    }
+    if ([NSStringFromClass(view.class) isEqualToString:className]) {
+        return view;
+    }
+    for (UIView* sub in view.subviews) {
+        UIView* found = ClickerFindView(sub, className, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static UIView* ClickerTabBar(UIWindow* window) {
+    UIView* bar = gTabBar;
+    if (bar && bar.window == window) {
+        return bar;
+    }
+    // A tree walk; at most twice a second.
+    if (gTabBarSearch++ % 30 != 0 || !window) {
+        return nil;
+    }
+    bar = ClickerFindView(window, @"XNavigation.TabBarPlacementView", 0);
+    gTabBar = bar;
+    return bar;
+}
+
+static UIWindow* ClickerMainWindow(void) {
+    UIWindow* w = gHost.window;
+    if (w) {
+        return w;
+    }
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
+            continue;
+        }
+        for (UIWindow* window in ((UIWindowScene*)scene).windows) {
+            if (window.isKeyWindow) {
+                return window;
+            }
+        }
+    }
+    return nil;
+}
+
+static CGRect ClickerFrameIn(UIView* view, UIWindow* window) {
+    CALayer* vl = view.layer.presentationLayer ?: view.layer;
+    CALayer* wl = window.layer.presentationLayer ?: window.layer;
+    return [vl convertRect:vl.bounds toLayer:wl];
+}
+
 static void ClickerTick(void) {
     BOOL compose = NO;
     UIView* anchor = gPrefs.on ? ClickerCurrentAnchor(&compose) : nil;
+    BOOL viaTabBar = NO;
+    if (!anchor && gPrefs.on && gPrefs.allTabs) {
+        // Another tab: stand where the home bar would be, over the tab bar.
+        anchor = ClickerTabBar(ClickerMainWindow());
+        viaTabBar = anchor != nil;
+    }
     if (!anchor) {
         // Nothing to follow: stop ticking until a bar comes back into a window
         // (didMoveToWindow) or the setting is turned on.
@@ -868,13 +957,26 @@ static void ClickerTick(void) {
         gHost.dragging = NO;
     }
     gOnCompose = compose;
-    CALayer* al = anchor.layer.presentationLayer ?: anchor.layer;
-    CALayer* wl = window.layer.presentationLayer ?: window.layer;
-    CGRect bar = [al convertRect:al.bounds toLayer:wl];
+    CGRect bar = ClickerFrameIn(anchor, window);
     CGFloat shown = ClickerAnchorVisibility(anchor, window, bar);
-    CGFloat visibility = compose ? shown : shown * ClickerHomeWidthFade(anchor, window, bar, shown);
+    CGFloat visibility = compose || viaTabBar ? shown : shown * ClickerHomeWidthFade(anchor, window, bar, shown);
     // Faded to nearly nothing counts as gone, nearly opaque as fully there.
     visibility = visibility < 0.05 ? 0 : visibility > 0.95 ? 1 : visibility;
+
+    // Remember where the home bar sits against the tab bar, for the other tabs.
+    UIView* tabBar = compose ? nil : ClickerTabBar(window);
+    if (!compose && !viaTabBar && tabBar && visibility >= 1) {
+        CGRect t = ClickerFrameIn(tabBar, window);
+        if (ClickerAnchorVisibility(tabBar, window, t) > 0.95) {
+            gBarOffset = CGRectOffset(bar, -t.origin.x, -t.origin.y);
+            gBarOffsetKnown = YES;
+        }
+    }
+    if (viaTabBar) {
+        // Where the home bar would be: remembered, or just above the tab bar.
+        bar = gBarOffsetKnown ? CGRectOffset(gBarOffset, bar.origin.x, bar.origin.y)
+                              : CGRectMake(bar.origin.x, bar.origin.y - 60, bar.size.width - 60, 48);
+    }
 
     CGPoint feet;
     if (compose) {
@@ -883,6 +985,17 @@ static void ClickerTick(void) {
         feet = CGPointMake(gPrefs.freeX, window.bounds.size.height - gPrefs.freeY);
     } else {
         feet = CGPointMake(CGRectGetMidX(bar) + gPrefs.barX, CGRectGetMinY(bar) - gPrefs.barY);
+        if (visibility >= 1) {
+            gLastFullX = feet.x;
+        }
+        // The bars slide or shrink away on scroll: instead of leaving with them, the character
+        // can settle on the bottom of the screen, keeping its place across.
+        if (gPrefs.dock) {
+            CGFloat bottom = window.bounds.size.height - gPrefs.dockY;
+            CGFloat x = isnan(gLastFullX) ? feet.x : gLastFullX;
+            feet = CGPointMake(x + (feet.x - x) * visibility, bottom + (feet.y - bottom) * visibility);
+            visibility = 1;
+        }
     }
     ClickerGeom g = ClickerGeometry(gPrefs.size);
     CGRect frame = CGRectMake(round(feet.x - g.width / 2), round(feet.y - g.zone - g.size), g.width, g.height);
@@ -901,8 +1014,9 @@ static void ClickerTick(void) {
     gHost.alpha = alpha;
     [gHost sendArea];
     gClickerState = [NSString
-        stringWithFormat:@"anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
+        stringWithFormat:@"tabs=%d dock=%d offset=%@ anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
                          @"ready=%d dragging=%d mask=%ldx%ld hots=%lu char=%@#%ld restWidth=%.1f",
+                         viaTabBar, gPrefs.dock, gBarOffsetKnown ? NSStringFromCGRect(gBarOffset) : @"-",
                          NSStringFromClass(anchor.class), compose, gPrefs.free, NSStringFromCGRect(bar),
                          NSStringFromCGSize(window.bounds.size), visibility, NSStringFromCGRect(gHost.frame),
                          gHost.alpha, gHost.hidden, gHost.ready, gHost.dragging, (long)gHost.maskW,
@@ -940,7 +1054,8 @@ static void ClickerPrefsChanged(void) {
     gCharEntry = entry;
     gPrefs = now;
     if (charChanged || now.flip != old.flip || now.lock != old.lock || now.sound != old.sound ||
-        now.typing != old.typing) {
+        now.typing != old.typing || now.bubbleX != old.bubbleX || now.bubbleY != old.bubbleY ||
+        now.bubbleSize != old.bubbleSize || now.idle != old.idle) {
         [gHost pushData];
     }
     if (now.on) {
@@ -980,12 +1095,15 @@ typedef NS_ENUM(NSInteger, ClickerAdjustMode) {
 
 @interface NFBClickerAdjustPanel : UIView
 @property (nonatomic) NSInteger mode;
+@property (nonatomic) NSInteger tab; // 0 place, 1 speech bubble, 2 beat
+@property (nonatomic) BOOL dock;
 @property (nonatomic, strong) UILabel* title;
 @property (nonatomic, strong) NSArray<NSString*>* keys;
 @property (nonatomic, strong) NSMutableArray<UISlider*>* sliders;
 @property (nonatomic, strong) NSMutableArray<UILabel*>* values;
-- (void)configure:(NSInteger)mode;
+- (void)configure:(NSInteger)mode dock:(BOOL)dock;
 - (void)refresh;
+- (CGFloat)wantedHeight;
 @end
 
 @implementation NFBClickerAdjustPanel
@@ -1020,24 +1138,53 @@ static NSString* ClickerText(NSString* key) {
     return b;
 }
 
-- (void)configure:(NSInteger)mode {
+// The rows of one tab: setting key and its label.
+- (NSArray<NSArray<NSString*>*>*)rowsFor:(NSInteger)mode tab:(NSInteger)tab {
+    if (tab == 1) {
+        return @[
+            @[@"kemo_clicker_bubble_size", @"KEMO_CLICKER_ADJUST_SIZE"],
+            @[@"kemo_clicker_bubble_x", @"KEMO_CLICKER_ADJUST_X"],
+            @[@"kemo_clicker_bubble_y", @"KEMO_CLICKER_ADJUST_Y"],
+        ];
+    }
+    if (tab == 2) {
+        return @[@[@"kemo_clicker_beat_offset", @"KEMO_CLICKER_ADJUST_BEAT"]];
+    }
+    if (mode == ClickerAdjustCompose) {
+        return @[@[kClickerSize, @"KEMO_CLICKER_ADJUST_SIZE"], @[kClickerComposeX, @"KEMO_CLICKER_ADJUST_X"],
+                 @[kClickerComposeY, @"KEMO_CLICKER_ADJUST_Y"]];
+    }
+    if (mode == ClickerAdjustFree) {
+        return @[@[kClickerSize, @"KEMO_CLICKER_ADJUST_SIZE"], @[kClickerFreeX, @"KEMO_CLICKER_ADJUST_X"],
+                 @[kClickerFreeY, @"KEMO_CLICKER_ADJUST_Y"]];
+    }
+    NSMutableArray* rows = [@[@[kClickerSize, @"KEMO_CLICKER_ADJUST_SIZE"], @[kClickerBarX, @"KEMO_CLICKER_ADJUST_X"],
+                              @[kClickerBarY, @"KEMO_CLICKER_ADJUST_Y"]] mutableCopy];
+    if (self.dock) {
+        [rows addObject:@[@"kemo_clicker_dock_y", @"KEMO_CLICKER_ADJUST_DOCK"]];
+    }
+    return rows;
+}
+
+- (CGFloat)wantedHeight {
+    return 12 + 28 + 6 + 32 + 6 + (CGFloat)self.keys.count * 40 + 10;
+}
+
+- (void)configure:(NSInteger)mode dock:(BOOL)dock {
     self.mode = mode;
+    self.dock = dock;
     for (UIView* v in self.subviews.copy) {
         if (![v isKindOfClass:[UIVisualEffectView class]]) {
             [v removeFromSuperview];
         }
     }
-    NSArray* keys;
-    NSString* titleKey;
-    if (mode == ClickerAdjustCompose) {
-        keys = @[kClickerSize, kClickerComposeX, kClickerComposeY];
-        titleKey = @"KEMO_CLICKER_ADJUST_COMPOSE";
-    } else if (mode == ClickerAdjustFree) {
-        keys = @[kClickerSize, kClickerFreeX, kClickerFreeY];
-        titleKey = @"KEMO_CLICKER_ADJUST_FREE";
-    } else {
-        keys = @[kClickerSize, kClickerBarX, kClickerBarY];
-        titleKey = @"KEMO_CLICKER_ADJUST_BAR";
+    NSString* titleKey = mode == ClickerAdjustCompose ? @"KEMO_CLICKER_ADJUST_COMPOSE"
+                         : mode == ClickerAdjustFree  ? @"KEMO_CLICKER_ADJUST_FREE"
+                                                      : @"KEMO_CLICKER_ADJUST_BAR";
+    NSArray* rowsSpec = [self rowsFor:mode tab:self.tab];
+    NSMutableArray* keys = [NSMutableArray array];
+    for (NSArray* r in rowsSpec) {
+        [keys addObject:r[0]];
     }
     self.keys = keys;
     self.sliders = [NSMutableArray array];
@@ -1052,7 +1199,6 @@ static NSString* ClickerText(NSString* key) {
         [rows.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
         [rows.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-14],
         [rows.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
-        [rows.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-10],
     ]];
 
     UIStackView* head = [[UIStackView alloc] init];
@@ -1067,18 +1213,29 @@ static NSString* ClickerText(NSString* key) {
     [done addTarget:self action:@selector(done) forControlEvents:UIControlEventTouchUpInside];
     [head addArrangedSubview:title];
     [head addArrangedSubview:done];
+    [head.heightAnchor constraintEqualToConstant:28].active = YES;
     [rows addArrangedSubview:head];
 
-    NSArray* names = @[@"KEMO_CLICKER_ADJUST_SIZE", @"KEMO_CLICKER_ADJUST_X", @"KEMO_CLICKER_ADJUST_Y"];
+    UISegmentedControl* tabs = [[UISegmentedControl alloc] initWithItems:@[
+        ClickerText(@"KEMO_CLICKER_ADJUST_TAB_PLACE"), ClickerText(@"KEMO_CLICKER_ADJUST_TAB_BUBBLE"),
+        ClickerText(@"KEMO_CLICKER_ADJUST_TAB_BEAT")
+    ]];
+    tabs.selectedSegmentIndex = self.tab;
+    [tabs addTarget:self action:@selector(tabChanged:) forControlEvents:UIControlEventValueChanged];
+    [tabs.heightAnchor constraintEqualToConstant:32].active = YES;
+    [rows addArrangedSubview:tabs];
+
     for (NSUInteger i = 0; i < keys.count; i++) {
         NSDictionary* entry = [BHTSettings settingForKey:keys[i]];
         UIStackView* row = [[UIStackView alloc] init];
         row.axis = UILayoutConstraintAxisHorizontal;
         row.alignment = UIStackViewAlignmentCenter;
         row.spacing = 4;
+        [row.heightAnchor constraintEqualToConstant:34].active = YES;
         UILabel* name = [UILabel new];
-        name.text = ClickerText(names[i]);
+        name.text = ClickerText(rowsSpec[i][1]);
         name.font = [UIFont systemFontOfSize:13];
+        name.adjustsFontSizeToFitWidth = YES;
         [name.widthAnchor constraintEqualToConstant:40].active = YES;
         UISlider* slider = [UISlider new];
         slider.minimumValue = [entry[@"min"] floatValue];
@@ -1088,7 +1245,8 @@ static NSString* ClickerText(NSString* key) {
         UILabel* value = [UILabel new];
         value.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightRegular];
         value.textAlignment = NSTextAlignmentRight;
-        [value.widthAnchor constraintEqualToConstant:44].active = YES;
+        value.adjustsFontSizeToFitWidth = YES;
+        [value.widthAnchor constraintEqualToConstant:50].active = YES;
         [row addArrangedSubview:name];
         [row addArrangedSubview:[self button:@"−" action:@selector(step:) tag:-(NSInteger)(i + 1)]];
         [row addArrangedSubview:slider];
@@ -1101,11 +1259,21 @@ static NSString* ClickerText(NSString* key) {
     [self refresh];
 }
 
+- (void)tabChanged:(UISegmentedControl*)tabs {
+    self.tab = tabs.selectedSegmentIndex;
+    [self configure:self.mode dock:self.dock];
+}
+
+- (NSString*)shown:(NSInteger)value index:(NSUInteger)i {
+    NSString* unit = [BHTSettings settingForKey:self.keys[i]][@"unit"] ?: @"";
+    return [NSString stringWithFormat:@"%ld%@", (long)value, unit];
+}
+
 - (void)write:(NSInteger)value index:(NSUInteger)i {
     UISlider* slider = self.sliders[i];
     value = MAX((NSInteger)slider.minimumValue, MIN((NSInteger)slider.maximumValue, value));
     [[NSUserDefaults standardUserDefaults] setInteger:value forKey:self.keys[i]];
-    self.values[i].text = [NSString stringWithFormat:@"%ld", (long)value];
+    self.values[i].text = [self shown:value index:i];
 }
 
 - (void)slid:(UISlider*)slider {
@@ -1125,7 +1293,7 @@ static NSString* ClickerText(NSString* key) {
         if (!self.sliders[i].tracking) {
             self.sliders[i].value = v;
         }
-        self.values[i].text = [NSString stringWithFormat:@"%ld", (long)v];
+        self.values[i].text = [self shown:v index:i];
     }
 }
 
@@ -1151,8 +1319,9 @@ static void ClickerAdjustPanelUpdate(UIWindow* window, BOOL compose) {
         gPanel = [[NFBClickerAdjustPanel alloc] initWithFrame:CGRectZero];
     }
     NSInteger mode = compose ? ClickerAdjustCompose : gPrefs.free ? ClickerAdjustFree : ClickerAdjustBar;
-    if (gPanel.mode != mode) {
-        [gPanel configure:mode];
+    BOOL dock = gPrefs.dock && !compose && !gPrefs.free;
+    if (gPanel.mode != mode || gPanel.dock != dock) {
+        [gPanel configure:mode dock:dock];
     }
     if (gPanel.superview != window) {
         [window addSubview:gPanel];
@@ -1160,7 +1329,8 @@ static void ClickerAdjustPanelUpdate(UIWindow* window, BOOL compose) {
         [window bringSubviewToFront:gPanel];
     }
     CGFloat width = MIN(window.bounds.size.width - 24, 420);
-    CGRect frame = CGRectMake(round((window.bounds.size.width - width) / 2), window.safeAreaInsets.top + 8, width, 168);
+    CGRect frame = CGRectMake(round((window.bounds.size.width - width) / 2), window.safeAreaInsets.top + 8, width,
+                              [gPanel wantedHeight]);
     if (!CGRectEqualToRect(gPanel.frame, frame)) {
         gPanel.frame = frame;
     }
@@ -1187,6 +1357,17 @@ void NFBClickerBeat(double strength, double interval) {
     }
     [gHost js:[NSString stringWithFormat:@"window.__clk&&__clk.emit('react',{kind:'beat',strength:%.3f,interval:%.3f})",
                                          MAX(0.05, MIN(1.0, strength)), MAX(0.2, MIN(2.0, interval))]];
+}
+
+// A time reminder (NFBClickerRemind) as main.js sends it: pet.js shows the reminder icon or the
+// character's own line for it, and answers when it is tapped.
+BOOL NFBClickerRemindShow(NSDictionary* reminder) {
+    if (!NFBClickerVisible() || ![reminder isKindOfClass:[NSDictionary class]]) {
+        return NO;
+    }
+    [gHost emit:@"remind" value:reminder];
+    ClickerLog([NSString stringWithFormat:@"remind %@ %@", reminder[@"kind"], reminder[@"time"]]);
+    return YES;
 }
 
 void NFBClickerLog(NSString* line) {
@@ -1242,7 +1423,7 @@ NSString* NFBClickerDebugText(void) {
     [out appendFormat:@"on=%d adjust=%d homeBars=%lu composeBars=%lu link=%d%c", gPrefs.on, gPrefs.adjust,
                       (unsigned long)gHomeBars.allObjects.count, (unsigned long)gComposeBars.allObjects.count,
                       gLink != nil, 10];
-    [out appendFormat:@"%@%c%@%c", gClickerState, 10, NFBClickerMusicDebugText(), 10];
+    [out appendFormat:@"%@%c%@%c%@", gClickerState, 10, NFBClickerMusicDebugText(), 10, [NFBClickerRemind debugText]];
     for (NSString* line in gClickerLog) {
         [out appendFormat:@"  %@%c", line, 10];
     }
@@ -1313,6 +1494,7 @@ static void ClickerComposeBars(UIViewController* controller) {
 %ctor {
     dispatch_async(dispatch_get_main_queue(), ^{
         ClickerPrefsChanged();
+        [NFBClickerRemind start];
     });
     // queue:nil, never the main queue (7.3.79, 7.3.86); the work hops to main itself.
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];

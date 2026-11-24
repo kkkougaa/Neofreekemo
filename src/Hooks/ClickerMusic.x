@@ -306,7 +306,9 @@ static void ClockTick(void) {
         return;
     }
     // Where in the song we are now, from where it was at Spotify's last answer.
-    NSTimeInterval at = spotify.lastProgress - [spotify.lastAnswerAt timeIntervalSinceNow];
+    // Beat offset (Clicker settings and adjust panel): moves where the beats fall, in ms.
+    NSTimeInterval at = spotify.lastProgress - [spotify.lastAnswerAt timeIntervalSinceNow] +
+                        [BHTSettings integerForKey:@"kemo_clicker_beat_offset"] / 1000.0;
     if (spotify.lastDuration > 0 && at > spotify.lastDuration + 2) {
         return; // the song ended and the next poll has not come yet
     }

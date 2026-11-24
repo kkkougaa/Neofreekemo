@@ -609,6 +609,27 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_clicker"
                     },
                     @{
+                        @"key": @"kemo_clicker_all_tabs",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_dock",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_dock_y",
+                        @"default": @40,
+                        @"type": @"slider",
+                        @"min": @0,
+                        @"max": @300,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker_dock"
+                    },
+                    @{
                         @"key": @"kemo_clicker_free",
                         @"parentKey": @"kemo_clicker",
                         @"default": @NO,
@@ -649,6 +670,48 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"max": @1000,
                         @"unit": @"pt",
                         @"parentKey": @"kemo_clicker_free"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_bubble_size",
+                        @"default": @100,
+                        @"type": @"slider",
+                        @"min": @50,
+                        @"max": @200,
+                        @"unit": @"%",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_bubble_x",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @-200,
+                        @"max": @200,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_bubble_y",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @-200,
+                        @"max": @200,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_idle",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @0,
+                        @"max": @600,
+                        @"unit": @"s",
+                        @"parentKey": @"kemo_clicker"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_clicker_remind_page",
+                        @"parentKey": @"kemo_clicker",
+                        @"action": @"openClickerRemind:"
                     },
                     @{
                         @"key": @"kemo_clicker_compose",
@@ -697,6 +760,15 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_clicker",
                         @"default": @YES,
                         @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_beat_offset",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @-500,
+                        @"max": @500,
+                        @"unit": @"ms",
+                        @"parentKey": @"kemo_clicker_music_beat"
                     },
                     @{
                         @"key": @"kemo_clicker_video_beat",

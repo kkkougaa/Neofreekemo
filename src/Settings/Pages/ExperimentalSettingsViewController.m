@@ -19,15 +19,12 @@
 - (void)switchChanged:(UISwitch*)sender {
     [super switchChanged:sender];
     NSString* key = objc_getAssociatedObject(sender, @"prefKey");
-    if ([key isEqualToString:@"liquid_glass"] || [key isEqualToString:@"vertical_tab_bar"] ||
-        [key isEqualToString:@"hide_quick_compose"]) {
-        NSString* messageKey = [key isEqualToString:@"liquid_glass"] ? @"LIQUID_GLASS_RESTART_ALERT_MESSAGE"
-                                                                      : @"SETTING_RESTART_ALERT_MESSAGE";
+    if ([key isEqualToString:@"liquid_glass"]) {
         UIAlertController* alertController =
             [UIAlertController alertControllerWithTitle:[[BHTBundle sharedBundle]
                                                             localizedStringForKey:@"LIQUID_GLASS_RESTART_ALERT_TITLE"]
                                                 message:[[BHTBundle sharedBundle]
-                                                            localizedStringForKey:messageKey]
+                                                            localizedStringForKey:@"LIQUID_GLASS_RESTART_ALERT_MESSAGE"]
                                          preferredStyle:UIAlertControllerStyleAlert];
 
         alertController.modalPresentationStyle = UIModalPresentationFullScreen;

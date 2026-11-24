@@ -349,17 +349,18 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openKemoHistory:"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_tab_bar_page",
+                        @"titleKey": @"KEMO_TAB_BAR_PAGE_TITLE",
+                        @"action": @"openKemoTabBar:"
+                    },
+                    @{
                         @"key": @"kemo_return_read",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
                     @{
                         @"key": @"kemo_account_bubbles",
-                        @"default": @YES,
-                        @"type": @"toggle"
-                    },
-                    @{
-                        @"key": @"kemo_account_dock",
                         @"default": @YES,
                         @"type": @"toggle"
                     },
@@ -531,6 +532,29 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"key": @"kemo_recent_list",
                         @"titleKey": @"KEMO_RECENT_LIST_TITLE",
                         @"action": @"openRecentTweets:"
+                    }
+                ]
+            },
+            @"kemo_tab_bar": @{
+                @"titleKey": @"KEMO_TAB_BAR_PAGE_TITLE",
+                @"subtitleKey": @"KEMO_TAB_BAR_PAGE_SUBTITLE",
+                @"settings": @[
+                    @{
+                        @"key": @"kemo_vertical_tab_bar",
+                        @"parentKey": @"liquid_glass",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"hide_quick_compose",
+                        @"parentKey": @"liquid_glass",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_account_dock",
+                        @"default": @YES,
+                        @"type": @"toggle"
                     }
                 ]
             },
@@ -736,14 +760,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                       @"default": @NO,
                       @"type": @"toggle"},
                     @{@"key": @"liquid_glass",
-                      @"default": @NO,
-                      @"type": @"toggle"},
-                    @{@"key": @"vertical_tab_bar",
-                      @"parentKey": @"liquid_glass",
-                      @"default": @NO,
-                      @"type": @"toggle"},
-                    @{@"key": @"hide_quick_compose",
-                      @"parentKey": @"liquid_glass",
                       @"default": @NO,
                       @"type": @"toggle"}
                 ]

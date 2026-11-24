@@ -32,7 +32,7 @@ static BOOL gVTBTraitHooked = NO;
 static NSInteger gVTBLastEdge = -1;
 
 static BOOL VTBOn(void) {
-    return NFBLiquidGlassEnabled() && !is_iPad() && [BHTSettings boolForKey:@"vertical_tab_bar"];
+    return NFBLiquidGlassEnabled() && !is_iPad() && [BHTSettings boolForKey:@"kemo_vertical_tab_bar"];
 }
 
 // Writes one byte of a Swift stored property, by its ObjC ivar name. Only for

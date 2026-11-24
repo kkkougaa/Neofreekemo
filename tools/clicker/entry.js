@@ -125,4 +125,25 @@ async function load(input) {
   };
 }
 
-globalThis.ClickerImport = { load, unpack };
+/* The built-in character comes from the app as character.json plus <slot>Url data URLs.
+   characters.js read() fills in the desktop defaults (petting, breathing, bubble style...)
+   the file leaves out; the pictures stay as given. */
+function normalizeBuiltIn(c) {
+  if (!c || typeof c !== 'object') return c;
+  const raw = {};
+  Object.keys(c).forEach((k) => {
+    if (!/Url$/.test(k) && k !== 'id') raw[k] = c[k];
+  });
+  if (Array.isArray(c.rig)) raw.rig = c.rig.map((r) => Object.assign({}, r, { url: undefined }));
+  fs.__reset();
+  fs.writeFileSync('/data/characters/default/character.json', JSON.stringify(raw));
+  const n = new Characters('/data', '/none').read('default');
+  const out = Object.assign({}, n, { id: c.id || 'default' });
+  Object.keys(c).forEach((k) => {
+    if (/Url$/.test(k)) out[k] = c[k];
+  });
+  out.rig = (n.rig || []).map((r, i) => Object.assign({}, r, { url: (c.rig && c.rig[i] && c.rig[i].url) || '' }));
+  return out;
+}
+
+globalThis.ClickerImport = { load, unpack, normalizeBuiltIn };

@@ -97,6 +97,18 @@
   var loadedFiles = {};
   var current = null;
   function fill(p) {
+    if (p && p.char && !p.charKey && window.ClickerImport && ClickerImport.normalizeBuiltIn) {
+      try {
+        p = Object.assign({}, p, { char: ClickerImport.normalizeBuiltIn(p.char) });
+      } catch (e) {
+        note('normalize failed ' + e.message);
+      }
+    }
+    if (p && p.charDefault && window.ClickerImport && ClickerImport.normalizeBuiltIn) {
+      try {
+        p = Object.assign({}, p, { charDefault: ClickerImport.normalizeBuiltIn(p.charDefault) });
+      } catch (e) {}
+    }
     if (!p || !p.charKey) return Promise.resolve(p);
     var key = p.charKey;
     var ready = loadedFiles[key];
@@ -234,36 +246,94 @@
     redo: noop
   };
 
-  /* 손가락은 마우스보다 떨린다. pet.js 는 4px 넘게 움직이면 끌기로 보고 누르기(말풍선)를 건너뛰므로,
-     누른 자리에서 10px 안의 움직임은 pet.js 에 넘기지 않는다. 넘어서면 그때부터는 그대로 넘긴다. */
+  /* 손가락 → 데스크톱 입력. pet.js 는 마우스용이다: 누르면 바로 끌기를 시작하고, 쓰다듬기(하트)는
+     "누르지 않고 위에서 문지르기"(hover)로만 된다. 손가락에는 hover 가 없으므로 이렇게 나눈다.
+       · 톡 누르기                  → 누르기 + 떼기 (클릭 · 말풍선)
+       · 누르자마자 문지르기        → 버튼 없는 pointermove (쓰다듬기 · 하트), 끝나면 pointerleave
+       · 0.35초 꾹 누른 뒤 움직이기 → 그때 누르기를 넘겨 pet.js 가 집어 든다(끌기)
+     진짜 손가락 이벤트는 여기서 붙잡아 두고, pet.js 에는 만든 이벤트를 넘긴다(__clk 표시). */
   var TAP_SLOP = 10;
-  var press = null;
+  var HOLD_MS = 350;
+  var touch = null;
+  function fake(type, src, buttons, target) {
+    var ev = new PointerEvent(type, {
+      bubbles: type !== 'pointerleave',
+      cancelable: true,
+      composed: true,
+      pointerId: src.pointerId,
+      pointerType: src.pointerType,
+      isPrimary: true,
+      clientX: src.clientX,
+      clientY: src.clientY,
+      screenX: src.screenX,
+      screenY: src.screenY,
+      button: type === 'pointermove' || type === 'pointerleave' ? -1 : 0,
+      buttons: buttons,
+      pressure: buttons ? 0.5 : 0
+    });
+    ev.__clk = true;
+    (target || touch.target).dispatchEvent(ev);
+  }
+  function lift() {
+    if (!touch || touch.mode !== 'wait') return;
+    touch.mode = 'drag';
+    note('touch hold → drag');
+    fake('pointerdown', touch.last, 1);
+  }
   window.addEventListener(
     'pointerdown',
     function (e) {
-      press = e.pointerType === 'mouse' ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, free: false };
+      if (e.__clk || e.pointerType === 'mouse') return;
+      e.stopImmediatePropagation();
+      if (touch) clearTimeout(touch.timer);
+      touch = { id: e.pointerId, x: e.clientX, y: e.clientY, target: e.target, last: e, mode: 'wait' };
+      touch.timer = setTimeout(lift, HOLD_MS);
     },
     true
   );
   window.addEventListener(
     'pointermove',
     function (e) {
-      if (!press || press.free || e.pointerId !== press.id) return;
-      if (Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y) < TAP_SLOP) e.stopImmediatePropagation();
-      else press.free = true;
+      if (e.__clk || !touch || e.pointerId !== touch.id) return;
+      touch.last = e;
+      if (touch.mode === 'drag') return; // pet.js 가 끌고 있다 — 그대로 넘긴다
+      e.stopImmediatePropagation();
+      if (touch.mode === 'wait') {
+        if (Math.abs(e.clientX - touch.x) + Math.abs(e.clientY - touch.y) < TAP_SLOP) return;
+        clearTimeout(touch.timer);
+        touch.mode = 'pet';
+        note('touch rub → pet');
+      }
+      fake('pointermove', e, 0, document.elementFromPoint(e.clientX, e.clientY) || touch.target);
     },
     true
   );
-  ['pointerup', 'pointercancel'].forEach(function (t) {
-    window.addEventListener(
-      t,
-      function (e) {
-        if (press && e.pointerId === press.id) press = null;
-        if (t === 'pointercancel') note('pointercancel');
-      },
-      true
-    );
-  });
+  function finish(e) {
+    if (e.__clk || !touch || e.pointerId !== touch.id) return;
+    var t = touch;
+    clearTimeout(t.timer);
+    if (t.mode === 'drag') {
+      touch = null; // pet.js 가 진짜 떼기를 받아 끌기를 마친다
+      return;
+    }
+    e.stopImmediatePropagation();
+    if (t.mode === 'wait' && e.type === 'pointerup') {
+      fake('pointerdown', t.last, 1);
+      fake('pointerup', e, 0);
+    } else if (t.mode === 'pet') {
+      fake('pointerleave', e, 0, document.getElementById('stack') || t.target);
+    }
+    touch = null;
+  }
+  window.addEventListener('pointerup', finish, true);
+  window.addEventListener(
+    'pointercancel',
+    function (e) {
+      note('pointercancel');
+      finish(e);
+    },
+    true
+  );
 
   /* 흔들기 덤프(DebugDump)에 실기기 기록을 남긴다 — 오류와 말풍선 · 지도 소식만 */
   window.addEventListener('error', function (e) {

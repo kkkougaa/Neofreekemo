@@ -383,7 +383,6 @@
         }
     ];
 
-
     self.officialPageCells = @[@{
         @"title": @"NeoFreeBird",
         @"username": @"NeoFreeBird",

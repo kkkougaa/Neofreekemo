@@ -1,0 +1,49 @@
+name: v7 Tests
+
+on:
+  pull_request:
+  push:
+    branches: [v7]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: localization
+            name: Localization
+          - check: formatting
+            name: Formatting
+          - check: build
+            name: Build
+
+    steps:
+      # Each matrix job checks out the same workflow commit on its own runner.
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          path: main
+          submodules: ${{ matrix.check == 'build' && 'recursive' || 'false' }}
+          persist-credentials: false
+
+      - name: Run Localization Tests
+        if: matrix.check == 'localization'
+        uses: ./main/.github/actions/test-localization
+
+      - name: Run Formatting Tests
+        if: matrix.check == 'formatting'
+        uses: ./main/.github/actions/test-formatting
+
+      - name: Run Build Tests
+        if: matrix.check == 'build'
+        uses: ./main/.github/actions/test-build
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          BUILD_DIR: ${{ github.workspace }}/ffmpeg-build

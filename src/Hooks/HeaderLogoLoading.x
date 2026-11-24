@@ -11,10 +11,6 @@
 // the header bubble and the logo menu. (Until 7.3.105 the bird inside the logo
 // was swapped for counting dots while the timeline refreshed.)
 
-@interface TFNPullToRefreshControl : UIView
-- (BOOL)loading;
-@end
-
 // Readability.x: notes what the pull looked like, for the shake dump.
 extern void NFBNotePullStatus(UIView* control, unsigned long long status);
 

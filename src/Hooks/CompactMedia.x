@@ -934,9 +934,8 @@ static void LeaveTweet(NFBTextScope was) {
 // an eye icon, a title, an explanation and a "View" button, laid out for a
 // full-width photo. On a small square the two texts ran into the icon and the
 // button. There they are left out: the icon sits above, the button below.
-// A cover on media of normal size is left as X draws it.
-@interface HFSensitiveTweetBlurredInterstitialView : UIView
-@end
+// A cover on media of normal size is left as X draws it. (The class is declared
+// in Headers/BHHeaders.h.)
 
 static const void* kCoverHiddenKey = &kCoverHiddenKey;
 

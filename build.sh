@@ -199,7 +199,8 @@ case "$MODE" in
       if command -v cyan >/dev/null 2>&1; then
         cyan -i packages/com.atebits.Tweetie2.ipa -o packages/NeoFreeBird-adhoc --ignore-encrypted \
           -uwf .theos/obj/debug/zxPluginsInject.dylib .theos/obj/debug/libbhFLEX.dylib \
-          .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle
+          .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle \
+          .theos/obj/debug/CallessKit.dylib
         # X's own extensions go (widgets, notifications...), only the Safari one is added.
         strip_plugins packages/NeoFreeBird-adhoc.ipa
         say "Injecting OpenTwitterSafariExtension.appex into the IPA."
@@ -224,7 +225,8 @@ case "$MODE" in
       if command -v cyan >/dev/null 2>&1; then
         cyan -i packages/com.atebits.Tweetie2.ipa -o packages/NeoFreeBird-sideloaded --ignore-encrypted \
           -uwf .theos/obj/debug/zxPluginsInject.dylib .theos/obj/debug/libbhFLEX.dylib \
-          .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle
+          .theos/obj/debug/BHTwitter.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle \
+          .theos/obj/debug/CallessKit.dylib
         # SideStore rejects this IPA when PlugIns are present: the widget path
         # contains a space, and extension bundle IDs no longer match after
         # SideStore appends the team id. The app itself does not need them.
@@ -255,7 +257,8 @@ case "$MODE" in
       say "Merging NeoFreeBird to provided Twitter IPA."
       if command -v cyan >/dev/null 2>&1; then
         cyan -i packages/com.atebits.Tweetie2.ipa -o packages/NeoFreeBird-trollstore.tipa --ignore-encrypted \
-          -uwf .theos/obj/debug/BHTwitter.dylib .theos/obj/debug/libbhFLEX.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle
+          -uwf .theos/obj/debug/BHTwitter.dylib .theos/obj/debug/libbhFLEX.dylib layout/Library/Application\ Support/BHT/BHTwitter.bundle \
+          .theos/obj/debug/CallessKit.dylib
         say "Injecting OpenTwitterSafariExtension.appex into the IPA."  
         inject_appex packages/NeoFreeBird-trollstore.tipa
       else

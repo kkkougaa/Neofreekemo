@@ -890,6 +890,66 @@ static UIView* ClickerTabBar(UIWindow* window) {
     return bar;
 }
 
+static CGRect ClickerFrameIn(UIView* view, UIWindow* window) {
+    CALayer* vl = view.layer.presentationLayer ?: view.layer;
+    CALayer* wl = window.layer.presentationLayer ?: window.layer;
+    return [vl convertRect:vl.bounds toLayer:wl];
+}
+
+// The selected tab, from the Liquid Glass tab bar (the Swift Int the tab labels read too).
+static __weak UIView* gTabBarView;
+static NSUInteger gTabBarViewSearch;
+
+static NSInteger ClickerSelectedTab(UIWindow* window) {
+    UIView* bar = gTabBarView;
+    if (!bar || bar.window != window) {
+        if (gTabBarViewSearch++ % 30 != 0 || !window) {
+            return NSNotFound;
+        }
+        bar = ClickerFindView(window, @"XNavigation.TabBarView", 0);
+        gTabBarView = bar;
+    }
+    Ivar field = bar ? class_getInstanceVariable(object_getClass(bar), "selectedIndex") : NULL;
+    if (!field) {
+        return NSNotFound;
+    }
+    return *(NSInteger*)((uint8_t*)(__bridge void*)bar + ivar_getOffset(field));
+}
+
+// Leaving the home tab hides the home bar while it stays in the window, which reads the same
+// as scrolling it away, so the character went to the bottom dock on a tab switch (7.3.126).
+// The home tab is learned as the one selected while the bar holds fully shown; from another
+// tab being selected until the bar is fully back, the character follows the tab bar instead.
+static NSInteger gHomeTab = NSNotFound;
+static NSInteger gHomeTabSeen = NSNotFound;
+static NSInteger gHomeTabFrames;
+static BOOL gAwayFromHome;
+
+static BOOL ClickerAwayFromHome(UIView* homeBar) {
+    UIWindow* window = homeBar.window;
+    NSInteger tab = ClickerSelectedTab(window);
+    if (tab == NSNotFound) {
+        return gAwayFromHome;
+    }
+    BOOL full = ClickerAnchorVisibility(homeBar, window, ClickerFrameIn(homeBar, window)) > 0.95;
+    if (full) {
+        gHomeTabFrames = tab == gHomeTabSeen ? gHomeTabFrames + 1 : 0;
+        gHomeTabSeen = tab;
+        if (gHomeTabFrames >= 30) {
+            gHomeTab = tab;
+        }
+        if (tab == gHomeTab) {
+            gAwayFromHome = NO;
+        }
+    } else {
+        gHomeTabFrames = 0;
+        if (gHomeTab != NSNotFound && tab != gHomeTab) {
+            gAwayFromHome = YES;
+        }
+    }
+    return gAwayFromHome;
+}
+
 static UIWindow* ClickerMainWindow(void) {
     UIWindow* w = gHost.window;
     if (w) {
@@ -908,16 +968,18 @@ static UIWindow* ClickerMainWindow(void) {
     return nil;
 }
 
-static CGRect ClickerFrameIn(UIView* view, UIWindow* window) {
-    CALayer* vl = view.layer.presentationLayer ?: view.layer;
-    CALayer* wl = window.layer.presentationLayer ?: window.layer;
-    return [vl convertRect:vl.bounds toLayer:wl];
-}
-
 static void ClickerTick(void) {
     BOOL compose = NO;
     UIView* anchor = gPrefs.on ? ClickerCurrentAnchor(&compose) : nil;
     BOOL viaTabBar = NO;
+    if (anchor && !compose && gPrefs.allTabs && ClickerAwayFromHome(anchor)) {
+        // Another tab with the home bar still in the window, hidden.
+        UIView* tabBar = ClickerTabBar(anchor.window);
+        if (tabBar) {
+            anchor = tabBar;
+            viaTabBar = YES;
+        }
+    }
     if (!anchor && gPrefs.on && gPrefs.allTabs) {
         // Another tab: stand where the home bar would be, over the tab bar.
         anchor = ClickerTabBar(ClickerMainWindow());
@@ -1014,9 +1076,9 @@ static void ClickerTick(void) {
     gHost.alpha = alpha;
     [gHost sendArea];
     gClickerState = [NSString
-        stringWithFormat:@"tabs=%d dock=%d offset=%@ anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
+        stringWithFormat:@"tabs=%d tab=%ld home=%ld away=%d dock=%d offset=%@ anchor=%@ compose=%d free=%d bar=%@ window=%@ visibility=%.2f host=%@ alpha=%.2f hidden=%d "
                          @"ready=%d dragging=%d mask=%ldx%ld hots=%lu char=%@#%ld restWidth=%.1f",
-                         viaTabBar, gPrefs.dock, gBarOffsetKnown ? NSStringFromCGRect(gBarOffset) : @"-",
+                         viaTabBar, (long)ClickerSelectedTab(window), (long)gHomeTab, gAwayFromHome, gPrefs.dock, gBarOffsetKnown ? NSStringFromCGRect(gBarOffset) : @"-",
                          NSStringFromClass(anchor.class), compose, gPrefs.free, NSStringFromCGRect(bar),
                          NSStringFromCGSize(window.bounds.size), visibility, NSStringFromCGRect(gHost.frame),
                          gHost.alpha, gHost.hidden, gHost.ready, gHost.dragging, (long)gHost.maskW,

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.114",
+      "subtitle": "NeoFreeBird version 7.3.115",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.115",
+          "buildVersion": "115",
+          "date": "2026-11-24T03:02:24Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.115/NeoFreeBird-Twitter-sideloaded_7.3.115_12.44.ipa",
+          "size": 270896151,
+          "minOSVersion": "15.0",
+          "localizedDescription": "kemo에 '탭바' 카테고리 추가: 세로 탭바 (오른쪽), 입력창 숨기기, 계정 도크를 한곳에 모았습니다. 실험실은 리퀴드 글래스만 남깁니다. 7.3.114에서 세로 탭바를 켰다면 새 위치에서 다시 켜 주세요."
+        },
         {
           "version": "7.3.114",
           "buildVersion": "114",

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.116",
+      "subtitle": "NeoFreeBird version 7.3.117",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.117",
+          "buildVersion": "117",
+          "date": "2026-11-24T05:46:44Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.117/NeoFreeBird-Twitter-sideloaded_7.3.117_12.44.ipa",
+          "size": 273535914,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: BUG Clicker의 .cvclk 캐릭터 파일을 가져와 쓸 수 있습니다 (잠긴 파일 포함, 원래 앱과 같은 방식으로 엽니다). 트윗 작성 중에는 사진 버튼 줄 위로 옮겨 앉고, 글자를 칠 때마다 까딱입니다."
+        },
         {
           "version": "7.3.116",
           "buildVersion": "116",

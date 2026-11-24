@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.115",
+      "subtitle": "NeoFreeBird version 7.3.116",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.116",
+          "buildVersion": "116",
+          "date": "2026-11-24T05:30:47Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.116/NeoFreeBird-Twitter-sideloaded_7.3.116_12.44.ipa",
+          "size": 273459231,
+          "minOSVersion": "15.0",
+          "localizedDescription": "kemo에 '클리커' 추가: 홈 타임라인의 입력바 위에 BUG Clicker 캐릭터가 앉습니다. 누르면 반응하고 끌어서 옮길 수 있으며, 크기·위치·좌우 뒤집기·잠금·소리를 설정에서 조정합니다. 스크롤로 입력바가 숨으면 같이 사라집니다."
+        },
         {
           "version": "7.3.115",
           "buildVersion": "115",

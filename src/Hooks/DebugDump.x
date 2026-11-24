@@ -25,6 +25,7 @@ extern NSString* NFBTimelineProbeText(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
+extern NSString* NFBVerticalTabBarDebugText(void);
 extern NSString* NFBReadabilityDebugText(void);
 extern NSArray<NSString*>* NFBRowLayoutClasses(void);
 extern CGFloat NFBLastMediaWidth(void);
@@ -555,6 +556,7 @@ static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUIn
 static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== COMPACT MEDIA ==%c%@ mediaWidth=%.1f%c", 10, NFBCompactMediaDebugText(), NFBLastMediaWidth(), 10];
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
+    [out appendFormat:@"== VERTICAL TAB BAR ==%c%@%c", 10, NFBVerticalTabBarDebugText(), 10];
     DumpCardRows(window, out);
     // The header (logo place and look), early so it is never cut off.
     [out appendFormat:@"== HEADER ==%c%@%c%@%cparodyLabel: %@%c", 10, NFBBubbleDebugText(), 10, NFBPullAnimationDebugText(),

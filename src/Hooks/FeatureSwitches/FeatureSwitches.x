@@ -485,7 +485,11 @@ static void RefreshDrawerSnapshot(void) {
 }
 
 + (BOOL)isQuickComposerEnabledWithFeatureSwitches:(id)switches {
-    return !is_iPad() && NFBLiquidGlassEnabled();
+    return !is_iPad() && NFBLiquidGlassEnabled() && ![BHTSettings boolForKey:@"hide_quick_compose"];
+}
+
++ (BOOL)isQuickComposerEnabledNoImpressionWithFeatureSwitches:(id)switches {
+    return [BHTSettings boolForKey:@"hide_quick_compose"] ? NO : %orig;
 }
 
 %end

@@ -267,7 +267,8 @@ NSNumber* FeatureSwitchOverrideValueForKey(NSString* key) {
     if ([key isEqualToString:@"ios_ipad_phone_navigation_enabled"]) {
         return @YES;
     }
-    if ([key isEqualToString:@"ios_liquid_glass_redesign_quick_composer_enabled"] && is_iPad()) {
+    if ([key isEqualToString:@"ios_liquid_glass_redesign_quick_composer_enabled"] &&
+        (is_iPad() || [BHTSettings boolForKey:@"hide_quick_compose"])) {
         return @NO;
     }
 

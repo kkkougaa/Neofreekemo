@@ -462,7 +462,7 @@
 "LIQUID_GLASS_RESTART_ALERT_MESSAGE" = "리퀴드 글래스 디자인을 적용하려면 앱을 재시작해야 합니다.";
 "LIQUID_GLASS_RESTART_ALERT_RESTART_BUTTON" = "재시작";
 "HIDE_QUICK_COMPOSE_TITLE" = "빠른 작성 숨기기";
-"HIDE_QUICK_COMPOSE_DETAIL" = "내비게이션 바의 빠른 작성 버튼을 없앱니다. (리퀴드 글래스 전용)";
+"HIDE_QUICK_COMPOSE_DETAIL" = "탭바 위의 \"무슨 일이 일어나고 있나요?\" 입력창을 없앱니다. 재시작 후 적용됩니다.";
 "BLOCK_LINK_TRACKING_TITLE" = "링크 추적 차단";
 "BLOCK_LINK_TRACKING_DETAIL" = "링크를 t.co를 거치지 않고 바로 엽니다. 백그라운드 t.co 요청과 광고 클릭 ID도 보내지 않습니다. 트위터의 위험한 링크 경고는 뜨지 않습니다.";
 "STRIP_TRACKING_PARAMS_TITLE" = "추적 매개변수 제거";
@@ -486,3 +486,6 @@
 "COMPOSITION_COMPLETE_SENDING_TWEET_TOAST_NOTIFICATION_MESSAGE" = "답글을 보냈습니다!";
 "DM_MESSAGE_ACTION_OPEN_GENERIC_TITLE" = "트윗 열기";
 "DISMISS_LABEL" = "닫기";
+"VERTICAL_TAB_BAR_TITLE" = "세로 탭바 (오른쪽)";
+"VERTICAL_TAB_BAR_DETAIL" = "하단 탭바를 화면 오른쪽에 세로로 놓고, + 버튼은 그 아래로 내립니다. iOS 27.1 이상, 아이폰 전용입니다. 재시작 후 적용됩니다.";
+"SETTING_RESTART_ALERT_MESSAGE" = "이 설정을 적용하려면 앱을 재시작해야 합니다.";

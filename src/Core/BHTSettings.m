@@ -142,8 +142,6 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                       @"default": @NO},
                     @{@"key": @"hide_tweet_button",
                       @"default": @NO},
-                    @{@"key": @"hide_quick_compose",
-                      @"default": @NO},
                     @{@"key": @"hide_retweets",
                       @"default": @NO},
                     @{@"key": @"hide_quote_tweets",
@@ -738,6 +736,14 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                       @"default": @NO,
                       @"type": @"toggle"},
                     @{@"key": @"liquid_glass",
+                      @"default": @NO,
+                      @"type": @"toggle"},
+                    @{@"key": @"vertical_tab_bar",
+                      @"parentKey": @"liquid_glass",
+                      @"default": @NO,
+                      @"type": @"toggle"},
+                    @{@"key": @"hide_quick_compose",
+                      @"parentKey": @"liquid_glass",
                       @"default": @NO,
                       @"type": @"toggle"}
                 ]

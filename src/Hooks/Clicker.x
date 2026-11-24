@@ -302,6 +302,7 @@ static NSString* ClickerJSON(id obj) {
 static void ClickerTick(void);
 static void ClickerAdjustPanelUpdate(UIWindow* window, BOOL compose);
 static void ClickerAdjustPanelRemove(void);
+static void ClickerAdjustPanelRefresh(void);
 
 // The page's last words for the shake dump (errors, bubbles, masks), and the placement state.
 static NSMutableArray<NSString*>* gClickerLog;

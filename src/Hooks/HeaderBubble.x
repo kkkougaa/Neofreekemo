@@ -18,6 +18,8 @@ extern UIImageView* HeaderLogoInWindow(UIWindow* window);
 extern UIWindow* NFBKeyWindow(void);
 extern void NFBRecentTick(void);
 extern UIImage* NFBRenderLogoSVG(NSString* fileName, CGSize size, UIColor* color);
+extern BOOL NFBClickerSay(NSString* text, BOOL music);
+extern void NFBClickerMusicUpdate(NSString* title, NSString* artist);
 
 static const NSInteger kBubbleTag = 0x4E464C42;
 static const NSInteger kBubbleHostTag = 0x4E464C48;
@@ -842,6 +844,7 @@ static void CheckSpotify(void) {
                 }
                 return;
             }
+            NFBClickerMusicUpdate(title, artist);
             if (title.length == 0) {
                 // Nothing is playing. The next song after this counts as a change.
                 gLastTrack = @"";
@@ -853,7 +856,8 @@ static void CheckSpotify(void) {
             gSpotifyLog = [NSString stringWithFormat:@"%@ playing: %@ (%@)", when, track,
                                                      changed ? @"changed, showing" : @"same or first"];
             gLastTrack = track;
-            if (changed) {
+            // The clicker character says it (with notes) when it is on screen.
+            if (changed && !NFBClickerSay(title, YES)) {
                 NFBShowBubbleWithIcon(title, @"spotify");
             }
         }];

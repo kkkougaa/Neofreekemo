@@ -16,6 +16,12 @@
 @property (nonatomic, readonly) BOOL isConnected;
 // How the last now-playing check went, in a few words (shown in the kemo settings).
 @property (nonatomic, copy, readonly) NSString* lastStatus;
+// From the last now-playing answer: whether it is actually playing (a paused track still
+// comes back with its title), and where in the track it was, both read when the answer came.
+@property (nonatomic, readonly) BOOL lastIsPlaying;
+@property (nonatomic, readonly) NSTimeInterval lastProgress;
+@property (nonatomic, readonly) NSTimeInterval lastDuration;
+@property (nonatomic, strong, readonly) NSDate* lastAnswerAt;
 
 // Opens Spotify's login page; the completion runs on the main queue.
 - (void)loginWithCompletion:(void (^)(NSError* error))completion;

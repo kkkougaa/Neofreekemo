@@ -335,6 +335,17 @@
     true
   );
 
+  /* 네이티브가 말을 시킨다 — 스포티파이 노래 바뀜(HeaderBubble.x)은 음표와 함께.
+     pet.js 의 sayText · FX 를 그대로 부른다(같은 전역 범위의 함수 · const). */
+  window.__clkSay = function (text, music) {
+    try {
+      if (typeof sayText === 'function') sayText(String(text), 3200);
+      if (music && typeof FX !== 'undefined' && FX && FX.burst) FX.burst(3, 'note');
+    } catch (e) {
+      note('say failed ' + e.message);
+    }
+  };
+
   /* 흔들기 덤프(DebugDump)에 실기기 기록을 남긴다 — 오류와 말풍선 · 지도 소식만 */
   window.addEventListener('error', function (e) {
     note('error ' + (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0));

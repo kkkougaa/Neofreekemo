@@ -296,6 +296,7 @@ static NSString* ClickerJSON(id obj) {
 @property (nonatomic, strong) NSMutableSet<NSString*>* sentFiles;
 - (void)pushData;
 - (void)typed;
+- (void)js:(NSString*)script;
 - (void)sendArea;
 @end
 
@@ -501,7 +502,8 @@ static void ClickerLog(NSString* line) {
             @"flip": @(gPrefs.flip),
             @"lock": @(gPrefs.lock),
             @"mute": @(!gPrefs.sound),
-            @"music": @NO,
+            @"music": @([BHTSettings boolForKey:@"kemo_clicker_music_beat"] ||
+                        [BHTSettings boolForKey:@"kemo_clicker_video_beat"]),
             @"typing": @((BOOL)(gOnCompose && gPrefs.typing)),
             @"keyBg": @"",
             @"alwaysOnTop": @YES,
@@ -1171,12 +1173,45 @@ static void ClickerAdjustPanelRefresh(void) {
     }
 }
 
+// MARK: - For the other files
+
+// Showing on screen now (a bar is up and the character is drawn).
+BOOL NFBClickerVisible(void) {
+    return gPrefs.on && gHost && gHost.ready && !gHost.hidden && gHost.superview;
+}
+
+// main.js reactTo('music', {kind: 'beat', strength, interval}) (ClickerMusic.x).
+void NFBClickerBeat(double strength, double interval) {
+    if (!NFBClickerVisible()) {
+        return;
+    }
+    [gHost js:[NSString stringWithFormat:@"window.__clk&&__clk.emit('react',{kind:'beat',strength:%.3f,interval:%.3f})",
+                                         MAX(0.05, MIN(1.0, strength)), MAX(0.2, MIN(2.0, interval))]];
+}
+
+void NFBClickerLog(NSString* line) {
+    ClickerLog(line);
+}
+
+// The character says it in its speech bubble (with floating notes for music). NO when it is
+// not on screen, so the caller can show it its own way (HeaderBubble.x).
+BOOL NFBClickerSay(NSString* text, BOOL music) {
+    if (text.length == 0 || !NFBClickerVisible() || ![BHTSettings boolForKey:@"kemo_clicker_spotify"]) {
+        return NO;
+    }
+    [gHost js:[NSString stringWithFormat:@"window.__clkSay&&__clkSay(%@,%@)", ClickerJSON(text), music ? @"true" : @"false"]];
+    ClickerLog([@"say " stringByAppendingString:text]);
+    return YES;
+}
+
+extern NSString* NFBClickerMusicDebugText(void);
+
 NSString* NFBClickerDebugText(void) {
     NSMutableString* out = [NSMutableString string];
     [out appendFormat:@"on=%d adjust=%d homeBars=%lu composeBars=%lu link=%d%c", gPrefs.on, gPrefs.adjust,
                       (unsigned long)gHomeBars.allObjects.count, (unsigned long)gComposeBars.allObjects.count,
                       gLink != nil, 10];
-    [out appendFormat:@"%@%c", gClickerState, 10];
+    [out appendFormat:@"%@%c%@%c", gClickerState, 10, NFBClickerMusicDebugText(), 10];
     for (NSString* line in gClickerLog) {
         [out appendFormat:@"  %@%c", line, 10];
     }

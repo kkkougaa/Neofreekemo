@@ -30,6 +30,10 @@ static const uint16_t kLoopbackPort = 8888;
 @property (nonatomic, strong) ASWebAuthenticationSession* session;
 @property (nonatomic, strong) dispatch_source_t listener;
 @property (nonatomic, copy, readwrite) NSString* lastStatus;
+@property (nonatomic, readwrite) BOOL lastIsPlaying;
+@property (nonatomic, readwrite) NSTimeInterval lastProgress;
+@property (nonatomic, readwrite) NSTimeInterval lastDuration;
+@property (nonatomic, strong, readwrite) NSDate* lastAnswerAt;
 @end
 
 @implementation BHTSpotify
@@ -404,6 +408,8 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                   NSString* title = nil;
                   NSString* artist = nil;
                   NSString* url = nil;
+                  BOOL playing = NO;
+                  NSTimeInterval progress = 0, duration = 0;
 
                   if (!error && status == 200 && data.length > 0) {
                       NSDictionary* json = [NSJSONSerialization JSONObjectWithData:data
@@ -412,6 +418,17 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                       NSDictionary* item = [json isKindOfClass:[NSDictionary class]]
                                                ? json[@"item"]
                                                : nil;
+                      if ([json isKindOfClass:[NSDictionary class]]) {
+                          playing = [json[@"is_playing"] respondsToSelector:@selector(boolValue)] &&
+                                    [json[@"is_playing"] boolValue];
+                          progress = [json[@"progress_ms"] respondsToSelector:@selector(doubleValue)]
+                                         ? [json[@"progress_ms"] doubleValue] / 1000.0
+                                         : 0;
+                      }
+                      if ([item isKindOfClass:[NSDictionary class]] &&
+                          [item[@"duration_ms"] respondsToSelector:@selector(doubleValue)]) {
+                          duration = [item[@"duration_ms"] doubleValue] / 1000.0;
+                      }
                       if ([item isKindOfClass:[NSDictionary class]]) {
                           title = item[@"name"];
                           NSArray* artists = item[@"artists"];
@@ -435,7 +452,14 @@ static NSString* ChallengeForVerifier(NSString* verifier) {
                       }
                       result = [NSError errorWithDomain:kErrorDomain code:status userInfo:info];
                   }
+                  NSDate* answeredAt = [NSDate date];
                   dispatch_async(dispatch_get_main_queue(), ^{
+                      if (!result) {
+                          self.lastIsPlaying = playing && title.length > 0;
+                          self.lastProgress = progress;
+                          self.lastDuration = duration;
+                          self.lastAnswerAt = answeredAt;
+                      }
                       if (result) {
                           self.lastStatus = [self statusLine:[NSString stringWithFormat:@"오류: %@", result.localizedDescription]];
                       } else if (title.length > 0) {

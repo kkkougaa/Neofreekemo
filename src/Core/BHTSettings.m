@@ -681,6 +681,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"key": @"kemo_clicker_refresh",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_clicker_spotify",
                         @"parentKey": @"kemo_clicker",
                         @"default": @YES,

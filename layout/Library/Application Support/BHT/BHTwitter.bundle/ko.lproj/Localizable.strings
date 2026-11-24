@@ -542,3 +542,5 @@
 "KEMO_CLICKER_MUSIC_BEAT_DETAIL" = "재생 중인 곡의 빠르기(BPM)를 Deezer에서 찾고, 없으면 30초 미리듣기로 재서 그 박자로 움직입니다. 곡 제목과 가수 이름이 Deezer로 갑니다. 빠르기는 맞추지만 박자가 떨어지는 자리는 정확하지 않을 수 있습니다.";
 "KEMO_CLICKER_VIDEO_BEAT_TITLE" = "X 동영상 소리에 맞춰 까딱 (실험)";
 "KEMO_CLICKER_VIDEO_BEAT_DETAIL" = "소리를 켜고 보는 X 동영상에 맞춰 움직입니다. 스트리밍(HLS)으로 오는 영상에는 붙지 않아 대부분 영상에서 동작하지 않을 수 있습니다. 흔들기 덤프에서 확인할 수 있습니다.";
+"KEMO_CLICKER_REFRESH_TITLE" = "새로고침할 때 꾹 누르기";
+"KEMO_CLICKER_REFRESH_DETAIL" = "타임라인을 당겨 새로고침하면 불러오는 동안 캐릭터를 꾹 누른 것처럼 있다가, 다 불러오면 손을 뗀 것처럼 반응합니다.";

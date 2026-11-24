@@ -540,3 +540,5 @@
 "KEMO_CLICKER_MUSIC_BEAT_DETAIL" = "Finds the playing song's tempo (BPM) on Deezer, or measures it from the 30-second preview, and moves to it. The song title and artist go to Deezer. The tempo is right; where the beat falls may not be.";
 "KEMO_CLICKER_VIDEO_BEAT_TITLE" = "Nod to X video sound (experimental)";
 "KEMO_CLICKER_VIDEO_BEAT_DETAIL" = "Moves with X videos played with sound. It cannot attach to streamed (HLS) videos, so it may not work for most. The shake dump shows how it went.";
+"KEMO_CLICKER_REFRESH_TITLE" = "Press while refreshing";
+"KEMO_CLICKER_REFRESH_DETAIL" = "Pulling the timeline to refresh holds the character down while it loads and lets go when it is done.";

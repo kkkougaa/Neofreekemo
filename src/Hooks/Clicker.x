@@ -1204,6 +1204,30 @@ BOOL NFBClickerSay(NSString* text, BOOL music) {
     return YES;
 }
 
+// Pull to refresh: held down while the timeline loads, let go when it is done, like a long
+// press on the character (pet.js press() / release()).
+static BOOL gRefreshHeld;
+
+static void ClickerRefresh(BOOL loading) {
+    if (loading) {
+        if (!NFBClickerVisible() || ![BHTSettings boolForKey:@"kemo_clicker_refresh"]) {
+            return;
+        }
+        gRefreshHeld = YES;
+        [gHost js:@"window.__clkPress&&__clkPress(true)"];
+        // Never stay held if the end is missed.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (gRefreshHeld) {
+                gRefreshHeld = NO;
+                [gHost js:@"window.__clkPress&&__clkPress(false)"];
+            }
+        });
+    } else if (gRefreshHeld) {
+        gRefreshHeld = NO;
+        [gHost js:@"window.__clkPress&&__clkPress(false)"];
+    }
+}
+
 extern NSString* NFBClickerMusicDebugText(void);
 
 NSString* NFBClickerDebugText(void) {
@@ -1252,6 +1276,20 @@ static void ClickerComposeBars(UIViewController* controller) {
 - (void)viewDidLayoutSubviews {
     %orig;
     ClickerComposeBars(self);
+}
+
+%end
+
+%hook TFNPullToRefreshControl
+
+- (void)_setStatus:(unsigned long long)status fromScrolling:(BOOL)fromScrolling {
+    BOOL wasLoading = [self loading];
+    %orig;
+    if (status == 1 && !wasLoading && fromScrolling) {
+        ClickerRefresh(YES);
+    } else if (status == 0 && wasLoading) {
+        ClickerRefresh(NO);
+    }
 }
 
 %end

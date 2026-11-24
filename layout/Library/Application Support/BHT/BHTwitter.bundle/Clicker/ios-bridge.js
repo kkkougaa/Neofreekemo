@@ -337,6 +337,17 @@
 
   /* 네이티브가 말을 시킨다 — 스포티파이 노래 바뀜(HeaderBubble.x)은 음표와 함께.
      pet.js 의 sayText · FX 를 그대로 부른다(같은 전역 범위의 함수 · const). */
+  /* 새로고침 — 로딩 동안 꾹 누르고 있다가, 끝나면 뗀다 (pet.js press · release) */
+  window.__clkPress = function (down) {
+    try {
+      if (typeof CHAR === 'undefined' || !CHAR) return;
+      if (down && typeof press === 'function') press();
+      else if (!down && typeof release === 'function') release();
+    } catch (e) {
+      note('press failed ' + e.message);
+    }
+  };
+
   window.__clkSay = function (text, music) {
     try {
       if (typeof sayText === 'function') sayText(String(text), 3200);

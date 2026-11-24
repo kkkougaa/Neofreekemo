@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.120",
+      "subtitle": "NeoFreeBird version 7.3.121",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.121",
+          "buildVersion": "121",
+          "date": "2026-11-24T06:50:16Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.121/NeoFreeBird-Twitter-sideloaded_7.3.121_12.44.ipa",
+          "size": 273548622,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: 손가락으로 쓰다듬을 수 있습니다. 톡 누르면 클릭(말풍선), 누르자마자 문지르면 쓰다듬기(하트), 0.35초 꾹 누른 뒤 움직이면 옮기기입니다. 기본 캐릭터도 원래 앱의 기본 설정값을 채워 씁니다."
+        },
         {
           "version": "7.3.120",
           "buildVersion": "120",

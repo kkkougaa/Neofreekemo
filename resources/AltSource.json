@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.123",
+      "subtitle": "NeoFreeBird version 7.3.124",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.124",
+          "buildVersion": "124",
+          "date": "2026-11-24T07:17:41Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.124/NeoFreeBird-Twitter-sideloaded_7.3.124_12.44.ipa",
+          "size": 273562408,
+          "minOSVersion": "15.0",
+          "localizedDescription": "클리커: 타임라인을 당겨 새로고침하면 불러오는 동안 캐릭터를 꾹 누른 것처럼 있다가, 다 불러오면 손을 뗀 것처럼 반응합니다. 설정에서 끌 수 있습니다."
+        },
         {
           "version": "7.3.123",
           "buildVersion": "123",

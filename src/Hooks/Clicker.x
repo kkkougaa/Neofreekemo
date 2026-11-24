@@ -5,6 +5,7 @@
 
 #import <UIKit/UIGestureRecognizerSubclass.h>
 #import "HookHelpers.h"
+#import "Core/NFBClickerStore.h"
 
 // MARK: - Clicker
 //
@@ -20,6 +21,13 @@
 // modals still cover it. A display link copies the bar's on-screen frame and visibility every
 // frame: when the bar slides, fades or shrinks away on scroll the character goes with it.
 // In free mode the character stands at a fixed spot instead, still only while the bar is up.
+//
+// While a post is being written the character moves onto the composer's toolbar (the row with
+// the photo, camera and GIF buttons, TCRComposerToolbarView) the same way, and nods along with
+// typing there, as the desktop app does with the keyboard.
+//
+// Characters brought in from a .cvclk (NFBClickerStore) are opened in the page by the desktop
+// importer itself (ios-import.js); this side only hands over the original, still locked file.
 
 static NSString* const kClickerOn = @"kemo_clicker";
 static NSString* const kClickerFree = @"kemo_clicker_free";
@@ -31,13 +39,21 @@ static NSString* const kClickerFreeY = @"kemo_clicker_free_y";
 static NSString* const kClickerFlip = @"kemo_clicker_flip";
 static NSString* const kClickerLock = @"kemo_clicker_lock";
 static NSString* const kClickerSound = @"kemo_clicker_sound";
+static NSString* const kClickerCompose = @"kemo_clicker_compose";
+static NSString* const kClickerComposeX = @"kemo_clicker_compose_x";
+static NSString* const kClickerComposeY = @"kemo_clicker_compose_y";
+static NSString* const kClickerTyping = @"kemo_clicker_typing";
 
 typedef struct {
-    BOOL on, free, flip, lock, sound;
-    NSInteger size, barX, barY, freeX, freeY;
+    BOOL on, free, flip, lock, sound, compose, typing;
+    NSInteger size, barX, barY, freeX, freeY, composeX, composeY, charIndex;
 } ClickerPrefs;
 
 static ClickerPrefs gPrefs;
+// The chosen .cvclk (NFBClickerStore), "" for the built-in character. Kept out of the struct.
+static NSString* gCharEntry = @"";
+// Whether the character is on the composer toolbar right now (else on the home bar).
+static BOOL gOnCompose;
 
 static ClickerPrefs ReadClickerPrefs(void) {
     ClickerPrefs p;
@@ -51,6 +67,11 @@ static ClickerPrefs ReadClickerPrefs(void) {
     p.barY = [BHTSettings integerForKey:kClickerBarY];
     p.freeX = [BHTSettings integerForKey:kClickerFreeX];
     p.freeY = [BHTSettings integerForKey:kClickerFreeY];
+    p.compose = [BHTSettings boolForKey:kClickerCompose];
+    p.typing = [BHTSettings boolForKey:kClickerTyping];
+    p.composeX = [BHTSettings integerForKey:kClickerComposeX];
+    p.composeY = [BHTSettings integerForKey:kClickerComposeY];
+    p.charIndex = [NFBClickerStore selectedIndex];
     return p;
 }
 
@@ -257,7 +278,7 @@ static NSString* ClickerJSON(id obj) {
 
 // MARK: - Host view
 
-@interface NFBClickerView : UIView <WKScriptMessageHandler, UIGestureRecognizerDelegate>
+@interface NFBClickerView : UIView <WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) WKWebView* web;
 @property (nonatomic, strong) NFBClickerTouchTracker* tracker;
 @property (nonatomic, strong) NSData* maskBits;
@@ -268,7 +289,10 @@ static NSString* ClickerJSON(id obj) {
 @property (nonatomic) CGPoint dragFrom;
 @property (nonatomic) CGRect sentArea;
 @property (nonatomic) BOOL ready;
+// .cvclk files the page has already opened (it keeps them), so they are not sent again.
+@property (nonatomic, strong) NSMutableSet<NSString*>* sentFiles;
 - (void)pushData;
+- (void)typed;
 - (void)sendArea;
 @end
 
@@ -280,6 +304,7 @@ static void ClickerTick(void);
     if ((self = [super initWithFrame:frame])) {
         self.backgroundColor = UIColor.clearColor;
         self.hots = [NSMutableDictionary dictionary];
+        self.sentFiles = [NSMutableSet set];
         self.sentArea = CGRectNull;
 
         WKWebViewConfiguration* config = [WKWebViewConfiguration new];
@@ -300,6 +325,16 @@ static void ClickerTick(void);
         [content addUserScript:[[WKUserScript alloc] initWithSource:source
                                                       injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                    forMainFrameOnly:YES]];
+        // The desktop importer, bundled (tools/clicker): opens .cvclk files in the page.
+        NSString* importer =
+            [NSString stringWithContentsOfURL:[ClickerDir() URLByAppendingPathComponent:@"ios-import.js"]
+                                     encoding:NSUTF8StringEncoding
+                                        error:nil];
+        if (importer.length) {
+            [content addUserScript:[[WKUserScript alloc] initWithSource:importer
+                                                          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                       forMainFrameOnly:YES]];
+        }
         NFBClickerScriptProxy* proxy = [NFBClickerScriptProxy new];
         proxy.target = self;
         [content addScriptMessageHandler:proxy name:@"clicker"];
@@ -316,6 +351,7 @@ static void ClickerTick(void);
         if (@available(iOS 16.4, *)) {
             web.inspectable = YES;
         }
+        web.navigationDelegate = self;
         [self addSubview:web];
         self.web = web;
 
@@ -337,6 +373,16 @@ static void ClickerTick(void);
         }
     }
     return self;
+}
+
+// iOS can kill the page's process in the background; start it again from scratch.
+- (void)webViewWebContentProcessDidTerminate:(WKWebView*)webView {
+    self.ready = NO;
+    self.maskBits = nil;
+    [self.hots removeAllObjects];
+    [self.sentFiles removeAllObjects];
+    self.sentArea = CGRectNull;
+    [webView reload];
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer*)g shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other {
@@ -403,17 +449,19 @@ static void ClickerTick(void);
     };
 }
 
-// main.js petPayload(): what one character window needs.
+// main.js petPayload(): what one character window needs. A character from a .cvclk goes
+// as the file itself (charFile, base64) the first time; the page opens it with the desktop
+// importer and keeps it, and later payloads only name it (charKey).
 - (NSDictionary*)payload {
-    static NSDictionary* character;
-    if (!character) {
-        character = ClickerCharacter(@"default");
+    static NSDictionary* builtIn;
+    if (!builtIn) {
+        builtIn = ClickerCharacter(@"default");
     }
-    if (!character) {
+    if (!builtIn) {
         return nil;
     }
     ClickerGeom g = ClickerGeometry(gPrefs.size);
-    return @{
+    NSMutableDictionary* p = [@{
         @"pet": @{
             @"id": @"home",
             @"charId": @"default",
@@ -422,12 +470,11 @@ static void ClickerTick(void);
             @"lock": @(gPrefs.lock),
             @"mute": @(!gPrefs.sound),
             @"music": @NO,
-            @"typing": @NO,
+            @"typing": @((BOOL)(gOnCompose && gPrefs.typing)),
             @"keyBg": @"",
             @"alwaysOnTop": @YES,
             @"clickThrough": @YES
         },
-        @"char": character,
         @"geom": @{
             @"size": @(g.size),
             @"side": @(g.side),
@@ -451,7 +498,22 @@ static void ClickerTick(void);
             },
             @"update": @{@"auto": @NO}
         }
-    };
+    } mutableCopy];
+    NSString* entry = gCharEntry;
+    if (entry.length) {
+        p[@"charKey"] = entry;
+        p[@"charIndex"] = @(gPrefs.charIndex);
+        p[@"charDefault"] = builtIn;
+        if (![self.sentFiles containsObject:entry]) {
+            NSData* file = [NFBClickerStore fileForEntry:entry];
+            if (file.length) {
+                p[@"charFile"] = [file base64EncodedStringWithOptions:0];
+            }
+        }
+    } else {
+        p[@"char"] = builtIn;
+    }
+    return p;
 }
 
 - (void)pushData {
@@ -525,7 +587,9 @@ static void ClickerTick(void);
         }
         self.dragging = YES;
         self.dragTouch = self.tracker.last;
-        self.dragFrom = gPrefs.free ? CGPointMake(gPrefs.freeX, gPrefs.freeY) : CGPointMake(gPrefs.barX, gPrefs.barY);
+        self.dragFrom = gOnCompose     ? CGPointMake(gPrefs.composeX, gPrefs.composeY)
+                        : gPrefs.free ? CGPointMake(gPrefs.freeX, gPrefs.freeY)
+                                      : CGPointMake(gPrefs.barX, gPrefs.barY);
         [self resolve:cb value:@YES];
     } else if ([op isEqualToString:@"dragMove"]) {
         if (!self.dragging) {
@@ -533,7 +597,9 @@ static void ClickerTick(void);
         }
         CGPoint now = self.tracker.last;
         CGFloat dx = now.x - self.dragTouch.x, dy = now.y - self.dragTouch.y;
-        if (gPrefs.free) {
+        if (gOnCompose) {
+            gPrefs.composeX = MAX(-200, MIN(200, lround(self.dragFrom.x + dx)));
+        } else if (gPrefs.free) {
             // Free spot: x from the left edge, y from the bottom edge.
             gPrefs.freeX = MAX(0, MIN(500, lround(self.dragFrom.x + dx)));
             gPrefs.freeY = MAX(0, MIN(1000, lround(self.dragFrom.y - dy)));
@@ -548,11 +614,37 @@ static void ClickerTick(void);
         }
         self.dragging = NO;
         NSUserDefaults* d = [NSUserDefaults standardUserDefaults];
-        if (gPrefs.free) {
+        if (gOnCompose) {
+            [d setInteger:gPrefs.composeX forKey:kClickerComposeX];
+        } else if (gPrefs.free) {
             [d setInteger:gPrefs.freeX forKey:kClickerFreeX];
             [d setInteger:gPrefs.freeY forKey:kClickerFreeY];
         } else {
             [d setInteger:gPrefs.barX forKey:kClickerBarX];
+        }
+    } else if ([op isEqualToString:@"charInfo"]) {
+        NSString* key = args.count > 0 && [args[0] isKindOfClass:[NSString class]] ? args[0] : nil;
+        if (!key) {
+            return;
+        }
+        NSArray* names = args.count > 1 && [args[1] isKindOfClass:[NSArray class]] ? args[1] : @[];
+        BOOL locked = args.count > 2 && [args[2] respondsToSelector:@selector(boolValue)] && [args[2] boolValue];
+        NSString* error = args.count > 3 && [args[3] isKindOfClass:[NSString class]] ? args[3] : @"";
+        // Opened or not, the page has the file; a broken one is not sent again either.
+        [self.sentFiles addObject:key];
+        [NFBClickerStore noteEntry:key names:names locked:locked error:error];
+    } else if ([op isEqualToString:@"charNeed"]) {
+        NSString* key = args.count > 0 && [args[0] isKindOfClass:[NSString class]] ? args[0] : nil;
+        NSDictionary* entry = nil;
+        for (NSDictionary* e in [NFBClickerStore entries]) {
+            if ([e[@"id"] isEqual:key]) {
+                entry = e;
+            }
+        }
+        // The page lost it (it reloaded); send it again unless it failed to open.
+        if (key && [entry[@"error"] length] == 0 && [self.sentFiles containsObject:key]) {
+            [self.sentFiles removeObject:key];
+            [self pushData];
         }
     } else if ([op isEqualToString:@"lineSound"]) {
         NSString* charId = args.count > 0 && [args[0] isKindOfClass:[NSString class]] ? args[0] : @"default";
@@ -566,16 +658,25 @@ static void ClickerTick(void);
     }
 }
 
+// main.js reactTo('typing', {kind: 'key'}): one nod per keystroke.
+- (void)typed {
+    if (self.ready && !self.hidden) {
+        [self js:@"window.__clk&&__clk.emit('react',{kind:'key'})"];
+    }
+}
+
 @end
 
 // MARK: - Placement
 
-static NSHashTable<UIView*>* gAnchors;
+static NSHashTable<UIView*>* gHomeBars;
+static NSHashTable<UIView*>* gComposeBars;
 static NFBClickerView* gHost;
 static CADisplayLink* gLink;
 static __weak UIView* gLastAnchor;
 static CGFloat gAnchorMaxWidth;
 static NSInteger gHostSize;
+static BOOL gHostOnCompose;
 
 @interface NFBClickerTicker : NSObject
 @end
@@ -606,10 +707,10 @@ static void ClickerStartLink(void) {
     [gLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
-// The bar that is in a window; a hidden one still counts, its visibility just reads 0.
-static UIView* ClickerCurrentAnchor(void) {
+// A bar that is in a window; a hidden one still counts, its visibility just reads 0.
+static UIView* ClickerBarIn(NSHashTable<UIView*>* bars) {
     UIView* best = nil;
-    for (UIView* v in gAnchors.allObjects) {
+    for (UIView* v in bars.allObjects) {
         if (v.window && (!best || (best.hidden && !v.hidden))) {
             best = v;
         }
@@ -617,11 +718,24 @@ static UIView* ClickerCurrentAnchor(void) {
     return best;
 }
 
+// The composer's toolbar wins while a post is being written; the home bar is still in its
+// window underneath then, covered.
+static UIView* ClickerCurrentAnchor(BOOL* compose) {
+    UIView* bar = gPrefs.compose ? ClickerBarIn(gComposeBars) : nil;
+    if (bar) {
+        *compose = YES;
+        return bar;
+    }
+    *compose = NO;
+    return ClickerBarIn(gHomeBars);
+}
+
 // How much of the bar is really showing: hidden or faded ancestors, clipping ancestors, the
 // screen edge, and the bar shrinking (the tab bar minimizing on scroll) all count.
 static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect frame) {
     CGFloat alpha = 1;
     CGRect visible = frame;
+    CALayer* wp = window.layer.presentationLayer ?: window.layer;
     for (UIView* v = anchor; v && v != window; v = v.superview) {
         if (v.hidden) {
             return 0;
@@ -629,9 +743,7 @@ static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect 
         CALayer* layer = v.layer.presentationLayer ?: v.layer;
         alpha *= layer.opacity;
         if (v != anchor && v.clipsToBounds) {
-            CALayer* vp = v.layer.presentationLayer ?: v.layer;
-            CALayer* wp = window.layer.presentationLayer ?: window.layer;
-            visible = CGRectIntersection(visible, [vp convertRect:vp.bounds toLayer:wp]);
+            visible = CGRectIntersection(visible, [layer convertRect:layer.bounds toLayer:wp]);
         }
     }
     visible = CGRectIntersection(visible, window.bounds);
@@ -645,8 +757,9 @@ static CGFloat ClickerAnchorVisibility(UIView* anchor, UIWindow* window, CGRect 
 }
 
 static void ClickerTick(void) {
-    UIView* anchor = ClickerCurrentAnchor();
-    if (!gPrefs.on || !anchor) {
+    BOOL compose = NO;
+    UIView* anchor = gPrefs.on ? ClickerCurrentAnchor(&compose) : nil;
+    if (!anchor) {
         // Nothing to follow: stop ticking until a bar comes back into a window
         // (didMoveToWindow) or the setting is turned on.
         ClickerHide();
@@ -676,7 +789,9 @@ static void ClickerTick(void) {
     if (anchor != gLastAnchor) {
         gLastAnchor = anchor;
         gAnchorMaxWidth = 0;
+        gHost.dragging = NO;
     }
+    gOnCompose = compose;
     CALayer* al = anchor.layer.presentationLayer ?: anchor.layer;
     CALayer* wl = window.layer.presentationLayer ?: window.layer;
     CGRect bar = [al convertRect:al.bounds toLayer:wl];
@@ -684,7 +799,9 @@ static void ClickerTick(void) {
     CGFloat visibility = ClickerAnchorVisibility(anchor, window, bar);
 
     CGPoint feet;
-    if (gPrefs.free) {
+    if (compose) {
+        feet = CGPointMake(CGRectGetMidX(bar) + gPrefs.composeX, CGRectGetMinY(bar) - gPrefs.composeY);
+    } else if (gPrefs.free) {
         feet = CGPointMake(gPrefs.freeX, window.bounds.size.height - gPrefs.freeY);
     } else {
         feet = CGPointMake(CGRectGetMidX(bar) + gPrefs.barX, CGRectGetMinY(bar) - gPrefs.barY);
@@ -694,8 +811,10 @@ static void ClickerTick(void) {
     if (!CGRectEqualToRect(gHost.frame, frame)) {
         gHost.frame = frame;
     }
-    if (gHostSize != gPrefs.size) {
+    if (gHostSize != gPrefs.size || gHostOnCompose != compose) {
+        // Size changes the page layout; the compose flag turns typing on in the payload.
         gHostSize = gPrefs.size;
+        gHostOnCompose = compose;
         [gHost pushData];
     }
     // A drag in progress keeps the character visible even if the bar moves under it.
@@ -705,14 +824,14 @@ static void ClickerTick(void) {
     [gHost sendArea];
 }
 
-static void NFBClickerAnchor(UIView* bar) {
-    if (!gAnchors) {
-        gAnchors = [NSHashTable weakObjectsHashTable];
+static void ClickerAddBar(NSHashTable<UIView*>* __strong* table, UIView* bar) {
+    if (!*table) {
+        *table = [NSHashTable weakObjectsHashTable];
     }
     if (bar.window) {
-        [gAnchors addObject:bar];
+        [*table addObject:bar];
     }
-    if (gPrefs.on && ClickerCurrentAnchor()) {
+    if (gPrefs.on) {
         ClickerStartLink();
     }
 }
@@ -726,22 +845,49 @@ static void ClickerPrefsChanged(void) {
         now.barY = old.barY;
         now.freeX = old.freeX;
         now.freeY = old.freeY;
+        now.composeX = old.composeX;
+        now.composeY = old.composeY;
     }
+    NSString* entry = [NFBClickerStore selectedEntry];
+    BOOL charChanged = ![entry isEqualToString:gCharEntry] || now.charIndex != old.charIndex;
+    gCharEntry = entry;
     gPrefs = now;
-    if (now.flip != old.flip || now.lock != old.lock || now.sound != old.sound) {
+    if (charChanged || now.flip != old.flip || now.lock != old.lock || now.sound != old.sound ||
+        now.typing != old.typing) {
         [gHost pushData];
     }
-    if (now.on && ClickerCurrentAnchor()) {
+    if (now.on) {
         ClickerStartLink();
     }
     ClickerTick();
+}
+
+// Typing in X while the character is on the composer toolbar.
+static void ClickerTextChanged(NSNotification* note) {
+    if (!gPrefs.on || !gPrefs.typing || !gOnCompose || !gHost || gHost.hidden) {
+        return;
+    }
+    UIView* field = note.object;
+    if (![field isKindOfClass:[UIView class]] || field.window != gHost.window) {
+        return;
+    }
+    [gHost typed];
 }
 
 %hook _TtC13QuickComposer21QuickComposerSlotView
 
 - (void)didMoveToWindow {
     %orig;
-    NFBClickerAnchor(self);
+    ClickerAddBar(&gHomeBars, self);
+}
+
+%end
+
+%hook TCRComposerToolbarView
+
+- (void)didMoveToWindow {
+    %orig;
+    ClickerAddBar(&gComposeBars, self);
 }
 
 %end
@@ -751,13 +897,28 @@ static void ClickerPrefsChanged(void) {
         ClickerPrefsChanged();
     });
     // queue:nil, never the main queue (7.3.79, 7.3.86); the work hops to main itself.
-    [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification
-                                                      object:nil
-                                                       queue:nil
-                                                  usingBlock:^(NSNotification* note) {
-                                                      dispatch_async(dispatch_get_main_queue(), ^{
-                                                          ClickerPrefsChanged();
-                                                      });
-                                                  }];
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:NSUserDefaultsDidChangeNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification* note) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            ClickerPrefsChanged();
+                        });
+                    }];
+    for (NSNotificationName name in @[UITextViewTextDidChangeNotification, UITextFieldTextDidChangeNotification]) {
+        [center addObserverForName:name
+                            object:nil
+                             queue:nil
+                        usingBlock:^(NSNotification* note) {
+                            if ([NSThread isMainThread]) {
+                                ClickerTextChanged(note);
+                            } else {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    ClickerTextChanged(note);
+                                });
+                            }
+                        }];
+    }
     %init;
 }

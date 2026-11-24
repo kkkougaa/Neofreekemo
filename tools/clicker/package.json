@@ -1,0 +1,12 @@
+{
+  "name": "nfb-clicker-import",
+  "private": true,
+  "description": "Builds BHTwitter.bundle/Clicker/ios-import.js from the BUG Clicker importer",
+  "scripts": {
+    "build": "./build.sh"
+  },
+  "devDependencies": {
+    "buffer": "6.0.3",
+    "esbuild": "0.23.1"
+  }
+}

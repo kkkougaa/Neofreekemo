@@ -27,6 +27,11 @@
 @interface _TtC13QuickComposer21QuickComposerSlotView : UIView
 @end
 
+// The composer's bottom row: gallery, camera, GIF, live, more, audience and post buttons
+// (XAppLibraries, X 12.44). T1TweetComposeViewController keeps it in accessoryWrapperView.
+@interface TCRComposerToolbarView : UIView
+@end
+
 @interface XDSBlur : UIView
 @end
 

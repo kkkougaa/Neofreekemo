@@ -65,6 +65,41 @@
     return Promise.resolve(null);
   }
 
+  /* 가져온 캐릭터 — 네이티브는 원래 .cvclk 를 그대로(잠긴 채) 넘기고, 여기서 ios-import.js
+     (데스크톱 importer.js 그대로)로 풀어 둔다. 한 번 푼 파일은 charKey 로 기억해 두고,
+     네이티브에는 "받았다"(charInfo)를 알려 같은 파일을 다시 보내지 않게 한다. */
+  var loadedFiles = {};
+  var current = null;
+  function fill(p) {
+    if (!p || !p.charKey) return Promise.resolve(p);
+    var key = p.charKey;
+    var ready = loadedFiles[key];
+    if (!ready && p.charFile && window.ClickerImport) {
+      ready = loadedFiles[key] = window.ClickerImport.load(p.charFile).then(
+        function (entry) {
+          send('charInfo', [key, entry.names, entry.locked, '']);
+          return entry;
+        },
+        function (e) {
+          delete loadedFiles[key];
+          send('charInfo', [key, [], false, String((e && e.message) || e)]);
+          return null;
+        }
+      );
+    }
+    if (!ready) {
+      send('charNeed', [key]);
+      return Promise.resolve(Object.assign({}, p, { char: p.charDefault }));
+    }
+    return ready.then(function (entry) {
+      var c = entry ? entry.resolve(p.charIndex || 0, p.geom && p.geom.size) : null;
+      if (!c) return Object.assign({}, p, { char: p.charDefault });
+      current = { entry: entry, id: c.id };
+      var pet = Object.assign({}, p.pet, { charId: c.id });
+      return Object.assign({}, p, { char: c, pet: pet });
+    });
+  }
+
   window.__clk = {
     resolve: function (id, v) {
       var f = waits[id];
@@ -73,13 +108,17 @@
       f(v);
     },
     emit: function (ch, v) {
-      (subs[ch] || []).slice().forEach(function (f) {
-        try {
-          f(v);
-        } catch (e) {
-          console.error('[clicker] ' + ch, e);
-        }
-      });
+      var deliver = function (val) {
+        (subs[ch] || []).slice().forEach(function (f) {
+          try {
+            f(val);
+          } catch (e) {
+            console.error('[clicker] ' + ch, e);
+          }
+        });
+      };
+      if (ch === 'data') fill(v).then(deliver);
+      else deliver(v);
     }
   };
 
@@ -88,7 +127,7 @@
 
     /* 캐릭터 · 크기 · 설정 */
     ready: function () {
-      return call('ready', [], null);
+      return call('ready', [], null).then(fill);
     },
     onData: on('data'),
     onArea: on('area'),
@@ -103,6 +142,7 @@
       send('loaded');
     },
     lineSoundUrl: function (charId, name) {
+      if (current && current.id === charId) return Promise.resolve(current.entry.lineSoundUrl(charId, name));
       return call('lineSound', [charId, name], '');
     },
 

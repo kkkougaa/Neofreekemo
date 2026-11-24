@@ -574,6 +574,26 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"type": @"toggle"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_clicker_pick",
+                        @"parentKey": @"kemo_clicker",
+                        @"prefKeyForSubtitle": @"kemo_clicker_char_label",
+                        @"subtitleDefaultKey": @"KEMO_CLICKER_DEFAULT_CHARACTER",
+                        @"action": @"pickClickerCharacter:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_clicker_import",
+                        @"parentKey": @"kemo_clicker",
+                        @"action": @"importClickerCharacter:"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_clicker_remove",
+                        @"parentKey": @"kemo_clicker",
+                        @"action": @"removeClickerCharacter:"
+                    },
+                    @{
                         @"key": @"kemo_clicker_size",
                         @"default": @100,
                         @"type": @"slider",
@@ -623,6 +643,36 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"max": @1000,
                         @"unit": @"pt",
                         @"parentKey": @"kemo_clicker_free"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_compose",
+                        @"parentKey": @"kemo_clicker",
+                        @"default": @YES,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_compose_x",
+                        @"default": @120,
+                        @"type": @"slider",
+                        @"min": @-200,
+                        @"max": @200,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker_compose"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_compose_y",
+                        @"default": @0,
+                        @"type": @"slider",
+                        @"min": @-80,
+                        @"max": @160,
+                        @"unit": @"pt",
+                        @"parentKey": @"kemo_clicker_compose"
+                    },
+                    @{
+                        @"key": @"kemo_clicker_typing",
+                        @"parentKey": @"kemo_clicker_compose",
+                        @"default": @YES,
+                        @"type": @"toggle"
                     },
                     @{
                         @"key": @"kemo_clicker_flip",

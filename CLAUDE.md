@@ -17,7 +17,7 @@
    - `deploy_format=sideloaded`
    - `twitter_branding=true`
    - `create_release=true`
-   - `sdk_version=16.5`
+   - `sdk_version=26.5`
    - `target_version=15.0`
    - `decrypted_ipa_url`: 직전 실행 로그의 `IPA_URL`
 4. 빌드가 성공하면 `v7.3.x` 릴리스와 IPA가 생긴다. 실패하면 로그의 `error:` 줄을 보고 고친 뒤 다시 실행한다.

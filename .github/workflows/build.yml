@@ -5,7 +5,7 @@ on:
     inputs:
       sdk_version:
         description: "iOS SDK Version"
-        default: "16.5"
+        default: "26.5"
         required: true
         type: string
       target_version:
@@ -97,6 +97,14 @@ jobs:
         if: inputs.deploy_format == 'sideloaded' || inputs.deploy_format == 'adhoc' || inputs.deploy_format == 'trollstore'
         run: pip install https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          newest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
+          if [[ -n "$newest" ]]; then sudo xcode-select --switch "$newest/Contents/Developer"; fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version || true
+
       - name: iOS SDK Caching
         id: SDK
         uses: actions/cache@v6
@@ -110,10 +118,12 @@ jobs:
       - name: Download iOS SDK
         if: steps.SDK.outputs.cache-hit != 'true'
         run: |
-          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
-          cd sdks
+          # theos/sdks stops at 18.x; the 26.x SDKs come from the same repository NeoFreeBird uses.
+          git clone -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs ios-sdks
+          cd ios-sdks
           git sparse-checkout set --no-cone iPhoneOS${{ inputs.sdk_version }}.sdk
           git checkout
+          mkdir -p "${THEOS}/sdks"
           mv ./*.sdk "${THEOS}/sdks"
         env:
           THEOS: ${{ github.workspace }}/theos

@@ -24,6 +24,7 @@ extern NSString* NFBStringProbeText(void);
 extern NSString* NFBTimelineProbeText(void);
 extern NSString* NFBUnifiedProbeText(void);
 extern NSString* NFBUnifiedTimelineDebugText(void);
+extern NSString* NFBUnifiedNotificationsDebugText(void);
 extern NSString* NFBUnifiedProfileDebugText(void);
 extern void NFBUnifiedProbeKick(void);
 extern NSString* NFBWebAccountsDebugText(void);
@@ -873,6 +874,7 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
     [out appendFormat:@"== UNIFIED TIMELINE ==%c%@%c", 10, NFBUnifiedTimelineDebugText(), 10];
     [out appendFormat:@"== UNIFIED PROFILE ==%c%@%c", 10, NFBUnifiedProfileDebugText(), 10];
+    [out appendFormat:@"== UNIFIED NOTIFICATIONS ==%c%@%c", 10, NFBUnifiedNotificationsDebugText(), 10];
     [out appendFormat:@"== UNIFIED TIMELINE PROBE ==%c%@%c", 10, NFBUnifiedProbeText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
     [out appendFormat:@"== LAST CRASH ==%c%@%c", 10, NFBLastCrashText(), 10];

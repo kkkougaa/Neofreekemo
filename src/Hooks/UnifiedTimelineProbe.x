@@ -270,6 +270,73 @@ static NSString* DescribeHomeControllers(void) {
     return out;
 }
 
+// Notifications (A/B step for the notifications tab): what X's notifications
+// screen holds, its URT controllers, their timeline objects and how those are made.
+static void CollectByClass(UIViewController* controller, NSString* name, NSMutableArray* found) {
+    if (!controller || found.count > 8) return;
+    if ([NSStringFromClass([controller class]) isEqualToString:name]) [found addObject:controller];
+    for (UIViewController* child in controller.childViewControllers) CollectByClass(child, name, found);
+}
+
+static NSString* ClassMethodsWith(Class cls, NSArray<NSString*>* words) {
+    NSMutableArray* names = [NSMutableArray array];
+    unsigned int count = 0;
+    Method* methods = class_copyMethodList(object_getClass(cls), &count);
+    for (unsigned int i = 0; i < count; i++) {
+        NSString* name = NSStringFromSelector(method_getName(methods[i]));
+        for (NSString* word in words) {
+            if ([name rangeOfString:word].location != NSNotFound) {
+                [names addObject:[NSString stringWithFormat:@"+%@ %s", name, method_getTypeEncoding(methods[i]) ?: ""]];
+                break;
+            }
+        }
+    }
+    free(methods);
+    Method* instance = class_copyMethodList(cls, &count);
+    for (unsigned int i = 0; i < count; i++) {
+        NSString* name = NSStringFromSelector(method_getName(instance[i]));
+        if ([name hasPrefix:@"init"]) {
+            [names addObject:[NSString stringWithFormat:@"-%@ %s", name, method_getTypeEncoding(instance[i]) ?: ""]];
+        }
+    }
+    free(instance);
+    return names.count ? [names componentsJoinedByString:@"\n    "] : @"(none)";
+}
+
+static NSString* DescribeNotifications(void) {
+    NSMutableArray* screens = [NSMutableArray array];
+    for (UIWindow* window in [UIApplication sharedApplication].windows) {
+        CollectByClass(window.rootViewController, @"T1NotificationsViewController", screens);
+    }
+    if (screens.count == 0) return @"(no T1NotificationsViewController)\n";
+    NSMutableString* out = [NSMutableString string];
+    for (UIViewController* screen in screens) {
+        [out appendFormat:@"T1NotificationsViewController %p account=%@ onScreen=%d\n  ivars: %@\n", screen,
+                          WhoseAccount(CallGetter(screen, @"account")), screen.viewIfLoaded.window != nil,
+                          ObjectIvars(screen)];
+        NSMutableArray* lists = [NSMutableArray array];
+        CollectByClass(screen, @"T1URTViewController", lists);
+        NSMutableSet* seenClasses = [NSMutableSet set];
+        for (UIViewController* list in lists) {
+            [out appendFormat:@"  T1URTViewController %p onScreen=%d\n    ivars: %@\n", list,
+                              list.viewIfLoaded.window != nil, ObjectIvars(list)];
+            for (NSString* getter in @[ @"timeline", @"urtTimeline", @"dataSource", @"timelineSource" ]) {
+                id timeline = CallGetter(list, getter);
+                if (!timeline) continue;
+                [out appendFormat:@"    %@: %@ account=%@\n      methods: %@\n      ivars: %@\n", getter,
+                                  NSStringFromClass([timeline class]), WhoseAccount(CallGetter(timeline, @"account")),
+                                  InterestingMethods(timeline), ObjectIvars(timeline)];
+                if (![seenClasses containsObject:[timeline class]]) {
+                    [seenClasses addObject:[timeline class]];
+                    [out appendFormat:@"      made by:\n    %@\n",
+                                      ClassMethodsWith([timeline class], @[ @"ccount", @"imeline", @"hared" ])];
+                }
+            }
+        }
+    }
+    return out;
+}
+
 BOOL NFBUnifiedProbeActive(void) {
     return gProbeRefreshing;
 }
@@ -416,6 +483,7 @@ NSString* NFBUnifiedProbeText(void) {
         if (gOtherTimeline) {
             [out appendFormat:@"-- other latest --\n%@", DescribeTimeline(gOtherTimeline)];
         }
+        [out appendFormat:@"-- notifications --\n%@", DescribeNotifications()];
     } @catch (NSException* exception) {
         [out appendFormat:@"describe threw %@\n", exception.name];
     }

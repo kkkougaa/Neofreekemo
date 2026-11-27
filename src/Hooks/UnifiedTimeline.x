@@ -3121,10 +3121,22 @@ static NSString* gComposerNote = @"(no composer looked at yet)";
 // where A can be chosen). The bookmark button is new here: X's callback for it
 // (-inlineActionButtonDidRecognizeLongPressBegan:) or, if X does not send one,
 // this file's own recogniser on the button (BookmarkPress), whichever comes.
+// The view is inside one of the unified home's own lists.
+static BOOL IsInUnifiedHome(UIView* view) {
+    for (UIResponder* responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]] && [gFollowingControllers containsObject:responder]) return YES;
+    }
+    return NO;
+}
+
 static BOOL LongPressChooser(id actionsView, id button, NSString* how) {
     if (!UnifiedActive() || ![actionsView isKindOfClass:[UIView class]]) return NO;
     int kind = ButtonKind(button);
     if (kind < 0 || kind > 2) return NO;
+    // 7.3.153: the sheet belongs to the unified home and to B's screens.
+    // Anywhere else (search, profiles, lists, a tweet screen of A's) the long
+    // press is X's own.
+    if (!IsInBScreen((UIView*)actionsView) && !IsInUnifiedHome((UIView*)actionsView)) return NO;
     // The same press reported twice (X's callback and our recogniser): one sheet.
     if (button == gLongPressButton && CFAbsoluteTimeGetCurrent() - gLongPressAt < 1.5) return YES;
     if (kind == 2) {

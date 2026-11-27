@@ -742,9 +742,25 @@ static BOOL gHostOnCompose;
 }
 @end
 
+// 7.3.159, for the shake dump: the last changes of where the character stands
+// and whether it shows (the state line only has the latest tick).
+static NSMutableArray<NSString*>* gClickerTrail;
+
+static void ClickerTrail(NSString* line) {
+    static NSDateFormatter* formatter;
+    if (!formatter) {
+        formatter = [NSDateFormatter new];
+        formatter.dateFormat = @"HH:mm:ss.SSS";
+    }
+    if (!gClickerTrail) gClickerTrail = [NSMutableArray array];
+    [gClickerTrail addObject:[NSString stringWithFormat:@"%@ %@", [formatter stringFromDate:[NSDate date]], line]];
+    while (gClickerTrail.count > 24) [gClickerTrail removeObjectAtIndex:0];
+}
+
 static void ClickerHide(void) {
     ClickerAdjustPanelRemove();
     if (gHost && !gHost.hidden) {
+        ClickerTrail(@"hidden: nothing to follow (no anchor, or its top view is not the window's)");
         gHost.hidden = YES;
         gHost.dragging = NO;
     }
@@ -1072,6 +1088,23 @@ static void ClickerTick(void) {
     }
     // A drag in progress keeps the character visible even if the bar moves under it.
     CGFloat alpha = gHost.dragging ? 1 : visibility;
+    {
+        // Only when something changes: which bar is followed, shown or not, a jump.
+        static __weak UIView* trailAnchor;
+        static BOOL trailVia, trailHidden;
+        static CGRect trailFrame;
+        BOOL hiddenNow = alpha < 0.02;
+        BOOL jumped = hypot(CGRectGetMidX(frame) - CGRectGetMidX(trailFrame), CGRectGetMidY(frame) - CGRectGetMidY(trailFrame)) > 40;
+        if (anchor != trailAnchor || viaTabBar != trailVia || hiddenNow != trailHidden || jumped) {
+            ClickerTrail([NSString stringWithFormat:@"anchor=%@ viaTabBar=%d away=%d shown=%.2f visibility=%.2f alpha=%.2f frame=%@ bar=%@",
+                                                    NSStringFromClass(anchor.class), viaTabBar, gAwayFromHome, shown, visibility, alpha,
+                                                    NSStringFromCGRect(frame), NSStringFromCGRect(bar)]);
+            trailAnchor = anchor;
+            trailVia = viaTabBar;
+            trailHidden = hiddenNow;
+            trailFrame = frame;
+        }
+    }
     gHost.hidden = alpha < 0.02;
     gHost.alpha = alpha;
     [gHost sendArea];
@@ -1486,6 +1519,10 @@ NSString* NFBClickerDebugText(void) {
                       (unsigned long)gHomeBars.allObjects.count, (unsigned long)gComposeBars.allObjects.count,
                       gLink != nil, 10];
     [out appendFormat:@"%@%c%@%c%@", gClickerState, 10, NFBClickerMusicDebugText(), 10, [NFBClickerRemind debugText]];
+    for (NSString* line in gClickerTrail) {
+        [out appendFormat:@"%c  trail %@", 10, line];
+    }
+    [out appendFormat:@"%c", 10];
     for (NSString* line in gClickerLog) {
         [out appendFormat:@"  %@%c", line, 10];
     }

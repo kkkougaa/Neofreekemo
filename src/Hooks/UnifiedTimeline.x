@@ -1113,6 +1113,23 @@ static void BookmarkAsB(id viewModel, UIView* sourceView) {
     }
 }
 
+extern BOOL NFBUnifiedUndoRepostAsB(id bAccount, id status, NSString** why);
+extern NSString* NFBUnifiedRepostDebugText(void);
+
+// The tweet (the original, for a repost) as B's own streams have it.
+static id BStatusFor(long long actedID) {
+    if (actedID <= 0) return nil;
+    for (id timeline in @[ gBTimeline ?: [NSNull null], gBForYouTimeline ?: [NSNull null] ]) {
+        if (timeline == [NSNull null]) continue;
+        id objects = Getter(Getter(timeline, @"stream"), @"streamObjects");
+        if (![objects isKindOfClass:[NSArray class]]) continue;
+        for (id object in objects) {
+            if (IsStatusItem(object) && ActedID(object) == actedID) return ActedStatusOf(object);
+        }
+    }
+    return nil;
+}
+
 static void RepostAsB(id viewModel) {
     id status = ActedStatus(viewModel);
     long long statusID = NumberGetter(status, @"statusID");
@@ -1124,10 +1141,19 @@ static void RepostAsB(id viewModel) {
         return;
     }
     if (!gBReposted) gBReposted = [NSMutableSet set];
-    BOOL reposted = [gBReposted containsObject:@(statusID)] || BoolGetter(status, @"seenAsRetweeted");
+    // B's own copy of the tweet: the one on screen may be A's, whose repost
+    // state is A's (7.3.145).
+    id bStatus = BStatusFor(statusID);
+    BOOL reposted = [gBReposted containsObject:@(statusID)] || BoolGetter(bStatus, @"seenAsRetweeted");
     if (reposted) {
-        // Undoing needs the repost's own ID, which only X's own state has.
-        ShowNotice([NSString stringWithFormat:@"%@의 재게시 취소는 아직 %@로 전환해서 해주세요", BName(), BName()]);
+        NSString* why = nil;
+        if (NFBUnifiedUndoRepostAsB(gBAccount, bStatus ?: status, &why)) {
+            [gBReposted removeObject:@(statusID)];
+            ShowNotice([NSString stringWithFormat:@"%@의 재게시 취소를 보냈어요", BName()]);
+            UnifiedLog(@"unrepost as B");
+        } else {
+            ShowNotice(why ?: [NSString stringWithFormat:@"%@의 재게시 취소는 %@로 전환해서 해주세요", BName(), BName()]);
+        }
         return;
     }
     CallStatusMethod(gBAccount, @"retweetWithStatusID:responseBlock:", statusID);
@@ -1607,6 +1633,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
                                           ? [Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects") count] : 0),
                       gLastForYouMerge];
     [out appendFormat:@"following lists:\n%@", NFBUnifiedFollowSyncDebugText()];
+    [out appendFormat:@"reposts as B:\n%@\n", NFBUnifiedRepostDebugText()];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,

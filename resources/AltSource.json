@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.150",
+      "subtitle": "NeoFreeBird version 7.3.151",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.151",
+          "buildVersion": "151",
+          "date": "2026-11-27T09:37:23Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.151/NeoFreeBird-Twitter-sideloaded_7.3.151_12.44.ipa",
+          "size": 273889715,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 모드 정리: 보낼 때마다 A·B 계정을 다시 확인하고, 확실하지 않으면 막아요. 하트·재게시·북마크는 탭하면 그 줄의 계정(A 베이스·둘 다 = A, B 베이스 = B)으로, 꾹 누르면 계정을 고르는 시트가 열려요. 비공개 계정 게시물은 그 계정으로만 반응해요. B의 대화(스레드)도 팔로잉 탭에 섞여요. 알림·이전내역 화면에 A | B 전환을 넣었고, 쪽지는 A 것만 써요. 통합 모드를 끄면 B 화면과 B 상태를 모두 정리해요."
+        },
         {
           "version": "7.3.150",
           "buildVersion": "150",

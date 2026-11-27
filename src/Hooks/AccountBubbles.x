@@ -2107,7 +2107,37 @@ static void ReadCountsOffscreen(UIViewController* sheet, CGRect bounds) {
     });
 }
 
+static NSUInteger gTouchStaleResets = 0;
+
 static void TrackTouches(UIWindow* window, UIEvent* event) {
+    // 7.3.152: the finger being followed can go away without its end ever
+    // coming through here (its view was taken off the screen under it, as when
+    // the dock is put away from a hold). Then "a finger is down" stayed set for
+    // good, no later touch was followed, and a hold on the Home tab was judged
+    // by that old touch's place: X's sheet instead of the dock. A finger that
+    // is gone is let go of.
+    if (gTouchDown) {
+        UITouch* tracked = gTrackedTouch;
+        BOOL inEvent = tracked && [event.allTouches containsObject:tracked];
+        BOOL gone = !tracked;
+        if (!gone && !inEvent) {
+            // Not in this event: gone if it has ended, or if another finger is
+            // only now coming down (a finger still held would be listed too).
+            gone = tracked.phase == UITouchPhaseEnded || tracked.phase == UITouchPhaseCancelled;
+            for (UITouch* touch in event.allTouches) {
+                if (touch.phase == UITouchPhaseBegan) gone = YES;
+            }
+        }
+        if (gone) {
+            gTouchDown = NO;
+            gTouchEnd = NSProcessInfo.processInfo.systemUptime;
+            gTrackedTouch = nil;
+            gTouchStaleResets++;
+            NFBAccountFan* fan = gCaughtFan;
+            gCaughtFan = nil;
+            [fan finishWith:nil];
+        }
+    }
     for (UITouch* touch in event.allTouches) {
         if (touch.phase == UITouchPhaseBegan && !gTouchDown) {
             gTrackedTouch = touch;
@@ -3468,8 +3498,14 @@ static void AttachDockSwipe(UIView* bar) {
                 return;
             }
         }
-        gBubbleLog = [NSString stringWithFormat:@"sheet shown: held=%d accounts=%lu", held,
-                                                (unsigned long)TwitterAccounts().count];
+        // (When the dock was tried and could not open, its own reason is kept.)
+        NSString* dockNote = [gBubbleLog hasPrefix:@"dock skipped"] ? gBubbleLog : @"-";
+        UIView* startView = gTouchStartView;
+        gBubbleLog = [NSString stringWithFormat:@"sheet shown: held=%d dock=%d onTabBar=%d start=%@ %@ accounts=%lu staleResets=%lu dockNote=%@",
+                                                held, DockOn(), TouchStartedOnTabBar(here),
+                                                startView ? NSStringFromClass(startView.class) : @"(gone)",
+                                                NSStringFromCGPoint(gTouchStartPoint), (unsigned long)TwitterAccounts().count,
+                                                (unsigned long)gTouchStaleResets, dockNote];
     }
     %orig;
 }

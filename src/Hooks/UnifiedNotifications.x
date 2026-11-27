@@ -834,9 +834,12 @@ static UIVisualEffect* UNHighlightEffect(void) {
 }
 
 static const CGFloat kFilterWidth = 104;
-// The picture not in use (7.3.151 feedback: 0.86 / 0.5 was too small and dim).
-static const CGFloat kUnselectedScale = 0.9;
+// The picture not in use is only dimmed (7.3.152: both pictures are always the
+// same size; it was also shrunk to 0.9 before).
+static const CGFloat kUnselectedScale = 1.0;
 static const CGFloat kUnselectedAlpha = 0.6;
+// At the avatar button: the glass circle is this much bigger than the picture, every side.
+static const CGFloat kAvatarGlassPad = 4.0;
 static const CGFloat kFilterHeight = 44;
 
 // The A | B switch (7.3.151, second look): A's picture on the left, B's on the
@@ -1176,14 +1179,58 @@ static __weak UIView* gASideBadge;  // A's badge, in X's avatar container
 - (void)tappedB:(UIButton*)button;
 @end
 
-// X's avatar picture inside its button (DashAvatarImageView : TUIAvatarImageView).
-static UIView* UNAvatarIn(UIView* container) {
+// X's avatar picture inside its button (DashAvatarImageView : TUIAvatarImageView),
+// however deep it sits.
+static UIView* UNAvatarInDepth(UIView* view, NSInteger depth) {
     Class avatarClass = objc_getClass("TUIAvatarImageView");
-    if (!avatarClass) return nil;
-    for (UIView* sub in container.subviews) {
+    if (!avatarClass || depth > 4) return nil;
+    for (UIView* sub in view.subviews) {
         if ([sub isKindOfClass:avatarClass]) return sub;
+        UIView* found = UNAvatarInDepth(sub, depth + 1);
+        if (found) return found;
     }
     return nil;
+}
+
+static UIView* UNAvatarIn(UIView* container) {
+    return UNAvatarInDepth(container, 0);
+}
+
+// Where X's avatar picture is drawn, in its button's coordinates (a scale on
+// it counts); CGRectNull when it cannot be read.
+static CGRect UNAvatarRectIn(UIView* container) {
+    UIView* avatar = UNAvatarIn(container);
+    if (!avatar) return CGRectNull;
+    CGRect rect = [avatar convertRect:avatar.bounds toView:container];
+    CGFloat size = MIN(CGRectGetWidth(rect), CGRectGetHeight(rect));
+    if (size < 16 || size > 64) return CGRectNull;
+    return rect;
+}
+
+// 7.3.152: the bar's own glass circle round each of the two items is switched
+// off while the pair is shown (UIBarButtonItem.hidesSharedBackground, iOS 26),
+// so the only glass is ours: a circle a little bigger than each picture. X's
+// item gets its own value back when the pair goes.
+static const void* kUNHidBackgroundKey = &kUNHidBackgroundKey;
+
+static BOOL UNHideSharedBackground(UIBarButtonItem* item) {
+    SEL get = NSSelectorFromString(@"hidesSharedBackground");
+    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
+    if (!item || ![item respondsToSelector:get] || ![item respondsToSelector:set]) return NO;
+    BOOL now = ((BOOL (*)(id, SEL))objc_msgSend)(item, get);
+    if (!objc_getAssociatedObject(item, kUNHidBackgroundKey)) {
+        objc_setAssociatedObject(item, kUNHidBackgroundKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (!now) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, YES);
+    return YES;
+}
+
+static void UNRestoreSharedBackground(UIBarButtonItem* item) {
+    NSNumber* was = item ? objc_getAssociatedObject(item, kUNHidBackgroundKey) : nil;
+    if (!was) return;
+    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
+    if ([item respondsToSelector:set]) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, was.boolValue);
+    objc_setAssociatedObject(item, kUNHidBackgroundKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 // X's avatar button view of the notifications tab, only if it is that class.
@@ -1193,54 +1240,78 @@ static UIView* UNAvatarContainer(void) {
     return [NSStringFromClass([container class]) containsString:@"TabRootAvatarContainerView"] ? container : nil;
 }
 
-// Which picture is the one in use: highlights, dimming, VoiceOver.
+// Which picture is the one in use. Both keep their size and their glass
+// circle; the one not being looked at is only dimmed.
 static void UNApplyAvatarState(void) {
     UIBarButtonItem* ours = gBBarItem;
     if (!ours) return;
     BOOL onB = UNFilterIsB();
     UIView* side = ours.customView;
-    UIView* bHighlight = [side viewWithTag:1];
     UIView* bPicture = [side viewWithTag:2];
-    bHighlight.alpha = onB ? 1.0 : 0.0;
-    bHighlight.transform = onB ? CGAffineTransformIdentity
-                               : CGAffineTransformScale(CGAffineTransformMakeTranslation(-18, 0), 0.6, 0.6);
     bPicture.alpha = onB ? 1.0 : kUnselectedAlpha;
-    bPicture.transform = onB ? CGAffineTransformIdentity : CGAffineTransformMakeScale(kUnselectedScale, kUnselectedScale);
     side.accessibilityTraits = onB ? (UIAccessibilityTraitButton | UIAccessibilityTraitSelected) : UIAccessibilityTraitButton;
-    UIView* container = UNAvatarContainer();
-    UIView* aHighlight = nil;
-    for (UIView* sub in container.subviews) {
-        if (sub.tag == kAvatarHighlightTag) aHighlight = sub;
-    }
-    aHighlight.layer.cornerRadius = MIN(CGRectGetWidth(aHighlight.bounds), CGRectGetHeight(aHighlight.bounds)) / 2;
-    aHighlight.alpha = onB ? 0.0 : 1.0;
-    aHighlight.transform = onB ? CGAffineTransformScale(CGAffineTransformMakeTranslation(18, 0), 0.6, 0.6)
-                               : CGAffineTransformIdentity;
     // X's avatar keeps its frame; only dimmed while B is the one in use.
-    UNAvatarIn(container).alpha = onB ? kUnselectedAlpha : 1.0;
+    UNAvatarIn(UNAvatarContainer()).alpha = onB ? kUnselectedAlpha : 1.0;
 }
 
 static CGFloat gBPictureSize = 28;
+static NSLayoutConstraint* gBSideWidth;
+static NSLayoutConstraint* gBSideHeight;
 
 // B's picture takes the size X's own A picture has in that bar (28 until it
-// can be read). Bounds and centre only: its transform is the selection's.
+// can be read), and each picture gets a glass circle kAvatarGlassPad bigger
+// all round: B's is its whole item, A's sits behind X's avatar.
 static void UNSizeBPicture(void) {
     UIBarButtonItem* ours = gBBarItem;
-    UIView* picture = [ours.customView viewWithTag:2];
+    UIView* side = ours.customView;
+    UIView* picture = [side viewWithTag:2];
     if (!picture) return;
-    UIView* avatar = UNAvatarIn(UNAvatarContainer());
-    CGFloat size = MIN(CGRectGetWidth(avatar.bounds), CGRectGetHeight(avatar.bounds));
-    if (size < 16 || size > 36) size = 28;
+    UIView* container = UNAvatarContainer();
+    CGRect aRect = UNAvatarRectIn(container);
+    CGFloat size = CGRectIsNull(aRect) ? 28 : round(MIN(CGRectGetWidth(aRect), CGRectGetHeight(aRect)) * 2) / 2;
     gBPictureSize = size;
+    CGFloat box = size + 2 * kAvatarGlassPad;
+    if (gBSideWidth.constant != box) gBSideWidth.constant = box;
+    if (gBSideHeight.constant != box) gBSideHeight.constant = box;
+    if (!side.superview) side.frame = CGRectMake(0, 0, box, box);
     if (CGRectGetWidth(picture.bounds) != size) picture.bounds = CGRectMake(0, 0, size, size);
-    if (!CGPointEqualToPoint(picture.center, CGPointMake(18, 18))) picture.center = CGPointMake(18, 18);
+    CGPoint middle = CGPointMake(CGRectGetMidX(side.bounds), CGRectGetMidY(side.bounds));
+    if (!CGPointEqualToPoint(picture.center, middle)) picture.center = middle;
     if (picture.layer.cornerRadius != size / 2) picture.layer.cornerRadius = size / 2;
+    UIView* bGlass = [side viewWithTag:1];
+    CGRect bFrame = CGRectMake(middle.x - box / 2, middle.y - box / 2, box, box);
+    if (!CGRectEqualToRect(bGlass.frame, bFrame)) bGlass.frame = bFrame;
+    if (bGlass.layer.cornerRadius != box / 2) bGlass.layer.cornerRadius = box / 2;
+    UIView* aGlass = nil;
+    for (UIView* sub in container.subviews) {
+        if (sub.tag == kAvatarHighlightTag) aGlass = sub;
+    }
+    if (aGlass) {
+        CGRect aFrame = container.bounds;
+        if (!CGRectIsNull(aRect)) {
+            // Never past the button's edge when the button cuts its content there.
+            CGFloat pad = kAvatarGlassPad;
+            if (container.clipsToBounds) {
+                CGRect bounds = container.bounds;
+                pad = MAX(0, MIN(pad, MIN(MIN(CGRectGetMinX(aRect) - CGRectGetMinX(bounds), CGRectGetMaxX(bounds) - CGRectGetMaxX(aRect)),
+                                          MIN(CGRectGetMinY(aRect) - CGRectGetMinY(bounds), CGRectGetMaxY(bounds) - CGRectGetMaxY(aRect)))));
+            }
+            aFrame = CGRectInset(aRect, -pad, -pad);
+        }
+        if (!CGRectEqualToRect(aGlass.frame, aFrame)) aGlass.frame = aFrame;
+        CGFloat radius = MIN(CGRectGetWidth(aFrame), CGRectGetHeight(aFrame)) / 2;
+        if (aGlass.layer.cornerRadius != radius) aGlass.layer.cornerRadius = radius;
+    }
 }
 
 static void UNRemoveAvatarSwitch(void) {
     UIBarButtonItem* ours = gBBarItem;
     UIViewController* holder = gAvatarHolder;
     UIView* container = UNAvatarContainer();
+    // The bar's own glass round X's avatar comes back.
+    UNRestoreSharedBackground(gAAvatarItem);
+    gBSideWidth = nil;
+    gBSideHeight = nil;
     if (ours && holder) {
         void (^drop)(void) = ^{
             NSMutableArray<UIBarButtonItem*>* items = [holder.navigationItem.leftBarButtonItems mutableCopy];
@@ -1312,8 +1383,10 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
     if (!ours) {
         UIButton* side = [UIButton buttonWithType:UIButtonTypeCustom];
         side.frame = CGRectMake(0, 0, 36, 36);
-        [side.widthAnchor constraintEqualToConstant:36].active = YES;
-        [side.heightAnchor constraintEqualToConstant:36].active = YES;
+        gBSideWidth = [side.widthAnchor constraintEqualToConstant:36];
+        gBSideHeight = [side.heightAnchor constraintEqualToConstant:36];
+        gBSideWidth.active = YES;
+        gBSideHeight.active = YES;
         UIVisualEffectView* highlight = [[UIVisualEffectView alloc] initWithEffect:UNHighlightEffect()];
         highlight.tag = 1;
         highlight.frame = side.bounds;
@@ -1329,6 +1402,9 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
         picture.layer.cornerRadius = 14;
         picture.layer.borderWidth = 1.5;
         picture.userInteractionEnabled = NO;
+        picture.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
+                                   UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+        highlight.autoresizingMask = picture.autoresizingMask;
         [side addSubview:picture];
         UIView* badge = UNMakeBadge();
         [side addSubview:badge];
@@ -1361,7 +1437,6 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
         UIVisualEffectView* highlight = [[UIVisualEffectView alloc] initWithEffect:UNHighlightEffect()];
         highlight.tag = kAvatarHighlightTag;
         highlight.frame = container.bounds;
-        highlight.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         highlight.clipsToBounds = YES;
         highlight.userInteractionEnabled = NO;
         if ([highlight.effect isKindOfClass:[UIBlurEffect class]]) highlight.contentView.backgroundColor = [UIColor tertiarySystemFillColor];
@@ -1374,6 +1449,9 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
     picture.image = UNAccountPicture(b, @"B", bColor);
     picture.layer.borderColor = bColor.CGColor;
     side.accessibilityLabel = [NSString stringWithFormat:@"%@ 알림", UNHandle(b) ?: @"B"];
+    // The glass circles are ours, not the bar's.
+    UNHideSharedBackground(ours);
+    UNHideSharedBackground(avatarItem);
     UNSizeBPicture();
     UNApplyAvatarState();
     return YES;
@@ -1901,6 +1979,13 @@ NSString* NFBUnifiedNotificationsDebugText(void) {
                       (unsigned long)gBSeenBatches, gBSeenSignature ?: @"-",
                       seen ? [NSString stringWithFormat:@"on for %@ (dock number then %@)", seen[@"id"], seen[@"base"]] : @"off",
                       (unsigned long)gSilentViewedStopped];
+    UIView* glassContainer = UNAvatarContainer();
+    UIBarButtonItem* glassItem = gAAvatarItem;
+    [out appendFormat:@"avatar pair: A rect %@ in button %@ clips=%d, B item %@, bar glass hidden: X's item %@ (its own value %@)%c",
+                      NSStringFromCGRect(UNAvatarRectIn(glassContainer)), NSStringFromCGRect(glassContainer.bounds),
+                      glassContainer.clipsToBounds, NSStringFromCGRect(gBBarItem.customView.bounds),
+                      glassItem && objc_getAssociatedObject(glassItem, kUNHidBackgroundKey) ? @"yes" : @"no",
+                      glassItem ? (objc_getAssociatedObject(glassItem, kUNHidBackgroundKey) ?: @"-") : @"-", 10];
     [out appendFormat:@"B picture size=%.0f (X's avatar) | badge style: %@ (colour source when not measured: %@) | ", gBPictureSize, gBadgeStylePath, gBadgeColorSource];
     [out appendFormat:@"picture badges: A=%ld (%@) B=%ld (%@) | X's own badge on the avatar: %@ (made invisible while ours shows)\n",
                       (long)gBadgeA, gBadgeASource, (long)gBadgeB, gBadgeBSource, gXBadgeNote];

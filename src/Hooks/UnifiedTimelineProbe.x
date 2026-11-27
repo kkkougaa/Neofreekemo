@@ -21,6 +21,11 @@
 //  the probe now asks the timeline to deserializeStream first; requests sent
 //  while the probe runs are tagged in TIMELINE REQUESTS; and the on-screen
 //  THFHomeTimelineItemsViewControllers' object ivars are listed.
+//  7.3.131: 7.3.130 got the other account's HomeLatestTimeline (74 entries) once the
+//  stream was set up. Each request in TIMELINE REQUESTS now has its method and an
+//  auth tag (4 hex digits of a hash of its credentials, so two accounts differ),
+//  and the streams' objects are counted and one is described (getter names).
+//  Method lists of the timeline and stream are dropped, they are known now.
 //  No tweet text, user names or IDs are recorded. The GraphQL request itself
 //  shows in the dump's TIMELINE REQUESTS section (TimelineProbe.x).
 //
@@ -148,6 +153,49 @@ static NSString* InterestingMethods(id object) {
     return [[names array] componentsJoinedByString:@" "];
 }
 
+// What the stream holds: count, object classes, and for the first status-like object
+// the getters that name its author or the viewer's relationship to them (names only).
+static NSString* DescribeStreamObjects(id stream) {
+    id objects = CallGetter(stream, @"streamObjects");
+    if (![objects respondsToSelector:@selector(count)] || ![objects respondsToSelector:@selector(objectAtIndex:)]) {
+        return [NSString stringWithFormat:@"streamObjects=%@\n", CountOf(objects)];
+    }
+    NSMutableDictionary<NSString*, NSNumber*>* classes = [NSMutableDictionary dictionary];
+    id sample = nil;
+    for (id object in objects) {
+        NSString* name = NSStringFromClass([object class]);
+        classes[name] = @(classes[name].integerValue + 1);
+        if (!sample && [name rangeOfString:@"tatus"].location != NSNotFound) sample = object;
+    }
+    NSMutableString* out = [NSMutableString stringWithFormat:@"streamObjects=%lu account=%@ classes=%@\n",
+                                                             (unsigned long)[objects count],
+                                                             WhoseAccount(CallGetter(stream, @"account")), classes];
+    if (!sample && [objects count] > 0) sample = [objects objectAtIndex:0];
+    if (sample) {
+        NSMutableOrderedSet* names = [NSMutableOrderedSet orderedSet];
+        NSArray* words = @[ @"ollow", @"uthor", @"ser", @"romot", @"ortIndex", @"ntryID", @"tatus", @"ccount" ];
+        for (Class cls = [sample class]; cls && cls != [NSObject class]; cls = class_getSuperclass(cls)) {
+            unsigned int count = 0;
+            Method* methods = class_copyMethodList(cls, &count);
+            for (unsigned int i = 0; i < count; i++) {
+                NSString* name = NSStringFromSelector(method_getName(methods[i]));
+                if ([name hasPrefix:@"."] || [name hasPrefix:@"_"] || [name hasPrefix:@"set"]) continue;
+                for (NSString* word in words) {
+                    if ([name rangeOfString:word].location != NSNotFound) {
+                        [names addObject:[NSString stringWithFormat:@"%@.%@", NSStringFromClass(cls), name]];
+                        break;
+                    }
+                }
+            }
+            free(methods);
+            if (names.count > 50) break;
+        }
+        [out appendFormat:@"  sample %@ methods: %@\n", NSStringFromClass([sample class]),
+                          [[names array] componentsJoinedByString:@" "]];
+    }
+    return out;
+}
+
 static NSString* DescribeTimeline(id timeline) {
     if (!timeline) return @"nil";
     NSMutableString* out = [NSMutableString string];
@@ -168,7 +216,7 @@ static NSString* DescribeTimeline(id timeline) {
         }
         [out appendFormat:@"%@ %@: %@\n", object == timeline ? @"timeline" : @"stream", NSStringFromClass([object class]),
                           found.count ? [found componentsJoinedByString:@" "] : @"(no entry getter)"];
-        [out appendFormat:@"  methods: %@\n", InterestingMethods(object)];
+        if (object != timeline) [out appendString:DescribeStreamObjects(object)];
     }
     return out;
 }

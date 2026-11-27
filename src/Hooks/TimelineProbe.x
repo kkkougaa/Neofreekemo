@@ -10,6 +10,7 @@
 //
 
 #import "HookHelpers.h"
+#import <CommonCrypto/CommonDigest.h>
 
 extern BOOL NFBUnifiedProbeActive(void);
 
@@ -132,6 +133,17 @@ static NSString* EntrySummary(id json) {
     return [NSString stringWithFormat:@"%lu entries: %@", (unsigned long)ids.count, [runs componentsJoinedByString:@" "]];
 }
 
+// Which credential a request carried, without keeping it: the first 4 hex digits of a
+// SHA-256 of the Authorization and Cookie headers. Equal tags = same account.
+NSString* NFBAuthTag(NSURLRequest* request) {
+    NSString* auth = [NSString stringWithFormat:@"%@|%@", [request valueForHTTPHeaderField:@"Authorization"] ?: @"",
+                                                [request valueForHTTPHeaderField:@"Cookie"] ?: @""];
+    NSData* data = [auth dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    return [NSString stringWithFormat:@"%02x%02x", digest[0], digest[1]];
+}
+
 static NSString* AuthScheme(NSURLRequest* request) {
     NSString* auth = [request valueForHTTPHeaderField:@"Authorization"];
     if (auth.length == 0) return @"none";
@@ -202,8 +214,9 @@ static void RecordTimelineResponse(NSURLRequest* request, NSURLResponse* respons
             formatter = [NSDateFormatter new];
             formatter.dateFormat = @"HH:mm:ss";
         }
-        [gProbeLog addObject:[NSString stringWithFormat:@"%@ %@ %ld %lu B%@", [formatter stringFromDate:[NSDate date]],
-                                                        operation, (long)status, (unsigned long)data.length,
+        [gProbeLog addObject:[NSString stringWithFormat:@"%@ %@ %@ %ld %lu B auth#%@%@", [formatter stringFromDate:[NSDate date]],
+                                                        request.HTTPMethod ?: @"GET", operation, (long)status,
+                                                        (unsigned long)data.length, NFBAuthTag(request),
                                                         NFBUnifiedProbeActive() ? @" [during probe]" : @""]];
         if (gProbeLog.count > 30) [gProbeLog removeObjectAtIndex:0];
         gProbeByOperation[operation] = out;

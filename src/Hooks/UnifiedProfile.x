@@ -161,7 +161,8 @@ static void UPLog(NSString* line) {
     @synchronized([NSObject class]) {
         if (!gProfileLog) gProfileLog = [NSMutableArray array];
         [gProfileLog addObject:[NSString stringWithFormat:@"%@ %@", [formatter stringFromDate:[NSDate date]], line]];
-        while (gProfileLog.count > 30) [gProfileLog removeObjectAtIndex:0];
+        // 7.3.151: 60 (was 30); a follow-button tap now writes several lines.
+        while (gProfileLog.count > 60) [gProfileLog removeObjectAtIndex:0];
     }
 }
 
@@ -170,6 +171,14 @@ extern void NFBShowNotice(NSString* text);
 // 7.3.150: X-style toast (UnifiedSheet.x).
 static void UPNotice(NSString* text) {
     NFBShowNotice(text);
+}
+
+// 7.3.151: something was stopped: the same toast with a warning haptic
+// (UnifiedSheet.x). The text ends with what to do next.
+extern void NFBShowBlockNotice(NSString* text);
+
+static void UPBlockNotice(NSString* text) {
+    NFBShowBlockNotice(text);
 }
 
 static UIViewController* UPTopController(void) {
@@ -251,6 +260,31 @@ static NSMutableDictionary<NSNumber*, NSNumber*>* gBFollowByUser;  // userID -> 
 static NSMutableSet<NSNumber*>* gBFollowAsked;
 static NSString* gProfileState = @"(no profile yet)";
 static long long gLastProfileUserID;
+// 7.3.151: the lookups under way, and who waits for their answer (the follow
+// sheet's row for B). Main thread only.
+static NSMutableSet<NSNumber*>* gBFollowPending;
+static NSMutableDictionary<NSNumber*, NSMutableArray*>* gBFollowWaiters;
+
+// Runs `waiter` when the lookup already under way for the user answers.
+// Never starts a lookup; NO when none is under way.
+static BOOL UPWaitForBFollow(long long userID, void (^waiter)(void)) {
+    if (userID <= 0 || !waiter || ![gBFollowPending containsObject:@(userID)]) return NO;
+    if (!gBFollowWaiters) gBFollowWaiters = [NSMutableDictionary dictionary];
+    NSMutableArray* waiters = gBFollowWaiters[@(userID)];
+    if (!waiters) {
+        waiters = [NSMutableArray array];
+        gBFollowWaiters[@(userID)] = waiters;
+    }
+    [waiters addObject:[waiter copy]];
+    return YES;
+}
+
+static void UPBFollowAnswered(long long userID) {
+    [gBFollowPending removeObject:@(userID)];
+    NSArray* waiters = gBFollowWaiters[@(userID)];
+    [gBFollowWaiters removeObjectForKey:@(userID)];
+    for (void (^waiter)(void) in waiters) waiter();
+}
 
 static void UPAskBFollow(long long userID, void (^done)(void)) {
     if (userID <= 0) return;
@@ -296,12 +330,16 @@ static void UPAskBFollow(long long userID, void (^done)(void)) {
                                              user ? NSStringFromClass([user class]) : @"nil"]);
             keep = nil;
             if (done) done();
+            UPBFollowAnswered(userID);
         });
     };
+    if (!gBFollowPending) gBFollowPending = [NSMutableSet set];
+    [gBFollowPending addObject:@(userID)];
     @try {
         ((void (*)(id, SEL, long long, id))objc_msgSend)(support, lookup, userID, completion);
     } @catch (NSException* exception) {
         UPLog([NSString stringWithFormat:@"B follow lookup threw %@", exception.name]);
+        UPBFollowAnswered(userID);
     }
 }
 
@@ -493,18 +531,34 @@ static NSString* UPActionTitle(UPAction action) {
     return @"";
 }
 
+// 7.3.151: the action as the object of "보냈어요" (a request was sent; whether
+// it worked is not known here).
+static NSString* UPActionObject(UPAction action) {
+    switch (action) {
+        case UPActionBlock:
+            return @"차단을";
+        case UPActionUnblock:
+            return @"차단 해제를";
+        case UPActionMute:
+            return @"뮤트를";
+        case UPActionUnmute:
+            return @"뮤트 해제를";
+    }
+    return @"";
+}
+
 // The same action as B, with B's own account. Stops (and says so) unless the
 // account is B's and has the method.
 static void UPDoAsB(UPAction action, id userReference) {
     id b = UPBAccount();
     if (!b) {
         UPLog(@"as B stopped: B account not found");
-        UPNotice(@"B 계정을 찾지 못해서 B로는 보내지 않았어요");
+        UPBlockNotice(@"B 계정을 찾지 못해서 보내지 않았어요. kemo 설정에서 B 계정을 다시 골라주세요");
         return;
     }
     if (!userReference) {
         UPLog(@"as B stopped: no user reference");
-        UPNotice(@"대상 계정을 확인하지 못해서 B로는 보내지 않았어요");
+        UPBlockNotice([NSString stringWithFormat:@"대상 계정을 확인하지 못해서 %@로는 보내지 않았어요. 프로필을 다시 열어서 해주세요", UPBName()]);
         return;
     }
     NSString* name = nil;
@@ -525,7 +579,7 @@ static void UPDoAsB(UPAction action, id userReference) {
     SEL selector = NSSelectorFromString(name);
     if (![b respondsToSelector:selector]) {
         UPLog([NSString stringWithFormat:@"as B stopped: no %@", name]);
-        UPNotice(@"이 X 버전에서는 B로 보낼 수 없어요");
+        UPBlockNotice([NSString stringWithFormat:@"이 X 버전에서는 %@로 보낼 수 없어요. %@ 계정으로 전환해서 해주세요", UPBName(), UPBName()]);
         return;
     }
     void (^response)(void) = ^{
@@ -533,10 +587,10 @@ static void UPDoAsB(UPAction action, id userReference) {
     @try {
         ((void (*)(id, SEL, id, id, BOOL, id))objc_msgSend)(b, selector, userReference, nil, NO, response);
         UPLog([NSString stringWithFormat:@"%@ as B sent", UPActionTitle(action)]);
-        UPNotice([NSString stringWithFormat:@"%@로 %@ 요청을 보냈어요", UPBName(), UPActionTitle(action)]);
+        UPNotice([NSString stringWithFormat:@"%@로 %@ 보냈어요", UPBName(), UPActionObject(action)]);
     } @catch (NSException* exception) {
         UPLog([NSString stringWithFormat:@"%@ as B threw %@", UPActionTitle(action), exception.name]);
-        UPNotice([NSString stringWithFormat:@"%@로 %@하지 못했어요", UPBName(), UPActionTitle(action)]);
+        UPBlockNotice([NSString stringWithFormat:@"%@로 %@ 보내지 못했어요. 잠시 뒤 다시 해주세요", UPBName(), UPActionObject(action)]);
     }
     if (action == UPActionBlock || action == UPActionUnblock) {
         // B's view of this user changed; ask again next time.
@@ -556,7 +610,7 @@ static void UPAskWhich(UPAction action, void (^asA)(void), void (^asB)(void)) {
     NSString* aAtAsk = UPAccountUserID(UPCurrentAccount());
     BOOL (^same)(void) = ^BOOL {
         if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
-        UPNotice(@"계정이 바뀌어서 보내지 않았어요");
+        UPBlockNotice(@"계정이 바뀌어서 보내지 않았어요. 다시 눌러주세요");
         return NO;
     };
     UIColor* purple = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
@@ -695,6 +749,10 @@ static BOOL UPShouldAsk(id performer, long long userID) {
 
 static NSMutableDictionary<NSString*, NSNumber*>* gFollowDone;  // "account:user" -> UPFollow
 
+// 7.3.151: YES while our own direct follow / unfollow call is being made, so
+// the account-level watch below knows it came from the sheet.
+static BOOL gFollowDirect;
+
 static NSString* UPFollowKey(NSString* accountID, long long userID) {
     return [NSString stringWithFormat:@"%@:%lld", accountID ?: @"", userID];
 }
@@ -771,36 +829,40 @@ static void UPRememberFollow(NSString* accountID, long long userID, BOOL followi
 static BOOL UPFollowWith(id account, NSString* expectedID, NSString* name, BOOL follow, long long userID, id reference) {
     if (!account || expectedID.length == 0 || ![UPAccountUserID(account) isEqualToString:expectedID]) {
         UPLog([NSString stringWithFormat:@"follow as %@ stopped: account not verified", name]);
-        UPNotice([NSString stringWithFormat:@"%@ 계정을 확인하지 못해서 보내지 않았어요", name]);
+        UPBlockNotice([NSString stringWithFormat:@"%@ 계정을 확인하지 못해서 보내지 않았어요. kemo 설정에서 계정을 다시 골라주세요", name]);
         return NO;
     }
     if (!reference || userID <= 0) {
         UPLog([NSString stringWithFormat:@"follow as %@ stopped: no user reference", name]);
-        UPNotice(@"대상 계정을 확인하지 못해서 보내지 않았어요");
+        UPBlockNotice(@"대상 계정을 확인하지 못해서 보내지 않았어요. 프로필을 다시 열어서 해주세요");
         return NO;
     }
     SEL selector = NSSelectorFromString(follow ? @"followUserWithUserReference:impressionID:isEarned:supportsChallenges:responseBlock:"
                                                : @"unfollowUserWithUserReference:impressionID:isEarned:associatedStatusForLeaveBehindConfirmation:responseBlock:");
     if (![account respondsToSelector:selector]) {
-        UPNotice(@"이 X 버전에서는 이 계정으로 보낼 수 없어요");
+        UPBlockNotice([NSString stringWithFormat:@"이 X 버전에서는 %@로 보낼 수 없어요. %@ 계정으로 전환해서 해주세요", name, name]);
         return NO;
     }
     void (^response)(void) = ^{
     };
+    gFollowDirect = YES;
     @try {
         if (follow) {
             ((void (*)(id, SEL, id, id, BOOL, BOOL, id))objc_msgSend)(account, selector, reference, nil, NO, NO, response);
         } else {
             ((void (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(account, selector, reference, nil, NO, nil, response);
         }
+        gFollowDirect = NO;
     } @catch (NSException* exception) {
+        gFollowDirect = NO;
         UPLog([NSString stringWithFormat:@"follow as %@ threw %@", name, exception.name]);
-        UPNotice(@"보내지 못했어요");
+        UPBlockNotice([NSString stringWithFormat:@"%@로 보내지 못했어요. 잠시 뒤 다시 눌러주세요", name]);
         return NO;
     }
     UPRememberFollow(expectedID, userID, follow);
     UPLog([NSString stringWithFormat:@"%@ %lld as %@ sent (direct)", follow ? @"follow" : @"unfollow", userID, name]);
-    UPNotice([NSString stringWithFormat:@"%@로 %@했어요", name, follow ? @"팔로우" : @"언팔로우"]);
+    // 7.3.151: a request was sent; "팔로우했어요" claimed it had worked.
+    UPNotice([NSString stringWithFormat:@"%@로 %@ 보냈어요", name, follow ? @"팔로우를" : @"언팔로우를"]);
     return YES;
 }
 
@@ -845,9 +907,94 @@ static NSString* UPButtonContextID(UIView* button) {
 
 static BOOL gFollowSheetBypass;
 
+// 7.3.151: while the mode is active the sheet is the only cushion. X's own
+// "unfollow?" confirmation is not shown, and X's own action from a follow
+// button may only run when the sheet did not apply to that tap or the user
+// picked the button's account in the sheet.
+static __weak UIView* gXAllowedButton;  // the button X's own action may run for
+static CFAbsoluteTime gXAllowedUntil;
+static long long gSheetUser;  // the user an unanswered sheet is about
+static CFAbsoluteTime gSheetAt;
+
+// For Confirmations.x (not wired yet): YES while X's own follow action is
+// running because the user picked that account in the sheet.
+BOOL NFBUnifiedFollowSheetChose(void) {
+    return gFollowSheetBypass;
+}
+
+static void UPAllowX(UIView* button) {
+    gXAllowedButton = button;
+    gXAllowedUntil = CFAbsoluteTimeGetCurrent() + 30;
+}
+
+// The user already chose in the sheet: X's own action must not ask again.
+// -setConfirmUnfollow: is on both TUIFollowButtonV2 and TUIFollowControl.
+static void UPQuietConfirm(UIView* button, NSString* entry) {
+    SEL selector = NSSelectorFromString(@"setConfirmUnfollow:");
+    if (!button || ![button respondsToSelector:selector]) {
+        UPLog([NSString stringWithFormat:@"X confirm not turned off (%@): no setConfirmUnfollow:", entry]);
+        return;
+    }
+    long long before = UPNumber(button, @"confirmUnfollow");
+    @try {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(button, selector, NO);
+    } @catch (NSException* exception) {
+        UPLog([NSString stringWithFormat:@"X confirm not turned off (%@): threw %@", entry, exception.name]);
+        return;
+    }
+    UPLog([NSString stringWithFormat:@"X confirm turned off for the sheet's choice (%@, confirmUnfollow %lld -> %lld)", entry, before,
+                                     UPNumber(button, @"confirmUnfollow")]);
+}
+
+// NO when X's own follow-button action must not run: the mode is active and
+// neither the sheet's choice nor a tap the sheet did not apply to stands
+// behind it (that is X's own confirmation path).
+static BOOL UPXActionAllowed(UIView* button, NSString* entry, long long action) {
+    if (!UPActive()) return YES;
+    BOOL allowed = gFollowSheetBypass || (button && gXAllowedButton == button && CFAbsoluteTimeGetCurrent() < gXAllowedUntil);
+    UPLog([NSString stringWithFormat:@"%@ action %lld: %@", entry, action, allowed ? @"allowed" : @"stopped (not from the sheet)"]);
+    if (!allowed) UPBlockNotice(@"계정을 고르지 않아서 보내지 않았어요. 팔로우 버튼을 다시 눌러 계정을 골라주세요");
+    return allowed;
+}
+
+// An unfollow arriving at a TFNTwitterAccount while the mode is active. Logged
+// always; stopped (YES) only when it is as A for the very user an unanswered
+// sheet is about, which is X's own confirmation answered behind the sheet.
+static BOOL UPUnfollowStopped(id account, id reference, NSString* entry) {
+    if (!UPActive()) return NO;
+    NSString* accountID = UPAccountUserID(account);
+    long long userID = UPReferenceUserID(reference);
+    BOOL isA = account && account == UPCurrentAccount();
+    NSString* who = isA ? @"A" : ([accountID isEqualToString:UPBID()] ? @"B" : @"other");
+    BOOL chosen = gFollowSheetBypass || gFollowDirect;
+    BOOL stop = !chosen && isA && userID > 0 && userID == gSheetUser && CFAbsoluteTimeGetCurrent() - gSheetAt < 60;
+    UPLog([NSString stringWithFormat:@"unfollow %lld as %@ reached the account (%@, sheet choice=%d)%@", userID, who, entry, chosen,
+                                     stop ? @" STOPPED: sheet not answered" : @""]);
+    if (stop) UPBlockNotice(@"계정을 고르지 않아서 언팔로우를 보내지 않았어요. 팔로우 버튼을 다시 눌러 계정을 골라주세요");
+    return stop;
+}
+
+extern NSUInteger NFBAccountSheetToken(void);
+extern void NFBUpdateAccountSheetRow(NSUInteger token, NSUInteger index, NSDictionary* changes);
+
+// 7.3.151: a follow row's detail line, pill and whether it can be tapped, for
+// a state. note replaces the state's own words ("확인 중…"). A state that is
+// not known turns the row off instead of answering the tap with a notice.
+static NSDictionary* UPFollowRowChanges(NSString* letter, UPFollow state, NSString* note) {
+    return @{
+        @"detail" : [NSString stringWithFormat:@"%@ 계정 · %@", letter, note ?: UPFollowText(state)],
+        @"button" : state == UPFollowYes ? @"언팔로우" : (state == UPFollowNo ? @"팔로우" : @"확인 안 됨"),
+        @"buttonStyle" : state == UPFollowYes ? @"outline" : (state == UPFollowNo ? @"filled" : @"disabled"),
+        @"disabled" : @(state == UPFollowUnknown),
+    };
+}
+
 // YES when the sheet was shown instead of X's own follow / unfollow.
 // xPath runs X's own action, which is the button's account's.
-static BOOL UPShowFollowSheet(UIView* button, void (^xPath)(void)) {
+// 7.3.151: entry names the hook the tap came through (for the log); xToggles
+// says X's action is the button's own toggle (it may run again from a sheet
+// that stays up), not a one-way follow or unfollow.
+static BOOL UPShowFollowSheet(UIView* button, NSString* entry, BOOL xToggles, void (^xPath)(void)) {
     if (gFollowSheetBypass || !UPActive()) return NO;
     NSString* aID = UPAccountUserID(UPCurrentAccount());
     NSString* bID = UPBID();
@@ -873,61 +1020,216 @@ static BOOL UPShowFollowSheet(UIView* button, void (^xPath)(void)) {
             weakButton && [(UPAccountUserID(UPGetter(weakButton, @"account")) ?: @"") isEqualToString:(buttonID ?: @"")]) {
             return YES;
         }
-        UPNotice(@"계정이 바뀌어서 보내지 않았어요");
+        UPBlockNotice(@"계정이 바뀌어서 보내지 않았어요. 다시 눌러주세요");
         return NO;
     };
     NSArray* accounts = @[
         @[ aID ?: @"", UPAName(), @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1], @(aFollow) ],
         @[ bID ?: @"", UPBName(), @"B", UPBColor(), @(bFollow) ],
     ];
+    // 7.3.151: rows stay (the sheet is not closed by them), so A and then B
+    // can be followed or unfollowed in one sheet. Each tap reads the account's
+    // state again and runs the checks again. A row whose state is not known is
+    // off, and B's comes on when the lookup already under way answers.
+    __block NSUInteger token = 0;  // the sheet, once it is up
     NSMutableArray* rows = [NSMutableArray array];
-    for (NSArray* entry in accounts) {
-        NSString* accountID = entry[0];
-        NSString* name = entry[1];
-        NSString* letter = entry[2];
-        UPFollow state = (UPFollow)[entry[4] integerValue];
+    NSMutableArray<NSString*>* shape = [NSMutableArray array];
+    for (NSArray* info in accounts) {
+        NSUInteger index = rows.count;
+        NSString* accountID = info[0];
+        NSString* name = info[1];
+        NSString* letter = info[2];
+        UPFollow state = (UPFollow)[info[4] integerValue];
         BOOL viaX = buttonID.length && [buttonID isEqualToString:accountID];
-        NSString* buttonTitle = state == UPFollowYes ? @"언팔로우" : (state == UPFollowNo ? @"팔로우" : @"확인 안 됨");
-        [rows addObject:@{
-            @"title" : name,
-            @"detail" : [NSString stringWithFormat:@"%@ 계정 · %@", letter, UPFollowText(state)],
-            @"image" : UPAvatar(accountID, letter, entry[3]),
-            @"button" : buttonTitle,
-            @"buttonStyle" : state == UPFollowYes ? @"outline" : (state == UPFollowNo ? @"filled" : @"disabled"),
-            @"action" : ^{
-                if (state == UPFollowUnknown || !same()) {
-                    if (state == UPFollowUnknown) UPNotice([NSString stringWithFormat:@"%@의 팔로우 상태를 몰라서 보내지 않았어요", name]);
-                    return;
-                }
-                BOOL follow = state != UPFollowYes;
-                if (viaX) {
-                    // X's own button action: the button's account, which is this one.
-                    UPLog([NSString stringWithFormat:@"%@ %lld as %@ via X", follow ? @"follow" : @"unfollow", userID, letter]);
-                    gFollowSheetBypass = YES;
-                    xPath();
-                    gFollowSheetBypass = NO;
-                    UPRememberFollow(accountID, userID, follow);
-                } else {
-                    id account = [letter isEqualToString:@"A"] ? UPCurrentAccount() : UPBAccount();
-                    UPFollowWith(account, accountID, name, follow, userID, reference);
-                }
-                refresh();
+        // X's own action stays only when it is the button's toggle; a
+        // one-way action (the older control) closes the sheet as before.
+        BOOL stay = !viaX || xToggles;
+        BOOL pending = NO;
+        if (state == UPFollowUnknown && [accountID isEqualToString:bID]) {
+            pending = UPWaitForBFollow(userID, ^{
+                UPFollow answered = UPFollowStateFor(accountID, userID, contextID, user, NULL);
+                NFBUpdateAccountSheetRow(token, index, UPFollowRowChanges(letter, answered, nil));
+                UPLog([NSString stringWithFormat:@"follow sheet: B's lookup answered for %lld -> row B=%ld", userID, (long)answered]);
+            });
+        }
+        __block NSUInteger taps = 0;  // a later tap on the row retires an earlier tap's read-backs
+        void (^action)(void) = ^{
+            gSheetUser = 0;  // answered
+            if (!same()) return;
+            NSUInteger thisTap = ++taps;
+            NSString* source = nil;
+            UPFollow now = UPFollowStateFor(accountID, userID, contextID, user, &source);
+            if (now == UPFollowUnknown) {
+                UPBlockNotice([NSString stringWithFormat:@"%@의 팔로우 상태를 몰라서 보내지 않았어요. 프로필을 다시 열어서 해주세요", name]);
+                return;
             }
-        }];
+            BOOL follow = now != UPFollowYes;
+            BOOL sent = YES;
+            if (viaX) {
+                // X's own button action: the button's account, which is this one.
+                UPLog([NSString stringWithFormat:@"%@ %lld as %@ via X", follow ? @"follow" : @"unfollow", userID, letter]);
+                // 7.3.151: no second question from X, and X's action is
+                // let through for this button.
+                UPQuietConfirm(weakButton, entry);
+                UPAllowX(weakButton);
+                gFollowSheetBypass = YES;
+                xPath();
+                gFollowSheetBypass = NO;
+                UPRememberFollow(accountID, userID, follow);
+            } else {
+                id account = [letter isEqualToString:@"A"] ? UPCurrentAccount() : UPBAccount();
+                sent = UPFollowWith(account, accountID, name, follow, userID, reference);
+            }
+            refresh();
+            if (!stay) return;
+            UPFollow after = UPFollowStateFor(accountID, userID, contextID, user, NULL);
+            if (!viaX) {
+                // Our own call: this file's record of it, read again.
+                NFBUpdateAccountSheetRow(token, index, UPFollowRowChanges(letter, after, nil));
+                UPLog([NSString stringWithFormat:@"stay tap: %@ %lld as %@ (direct, sent=%d) -> recomputed %@=%ld (was %ld from %@)",
+                                                 follow ? @"follow" : @"unfollow", userID, letter, sent, letter, (long)after, (long)now, source]);
+                return;
+            }
+            // X's own action: what it did is read back from the button's user
+            // a moment later, not assumed; until it shows, the row says so.
+            NFBUpdateAccountSheetRow(token, index, UPFollowRowChanges(letter, after, @"확인 중…"));
+            UPFollow expected = follow ? UPFollowYes : UPFollowNo;
+            __block BOOL confirmed = NO;
+            NSArray<NSNumber*>* delays = @[ @0.3, @1.0, @2.5 ];
+            for (NSNumber* delay in delays) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (confirmed || taps != thisTap) return;
+                    UIView* shown = weakButton;
+                    id freshUser = nil;
+                    long long freshID = shown ? UPButtonUser(shown, &freshUser, NULL) : 0;
+                    UPFollow real = UPFollowUnknown;
+                    if (freshID == userID && freshUser && contextID.length && [contextID isEqualToString:accountID]) {
+                        real = UPFollowFromUser(freshUser, NULL);
+                    }
+                    BOOL lastTry = delay == delays.lastObject;
+                    if (real == expected) {
+                        confirmed = YES;
+                        NFBUpdateAccountSheetRow(token, index, UPFollowRowChanges(letter, real, nil));
+                    } else if (lastTry) {
+                        NFBUpdateAccountSheetRow(token, index, UPFollowRowChanges(letter, after, @"반영됐는지 확인 안 됨"));
+                    }
+                    if (confirmed || lastTry) {
+                        UPLog([NSString stringWithFormat:@"stay tap: %@ %lld as %@ via X -> read back %@=%ld after %.1fs (expected %ld, %@)",
+                                                         follow ? @"follow" : @"unfollow", userID, letter, letter, (long)real, delay.doubleValue,
+                                                         (long)expected, confirmed ? @"confirmed" : @"not confirmed"]);
+                        refresh();
+                    }
+                });
+            }
+        };
+        NSMutableDictionary* row = [NSMutableDictionary dictionary];
+        row[@"title"] = name;
+        row[@"image"] = UPAvatar(accountID, letter, info[3]);
+        row[@"stay"] = @(stay);
+        row[@"action"] = action;
+        [row addEntriesFromDictionary:UPFollowRowChanges(letter, state, pending ? @"확인 중…" : nil)];
+        [rows addObject:row];
+        [shape addObject:[NSString stringWithFormat:@"%@=%ld%@%@%@", letter, (long)state, state == UPFollowUnknown ? @" off" : @"",
+                                                    pending ? @" waiting for B's lookup" : @"", stay ? @" stay" : @" closes"]];
     }
-    NFBPresentAccountSheet(@"팔로우", @"계정별로 팔로우 상태를 바꿀 수 있어요", rows);
+    NFBPresentAccountSheet(@"어느 계정의 팔로우를 바꿀까요?", nil, rows);
+    token = NFBAccountSheetToken();
+    UPLog([NSString stringWithFormat:@"sheet shown: follow rows with state + pill, from %@ (%@)", entry, [shape componentsJoinedByString:@", "]]);
     UPLog([NSString stringWithFormat:@"follow sheet for %lld (A=%ld %@, B=%ld %@, button %@, context %@)", userID, (long)aFollow, aSource,
                                      (long)bFollow, bSource, buttonID ?: @"-", contextID ?: @"-"]);
+    // 7.3.151: X's own action (and its confirmation) did not run for this tap.
+    gSheetUser = userID;
+    gSheetAt = CFAbsoluteTimeGetCurrent();
+    gXAllowedButton = nil;
+    UPLog([NSString stringWithFormat:@"X confirm suppressed at %@ for %lld (confirmUnfollow=%lld, state=%lld)", entry, userID,
+                                     UPNumber(button, @"confirmUnfollow"),
+                                     [button respondsToSelector:NSSelectorFromString(@"followState")] ? UPNumber(button, @"followState")
+                                                                                                    : UPNumber(button, @"state")]);
     return YES;
 }
 
 %hook TUIFollowButtonV2
 
 - (void)buttonTapped {
-    if (UPShowFollowSheet((UIView*)self, ^{
+    if (UPShowFollowSheet((UIView*)self, @"V2 buttonTapped", YES, ^{
             %orig;
         }))
         return;
+    // The sheet did not apply (third account, own account, mode off): X's own.
+    UPAllowX((UIView*)self);
+    %orig;
+}
+
+// 7.3.151: X asks this before it performs the button's action. Its
+// confirmation lives in Swift (FollowButtonV2.ViewModel) and is not in the
+// dump, so this is where an action not chosen in the sheet is stopped.
+- (BOOL)shouldPerform:(long long)action {
+    if (!UPXActionAllowed((UIView*)self, @"V2 shouldPerform", action)) return NO;
+    return %orig;
+}
+
+- (void)notifyWillPerform:(long long)action {
+    if (UPActive()) UPLog([NSString stringWithFormat:@"V2 notifyWillPerform action %lld (sheet choice=%d)", action, gFollowSheetBypass]);
+    %orig;
+}
+
+%end
+
+// 7.3.151: the older follow control (user rows that still use it). Its
+// -_unfollowUser:event: is what asks "unfollow?" and then calls
+// -_doUnfollowUserWithEvent:; the sheet replaces the question, and the
+// sheet's choice goes straight to the second one.
+%hook TUIFollowControl
+
+- (void)_unfollowUser:(id)sender event:(id)event {
+    if (UPShowFollowSheet((UIView*)self, @"V1 _unfollowUser", NO, ^{
+            SEL selector = NSSelectorFromString(@"_doUnfollowUserWithEvent:");
+            if (![(UIView*)self respondsToSelector:selector]) {
+                UPLog(@"V1 via X stopped: no _doUnfollowUserWithEvent:");
+                UPBlockNotice(@"이 X 버전에서는 이 버튼으로 보낼 수 없어요. 프로필의 팔로우 버튼으로 해주세요");
+                return;
+            }
+            @try {
+                ((void (*)(id, SEL, id))objc_msgSend)(self, selector, event);
+            } @catch (NSException* exception) {
+                UPLog([NSString stringWithFormat:@"V1 via X threw %@", exception.name]);
+            }
+        }))
+        return;
+    %orig;
+}
+
+- (void)_followUser:(id)sender event:(id)event {
+    if (UPShowFollowSheet((UIView*)self, @"V1 _followUser", NO, ^{
+            %orig;
+        }))
+        return;
+    %orig;
+}
+
+%end
+
+// 7.3.151: every unfollow that reaches an account while the mode is active is
+// logged, and one that X's own confirmation sent behind an unanswered sheet is
+// not sent.
+%hook TFNTwitterAccount
+
+- (void)unfollowUserWithUserReference:(id)reference
+                                   impressionID:(id)impressionID
+                                       isEarned:(BOOL)isEarned
+    associatedStatusForLeaveBehindConfirmation:(id)status
+                                  responseBlock:(id)responseBlock {
+    if (UPUnfollowStopped(self, reference, @"leaveBehind")) return;
+    %orig;
+}
+
+- (void)unfollowUserWithUserReference:(id)reference
+                         impressionID:(id)impressionID
+                             isEarned:(BOOL)isEarned
+                     associatedStatus:(id)status
+                              context:(long long)context
+                        responseBlock:(id)responseBlock {
+    if (UPUnfollowStopped(self, reference, @"context")) return;
     %orig;
 }
 
@@ -940,7 +1242,8 @@ NSString* NFBUnifiedProfileDebugText(void) {
     [out appendFormat:@"active=%d B=%@ visibleProfile=%@\n", UPActive(), UPBAccount() ? @"found" : @"missing",
                       gVisibleProfile ? NSStringFromClass([gVisibleProfile class]) : @"-"];
     [out appendFormat:@"last: %@\n", gProfileState];
-    [out appendFormat:@"B follow known for %lu users\n", (unsigned long)gBFollowByUser.count];
+    [out appendFormat:@"B follow known for %lu users, lookups under way %lu (rows waiting %lu)\n", (unsigned long)gBFollowByUser.count,
+                      (unsigned long)gBFollowPending.count, (unsigned long)gBFollowWaiters.count];
     @synchronized([NSObject class]) {
         [out appendFormat:@"%@\n", gProfileLog.count ? [gProfileLog componentsJoinedByString:@"\n"] : @"(no events)"];
     }

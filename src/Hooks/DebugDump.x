@@ -26,6 +26,12 @@ extern NSString* NFBUnifiedProbeText(void);
 extern NSString* NFBUnifiedTimelineDebugText(void);
 extern NSString* NFBUnifiedNotificationsDebugText(void);
 extern NSString* NFBUnifiedProfileDebugText(void);
+extern NSString* NFBUnifiedGuardDebugText(void);
+extern NSString* NFBUnifiedSheetDebugText(void);
+extern NSString* NFBUnifiedDMDebugText(void);
+extern NSString* NFBUnifiedHomeSignDebugText(void);
+extern NSString* NFBUnifiedHistoryDebugText(void);
+extern NSString* NFBUnifiedQuickSettingsDebugText(void);
 extern void NFBUnifiedProbeKick(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
@@ -874,6 +880,12 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
     [out appendFormat:@"== UNIFIED TIMELINE ==%c%@%c", 10, NFBUnifiedTimelineDebugText(), 10];
     [out appendFormat:@"== UNIFIED PROFILE ==%c%@%c", 10, NFBUnifiedProfileDebugText(), 10];
+    [out appendFormat:@"== UNIFIED GUARD ==%c%@%c", 10, NFBUnifiedGuardDebugText(), 10];
+    [out appendFormat:@"== UNIFIED SHEET ==%c%@%c", 10, NFBUnifiedSheetDebugText(), 10];
+    [out appendFormat:@"== UNIFIED DM ==%c%@%c", 10, NFBUnifiedDMDebugText(), 10];
+    [out appendFormat:@"== UNIFIED HOME SIGN ==%c%@%c", 10, NFBUnifiedHomeSignDebugText(), 10];
+    [out appendFormat:@"== UNIFIED HISTORY ==%c%@%c", 10, NFBUnifiedHistoryDebugText(), 10];
+    [out appendFormat:@"== UNIFIED QUICK SETTINGS ==%c%@%c", 10, NFBUnifiedQuickSettingsDebugText(), 10];
     [out appendFormat:@"== UNIFIED NOTIFICATIONS ==%c%@%c", 10, NFBUnifiedNotificationsDebugText(), 10];
     [out appendFormat:@"== UNIFIED TIMELINE PROBE ==%c%@%c", 10, NFBUnifiedProbeText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
@@ -1016,8 +1028,9 @@ static void DumpFromVolumeButton(void) {
     if (!window || ![BHTSettings boolForKey:@"kemo_shake_dump"]) {
         return;
     }
-    // Starts the other account's timeline refresh; the second dump below shows the result.
-    NFBUnifiedProbeKick();
+    // 7.3.151: the 7.3.132 probe is no longer started here. It refreshed the
+    // home timeline of the first account that is not in use on every dump,
+    // which on a device with several accounts was a third account, not B.
     PerformDump(window);
 
     // Menus and sheets can't be open while the first dump is made, so a second one follows

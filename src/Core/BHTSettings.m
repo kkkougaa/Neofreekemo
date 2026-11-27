@@ -447,6 +447,13 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_unified_exp"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_unified_dock_order_button",
+                        @"titleKey": @"KEMO_UNIFIED_DOCK_ORDER_TITLE",
+                        @"action": @"openUnifiedDockOrder:",
+                        @"parentKey": @"kemo_unified_exp"
+                    },
+                    @{
                         @"key": @"kemo_draft_autosave",
                         @"default": @YES,
                         @"type": @"toggle"

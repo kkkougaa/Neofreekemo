@@ -576,19 +576,16 @@
 "KEMO_CLICKER_REMIND_TO" = "To";
 
 "KEMO_UNIFIED_EXP_TITLE" = "A/B unified timeline (experiment)";
-"KEMO_UNIFIED_EXP_DETAIL" = "Mixes the Following timelines of accounts A and B. Pick \"A/B\" at the bottom account dock to turn it on; picking any other account turns it off. Tweets only B has are answered as B; tweets both have ask which account.";
+"KEMO_UNIFIED_EXP_DETAIL" = "Pick \"Unified account\" in the account dock to mix the timelines of A and B; chats are A's only. A post only B sees reacts as B; on a post both see, a tap goes as A and a long press on like or repost asks which account.";
 "KEMO_UNIFIED_B_TITLE" = "Account B";
 "KEMO_UNIFIED_B_NONE" = "None";
-"KEMO_UNIFIED_B_MESSAGE" = "B's Following timeline is mixed into A's. B cannot be the same account as A.";
 "KEMO_UNIFIED_B_ACTIVE" = "in use";
 "KEMO_UNIFIED_B_CLEAR" = "Clear";
 "KEMO_UNIFIED_A_TITLE" = "Account A";
 "KEMO_UNIFIED_A_NONE" = "Account in use";
-"KEMO_UNIFIED_A_MESSAGE" = "Picking A/B switches to this account. Without one, the account in use is A.";
 "KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "Always ask which account";
-"KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "Also asks on tweets only A has when you like, repost or reply. Tweets only B has always go as B.";
-"KEMO_UNIFIED_B_COLOR_TITLE" = "Colour of B's tweets";
-"KEMO_UNIFIED_B_COLOR_MESSAGE" = "Used for the display name and the folded top-left corner of tweets only B has.";
+"KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "Also asks on posts only A sees when you like, repost, reply or bookmark. Posts only B sees always go as B.";
+"KEMO_UNIFIED_B_COLOR_TITLE" = "Colour of posts only B sees";
 "KEMO_UNIFIED_COLOR_ORANGE" = "Orange";
 "KEMO_UNIFIED_COLOR_BLUE" = "Blue";
 "KEMO_UNIFIED_COLOR_GREEN" = "Green";
@@ -598,3 +595,8 @@
 "KEMO_UNIFIED_COLOR_THEME" = "Theme colour";
 "KEMO_UNIFIED_COLOR_PICK" = "Pick a colour…";
 "KEMO_UNIFIED_COLOR_CUSTOM" = "Custom";
+"KEMO_UNIFIED_CHOSEN" = "Selected";
+"KEMO_UNIFIED_DOCK_ORDER_TITLE" = "Dock order";
+"KEMO_UNIFIED_ACCOUNT_NAME" = "Unified account";
+"KEMO_UNIFIED_ON" = "On";
+"KEMO_UNIFIED_OFF" = "Off";

@@ -8,8 +8,14 @@
 //    carry an account picture, a name, a detail line, an optional pill button
 //    on the right, and an action. 7.3.150: X's look (Chirp, a heavy title,
 //    40pt pictures, black/white pill buttons, an outlined pill to cancel).
-//  - NFBShowNotice(): a short notice at the bottom like X's own toasts (a glass
-//    capsule above the tab bar), not a dark box in the middle.
+//    7.3.151: a row marked "stay" runs its action and leaves the sheet up (the
+//    caller then changes that row in place), so A and B can both be acted for
+//    in one sheet; such a sheet's footer says "닫기", not "취소".
+//  - NFBShowNotice(): a short notice. 7.3.151: pushed through X's own toaster
+//    (TFNToaster / TFNInformationToast), so it is X's black toast from the top;
+//    the glass capsule above the tab bar is only the fallback.
+//  - NFBShowBlockNotice(): the same notice with a warning haptic, for every
+//    "this was stopped" message of the unified mode (7.3.151).
 //
 
 #import "HookHelpers.h"
@@ -63,6 +69,112 @@ static UIVisualEffect* NFBGlass(void) {
 
 static const NSInteger kNoticeTag = 0x4E464E;  // "NFN"
 
+// Only a lock token for the notice log.
+@interface NFBNoticeLogLock : NSObject
+@end
+@implementation NFBNoticeLogLock
+@end
+
+// 7.3.151: which path each notice took (X's toaster or our own capsule) and
+// what was found at runtime; printed by NFBUnifiedSheetDebugText().
+static NSMutableArray<NSString*>* gNoticeLog;
+static NSUInteger gNoticeXCount;
+static NSUInteger gNoticeFallbackCount;
+static NSUInteger gNoticeBlockCount;  // notices shown through NFBShowBlockNotice()
+// 7.3.151: each sheet's shape as presented and each tap on a "stay" row.
+static NSMutableArray<NSString*>* gSheetLog;
+
+static void NFBNoticeLog(NSString* line) {
+    @synchronized([NFBNoticeLogLock class]) {
+        if (!gNoticeLog) gNoticeLog = [NSMutableArray array];
+        [gNoticeLog addObject:line];
+        if (gNoticeLog.count > 12) [gNoticeLog removeObjectAtIndex:0];
+    }
+}
+
+static void NFBSheetLog(NSString* line) {
+    @synchronized([NFBNoticeLogLock class]) {
+        if (!gSheetLog) gSheetLog = [NSMutableArray array];
+        [gSheetLog addObject:line];
+        if (gSheetLog.count > 12) [gSheetLog removeObjectAtIndex:0];
+    }
+}
+
+// 7.3.151: hand the text to X's own toaster so the notice is X's black toast
+// that drops from the top (X's queue, position and dismissal), not a look-alike.
+// From the 12.44 dump (XServiceLibraries): +[TFNToaster defaultToaster] @16@0:8,
+// -[TFNToaster pushToast:] v24@0:8@16, -[TFNToaster toastViewController] @16@0:8,
+// -[TFNInformationToast initWithMessageText:] @24@0:8@16 (no icon: the plain one).
+// Returns NO, with the reason logged, when a piece is missing or the call throws.
+static BOOL NFBShowXToast(NSString* text) {
+    NSString* reason = nil;
+    @try {
+        Class toasterClass = NSClassFromString(@"TFNToaster");
+        Class toastClass = NSClassFromString(@"TFNInformationToast");
+        SEL defaultToaster = NSSelectorFromString(@"defaultToaster");
+        SEL pushToast = NSSelectorFromString(@"pushToast:");
+        SEL initWithMessageText = NSSelectorFromString(@"initWithMessageText:");
+        SEL toastViewController = NSSelectorFromString(@"toastViewController");
+        Method pushMethod = toasterClass ? class_getInstanceMethod(toasterClass, pushToast) : NULL;
+        Method initMethod = toastClass ? class_getInstanceMethod(toastClass, initWithMessageText) : NULL;
+        if (!toasterClass) {
+            reason = @"no class TFNToaster";
+        } else if (!toastClass) {
+            reason = @"no class TFNInformationToast";
+        } else if (!class_getClassMethod(toasterClass, defaultToaster)) {
+            reason = @"no +[TFNToaster defaultToaster]";
+        } else if (!pushMethod || method_getNumberOfArguments(pushMethod) != 3) {
+            reason = @"no -[TFNToaster pushToast:]";
+        } else if (!initMethod || method_getNumberOfArguments(initMethod) != 3) {
+            reason = @"no -[TFNInformationToast initWithMessageText:]";
+        } else {
+            id toaster = ((id (*)(id, SEL))objc_msgSend)(toasterClass, defaultToaster);
+            if (!toaster) {
+                reason = @"defaultToaster is nil";
+            } else if (class_getInstanceMethod(toasterClass, toastViewController) &&
+                       !((id (*)(id, SEL))objc_msgSend)(toaster, toastViewController)) {
+                // Nothing would draw the toast; a notice must not be lost.
+                reason = @"toaster has no toastViewController";
+            } else {
+                id toast = ((id (*)(id, SEL, id))objc_msgSend)([toastClass alloc], initWithMessageText, text);
+                if (!toast) {
+                    reason = @"initWithMessageText: returned nil";
+                } else {
+                    ((void (*)(id, SEL, id))objc_msgSend)(toaster, pushToast, toast);
+                    gNoticeXCount++;
+                    NFBNoticeLog([NSString stringWithFormat:@"X toast: +[TFNToaster defaultToaster]=%@ pushToast: <- %@ (initWithMessageText:) \"%@\"",
+                                                            NSStringFromClass([toaster class]), NSStringFromClass([toast class]), text]);
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException* exception) {
+        reason = [NSString stringWithFormat:@"threw %@: %@", exception.name, exception.reason];
+    }
+    gNoticeFallbackCount++;
+    NFBNoticeLog([NSString stringWithFormat:@"fallback (%@) \"%@\"", reason ?: @"?", text]);
+    return NO;
+}
+
+NSString* NFBUnifiedSheetDebugText(void) {
+    NSMutableString* out = [NSMutableString string];
+    Class toasterClass = NSClassFromString(@"TFNToaster");
+    Class toastClass = NSClassFromString(@"TFNInformationToast");
+    [out appendFormat:@"notice: X toast %lu, fallback %lu, blocked (warning haptic) %lu\n", (unsigned long)gNoticeXCount,
+                      (unsigned long)gNoticeFallbackCount, (unsigned long)gNoticeBlockCount];
+    [out appendFormat:@"TFNToaster=%d defaultToaster=%d pushToast:=%d TFNInformationToast=%d initWithMessageText:=%d\n",
+                      toasterClass != Nil,
+                      toasterClass && class_getClassMethod(toasterClass, NSSelectorFromString(@"defaultToaster")) != NULL,
+                      toasterClass && class_getInstanceMethod(toasterClass, NSSelectorFromString(@"pushToast:")) != NULL,
+                      toastClass != Nil,
+                      toastClass && class_getInstanceMethod(toastClass, NSSelectorFromString(@"initWithMessageText:")) != NULL];
+    @synchronized([NFBNoticeLogLock class]) {
+        [out appendFormat:@"%@\n", gNoticeLog.count ? [gNoticeLog componentsJoinedByString:@"\n"] : @"(no notices)"];
+        [out appendFormat:@"sheets:\n%@\n", gSheetLog.count ? [gSheetLog componentsJoinedByString:@"\n"] : @"(no sheets)"];
+    }
+    return out;
+}
+
 void NFBShowNotice(NSString* text) {
     if (text.length == 0) return;
     if (![NSThread isMainThread]) {
@@ -71,6 +183,8 @@ void NFBShowNotice(NSString* text) {
         });
         return;
     }
+    // 7.3.151: X's own toast first; the capsule below only when that is not possible.
+    if (NFBShowXToast(text)) return;
     UIWindow* window = NFBKeyWindow();
     if (!window) return;
     [[window viewWithTag:kNoticeTag] removeFromSuperview];
@@ -121,6 +235,24 @@ void NFBShowNotice(NSString* text) {
     });
 }
 
+// 7.3.151: a notice that something was stopped (not sent, not opened): the
+// same toast, with the system's warning haptic so it does not pass for a
+// "sent" one. Every block message of the unified mode goes through here.
+void NFBShowBlockNotice(NSString* text) {
+    if (text.length == 0) return;
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NFBShowBlockNotice(text);
+        });
+        return;
+    }
+    UINotificationFeedbackGenerator* haptic = [UINotificationFeedbackGenerator new];
+    [haptic prepare];
+    [haptic notificationOccurred:UINotificationFeedbackTypeWarning];
+    gNoticeBlockCount++;
+    NFBShowNotice(text);
+}
+
 // MARK: - Account sheet
 
 @interface NFBSheetRow : UIControl
@@ -137,14 +269,79 @@ void NFBShowNotice(NSString* text) {
 @property (nonatomic, copy) NSString* titleText;
 @property (nonatomic, copy) NSString* messageText;
 @property (nonatomic, strong) NSArray<NSDictionary*>* rows;
+@property (nonatomic, assign) CFAbsoluteTime lastStayTap;
+- (void)updateRowAtIndex:(NSUInteger)index changes:(NSDictionary*)changes;
 @end
 
 static const CGFloat kSheetRowHeight = 64;
+// 7.3.151: a row's detail line and pill, found again by NFBUpdateAccountSheetRow().
+static const NSInteger kSheetDetailTag = 0x4E4644;  // "NFD"
+static const NSInteger kSheetPillTag = 0x4E4650;    // "NFP"
 
 @implementation NFBAccountSheetController
 
+// The pill's text, colours and width for a style; also restyles one already shown.
+- (void)stylePill:(UILabel*)pill title:(NSString*)title style:(NSString*)style {
+    pill.text = title;
+    pill.backgroundColor = UIColor.clearColor;
+    pill.layer.borderWidth = 0;
+    if ([style isEqualToString:@"filled"]) {
+        pill.backgroundColor = [UIColor labelColor];
+        pill.textColor = [UIColor systemBackgroundColor];
+    } else if ([style isEqualToString:@"outline"]) {
+        pill.textColor = [UIColor labelColor];
+        pill.layer.borderWidth = 1;
+        pill.layer.borderColor = [UIColor separatorColor].CGColor;
+    } else {
+        pill.textColor = [UIColor tertiaryLabelColor];
+        pill.layer.borderWidth = 1;
+        pill.layer.borderColor = [UIColor quaternaryLabelColor].CGColor;
+    }
+    CGFloat width = MAX(ceil([title sizeWithAttributes:@{NSFontAttributeName : pill.font}].width) + 32, 76);
+    for (NSLayoutConstraint* constraint in pill.constraints) {
+        if (constraint.firstItem == pill && constraint.firstAttribute == NSLayoutAttributeWidth && !constraint.secondItem) constraint.constant = width;
+    }
+}
+
+// 7.3.151: change a shown row's detail line and pill in place (keys: detail,
+// button, buttonStyle, disabled). The row's action stays; a "stay" row's
+// action reads the state again when it is tapped.
+- (void)updateRowAtIndex:(NSUInteger)index changes:(NSDictionary*)changes {
+    if (index >= self.rows.count || changes.count == 0) return;
+    NSMutableDictionary* row = [self.rows[index] mutableCopy];
+    for (NSString* key in @[ @"detail", @"button", @"buttonStyle", @"disabled" ]) {
+        if (changes[key]) row[key] = changes[key];
+    }
+    NSMutableArray<NSDictionary*>* rows = [self.rows mutableCopy];
+    rows[index] = row;
+    self.rows = rows;
+    if (!self.isViewLoaded) return;
+    UIStackView* stack = (UIStackView*)self.view.subviews.firstObject;
+    if (![stack isKindOfClass:[UIStackView class]]) return;
+    for (UIView* control in stack.arrangedSubviews) {
+        if (![control isKindOfClass:[NFBSheetRow class]] || control.tag != (NSInteger)index) continue;
+        BOOL disabled = [row[@"disabled"] boolValue];
+        if ([control isKindOfClass:[UIControl class]]) ((UIControl*)control).enabled = !disabled;
+        control.alpha = disabled ? 0.5 : 1;
+        control.accessibilityTraits = UIAccessibilityTraitButton | (disabled ? UIAccessibilityTraitNotEnabled : 0);
+        [UIView transitionWithView:control duration:0.2 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
+            for (UIView* child in control.subviews) {
+                if (![child isKindOfClass:[UILabel class]]) continue;
+                if (child.tag == kSheetDetailTag) {
+                    ((UILabel*)child).text = row[@"detail"];
+                } else if (child.tag == kSheetPillTag && [row[@"button"] length]) {
+                    [self stylePill:(UILabel*)child title:row[@"button"] style:disabled ? @"disabled" : (row[@"buttonStyle"] ?: @"filled")];
+                }
+            }
+        } completion:nil];
+        control.accessibilityLabel = [NSString stringWithFormat:@"%@, %@ %@", row[@"title"] ?: @"", row[@"detail"] ?: @"", row[@"button"] ?: @""];
+        break;
+    }
+}
+
 - (UIView*)pillWithTitle:(NSString*)title style:(NSString*)style {
     UILabel* pill = [UILabel new];
+    pill.tag = kSheetPillTag;
     pill.text = title;
     pill.textAlignment = NSTextAlignmentCenter;
     pill.font = NFBXFont(14, UIFontWeightBold);
@@ -242,6 +439,7 @@ static const CGFloat kSheetRowHeight = 64;
         [control addSubview:name];
 
         UILabel* detail = [UILabel new];
+        detail.tag = kSheetDetailTag;
         detail.text = row[@"detail"];
         detail.font = NFBXFont(14, UIFontWeightRegular);
         detail.textColor = [UIColor secondaryLabelColor];
@@ -285,9 +483,15 @@ static const CGFloat kSheetRowHeight = 64;
         [stack addArrangedSubview:control];
     }
 
+    // 7.3.151: with rows that keep the sheet up, the footer closes it ("닫기");
+    // "취소" would read as undoing what those rows already sent.
+    BOOL stays = NO;
+    for (NSDictionary* row in self.rows) {
+        if ([row[@"stay"] boolValue]) stays = YES;
+    }
     UIView* footer = [UIView new];
     UIButton* cancel = [UIButton buttonWithType:UIButtonTypeSystem];
-    [cancel setTitle:@"취소" forState:UIControlStateNormal];
+    [cancel setTitle:stays ? @"닫기" : @"취소" forState:UIControlStateNormal];
     [cancel setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
     cancel.titleLabel.font = NFBXFont(16, UIFontWeightBold);
     cancel.layer.cornerRadius = 22;
@@ -326,6 +530,19 @@ static const CGFloat kSheetRowHeight = 64;
     NSDictionary* row = control.tag < (NSInteger)self.rows.count ? self.rows[(NSUInteger)control.tag] : nil;
     if ([row[@"disabled"] boolValue]) return;
     void (^action)(void) = row[@"action"];
+    if ([row[@"stay"] boolValue]) {
+        // 7.3.151: the sheet stays up; the action changes this row through
+        // NFBUpdateAccountSheetRow(). Two taps closer than half a second are
+        // one tap (a second one would undo what the first just sent).
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (now - self.lastStayTap < 0.5) return;
+        self.lastStayTap = now;
+        [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+        NFBSheetLog([NSString stringWithFormat:@"stay row %ld tapped in \"%@\" (was: %@ / %@)", (long)control.tag, self.titleText ?: @"",
+                                               row[@"detail"] ?: @"-", row[@"button"] ?: @"-"]);
+        if (action) action();
+        return;
+    }
     [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
     [self dismissViewControllerAnimated:YES completion:^{
         if (action) action();
@@ -346,12 +563,48 @@ static UIViewController* NFBSheetTop(void) {
 
 // rows: @{ @"title", @"detail", @"image", @"destructive", @"disabled",
 //          @"button" (pill text on the right), @"buttonStyle" (filled / outline / disabled),
+//          @"stay" (7.3.151: the tap runs the action and the sheet stays up),
 //          @"action" (block) } — all but title optional.
+static __weak NFBAccountSheetController* gShownSheet;
+static NSUInteger gSheetToken;
+
+// 7.3.151: names the sheet presented last, for NFBUpdateAccountSheetRow().
+NSUInteger NFBAccountSheetToken(void) {
+    return gSheetToken;
+}
+
+// 7.3.151: change a row of the sheet `token` names after it is shown (keys:
+// detail, button, buttonStyle, disabled). Nothing happens when that sheet is
+// gone or another one has been presented since.
+void NFBUpdateAccountSheetRow(NSUInteger token, NSUInteger index, NSDictionary* changes) {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NFBUpdateAccountSheetRow(token, index, changes);
+        });
+        return;
+    }
+    NFBAccountSheetController* sheet = gShownSheet;
+    if (!sheet || token != gSheetToken || sheet.isBeingDismissed) return;
+    [sheet updateRowAtIndex:index changes:changes];
+}
+
+// (row keys: see above the token functions)
 void NFBPresentAccountSheet(NSString* title, NSString* message, NSArray<NSDictionary*>* rows) {
     NFBAccountSheetController* sheet = [NFBAccountSheetController new];
+    gShownSheet = sheet;
+    gSheetToken++;
     sheet.titleText = title;
     sheet.messageText = message;
     sheet.rows = rows;
+    NSUInteger stayRows = 0, pillRows = 0, offRows = 0;
+    for (NSDictionary* row in rows) {
+        if ([row[@"stay"] boolValue]) stayRows++;
+        if ([row[@"button"] length]) pillRows++;
+        if ([row[@"disabled"] boolValue]) offRows++;
+    }
+    NFBSheetLog([NSString stringWithFormat:@"sheet #%lu \"%@\": %lu rows (pill %lu, stay %lu, disabled %lu), footer %@", (unsigned long)gSheetToken,
+                                           title ?: @"", (unsigned long)rows.count, (unsigned long)pillRows, (unsigned long)stayRows,
+                                           (unsigned long)offRows, stayRows ? @"닫기" : @"취소"]);
     sheet.modalPresentationStyle = UIModalPresentationPageSheet;
     UISheetPresentationController* presentation = sheet.sheetPresentationController;
     if (presentation) {

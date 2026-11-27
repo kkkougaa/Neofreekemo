@@ -574,7 +574,16 @@ static NSInteger CurrentBadgeCount(id account, UIWindow* window) {
     return seen ? seen.integerValue : 0;
 }
 
+// 7.3.151: B's notifications seen inside the unified notifications tab count
+// as checked (UnifiedNotifications.x): 0 until B's number next changes; -1
+// when it has nothing to say.
+extern NSInteger NFBUnifiedNotificationsBadgeOverride(id account);
+
 static NSInteger BadgeCountFor(id account) {
+    NSInteger unifiedSeen = NFBUnifiedNotificationsBadgeOverride(account);
+    if (unifiedSeen >= 0) {
+        return unifiedSeen;
+    }
     NSString* key = AccountKey(account);
     NSNumber* seen = key ? SheetCounts()[key] : nil;
     if (seen) {
@@ -655,10 +664,78 @@ static NSString* DockSwitchFooter(void) {
     return @"Only accounts switched on appear in the dock. Switch to the others from the profile icon at the top left.";
 }
 
+// 7.3.151: the unified account ("A/B", UnifiedTimeline.x) is one more entry of
+// the order: it can be dragged anywhere in the order editor and switched out
+// of the dock like an account, so A and B can be left out and only the unified
+// circle kept. In the saved order and in the hidden list it is this key; in
+// the editor's list it is this very string object.
+static NSString* const kUnifiedOrderKey = @"nfb.unified";
+
+extern BOOL NFBUnifiedDockPair(id* outA, id* outB);
+
+static BOOL IsUnifiedEntry(id entry) {
+    return entry == kUnifiedOrderKey;
+}
+
+static NSString* EntryKey(id entry) {
+    return IsUnifiedEntry(entry) ? kUnifiedOrderKey : AccountKey(entry);
+}
+
+static BOOL UnifiedHiddenFromDock(void) {
+    return [[[NSUserDefaults standardUserDefaults] arrayForKey:kDockHiddenKey] containsObject:kUnifiedOrderKey];
+}
+
+static void SetUnifiedHiddenFromDock(BOOL hide) {
+    NSMutableArray* hidden =
+        [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:kDockHiddenKey] ?: @[]];
+    [hidden removeObject:kUnifiedOrderKey];
+    if (hide) {
+        [hidden addObject:kUnifiedOrderKey];
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:hidden forKey:kDockHiddenKey];
+}
+
+// The accounts in the saved order with the unified entry at its saved place
+// (right before A when it has none yet). Without an A/B pair: the accounts.
+static NSArray* OrderedEntries(NSArray* accounts) {
+    NSArray* ordered = OrderedAccounts(accounts ?: @[]);
+    id unifiedA = nil, unifiedB = nil;
+    if (!NFBUnifiedDockPair(&unifiedA, &unifiedB)) {
+        return ordered;
+    }
+    NSMutableArray* entries = [NSMutableArray arrayWithArray:ordered];
+    NSArray* saved = [[NSUserDefaults standardUserDefaults] arrayForKey:kOrderKey];
+    NSUInteger savedAt = saved ? [saved indexOfObject:kUnifiedOrderKey] : NSNotFound;
+    NSUInteger at = NSNotFound;
+    if (savedAt != NSNotFound) {
+        // Before the first account that the saved order has after it.
+        for (NSUInteger i = savedAt + 1; i < saved.count && at == NSNotFound; i++) {
+            for (NSUInteger j = 0; j < entries.count; j++) {
+                if ([AccountKey(entries[j]) isEqual:saved[i]]) {
+                    at = j;
+                    break;
+                }
+            }
+        }
+        if (at == NSNotFound) {
+            at = entries.count;
+        }
+    } else {
+        at = 0;
+        for (NSUInteger j = 0; j < entries.count; j++) {
+            if (SameAccount(entries[j], unifiedA)) {
+                at = j;
+            }
+        }
+    }
+    [entries insertObject:kUnifiedOrderKey atIndex:MIN(at, entries.count)];
+    return entries;
+}
+
 static void SaveOrder(NSArray* accounts) {
     NSMutableArray* keys = [NSMutableArray array];
     for (id account in accounts) {
-        NSString* key = AccountKey(account);
+        NSString* key = EntryKey(account);
         if (key.length > 0) {
             [keys addObject:key];
         }
@@ -1212,7 +1289,7 @@ static void Tick(void) {
 
 - (instancetype)init {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
-        _accounts = [NSMutableArray arrayWithArray:OrderedAccounts(TwitterAccounts() ?: @[])];
+        _accounts = [NSMutableArray arrayWithArray:OrderedEntries(TwitterAccounts() ?: @[])];
         self.title = OrderTitle();
     }
     return self;
@@ -1252,6 +1329,27 @@ static void Tick(void) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"account"];
     }
     id account = self.accounts[indexPath.row];
+    if (IsUnifiedEntry(account)) {
+        // The unified account: its two accounts' names, a switch like the rest.
+        id unifiedA = nil, unifiedB = nil;
+        NFBUnifiedDockPair(&unifiedA, &unifiedB);
+        cell.textLabel.text = @"통합 계정";
+        cell.detailTextLabel.text =
+            unifiedA && unifiedB ? [NSString stringWithFormat:@"%@ + %@", AccountTitle(unifiedA), AccountTitle(unifiedB)] : nil;
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.imageView.image = [UIImage systemImageNamed:@"person.2.circle.fill"];
+        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+        if (DockOn()) {
+            UISwitch* toggle = [UISwitch new];
+            toggle.on = !UnifiedHiddenFromDock();
+            toggle.tag = indexPath.row;
+            [toggle addTarget:self action:@selector(dockToggled:) forControlEvents:UIControlEventValueChanged];
+            cell.editingAccessoryView = toggle;
+        } else {
+            cell.editingAccessoryView = nil;
+        }
+        return cell;
+    }
     id user = ObjectProp(account, @"user");
     NSString* name = nil;
     for (NSString* selector in @[ @"fullName", @"displayFullName", @"name" ]) {
@@ -1301,6 +1399,10 @@ static void Tick(void) {
     NSIndexPath* path = cell ? [self.tableView indexPathForCell:(UITableViewCell*)cell] : nil;
     NSInteger row = path ? path.row : toggle.tag;
     if (row < 0 || row >= (NSInteger)self.accounts.count) {
+        return;
+    }
+    if (IsUnifiedEntry(self.accounts[row])) {
+        SetUnifiedHiddenFromDock(!toggle.on);
         return;
     }
     SetHiddenFromDock(self.accounts[row], !toggle.on);
@@ -1360,6 +1462,12 @@ static void ShowOrderEditor(void) {
         sheet.prefersGrabberVisible = YES;
     }
     [top presentViewController:nav animated:YES completion:nil];
+}
+
+// 7.3.151: the order editor for the kemo settings page and the unified
+// account's quick settings sheet (UnifiedQuickSettings.x).
+void NFBShowAccountOrderEditor(void) {
+    ShowOrderEditor();
 }
 
 @interface NFBAccountFan : UIView
@@ -2264,6 +2372,13 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 extern BOOL NFBUnifiedDockPair(id* outA, id* outB);
 extern BOOL NFBUnifiedIsActive(void);
 extern void NFBUnifiedDockChose(BOOL unified, id a);
+// 7.3.151: holding the unified circle opens its settings sheet
+// (UnifiedQuickSettings.x). The serial names the press a hold timer belongs
+// to; the flag tells closeWith: to open the sheet once the dock is put away.
+extern void NFBUnifiedPresentQuickSettings(void);
+static const NSTimeInterval kUnifiedHoldDuration = 0.5;
+static NSUInteger gDockPressSerial;
+static BOOL gDockOpensUnifiedSettings;
 
 // Stands in the dock's account list for the "A/B" circle.
 static id UnifiedMarker(void) {
@@ -2362,12 +2477,25 @@ static id UnifiedMarker(void) {
         // switched off in the order editor).
         NSMutableArray* ordered = [NSMutableArray array];
         NSMutableArray* hidden = [NSMutableArray array];
-        for (id account in OrderedAccounts(accounts)) {
-            if (!HiddenFromDock(account)) {
+        // 7.3.151: the unified account ("A/B") is an entry of the same order
+        // (right before A until it is dragged elsewhere in the order editor)
+        // and can be switched out of the dock like an account.
+        id unifiedA = nil, unifiedB = nil;
+        BOOL unifiedPair = NFBUnifiedDockPair(&unifiedA, &unifiedB);
+        BOOL unifiedActive = unifiedPair && NFBUnifiedIsActive();
+        BOOL unifiedShown = unifiedPair && !UnifiedHiddenFromDock();
+        for (id account in OrderedEntries(accounts)) {
+            if (IsUnifiedEntry(account)) {
+                if (unifiedShown) {
+                    [ordered addObject:UnifiedMarker()];
+                }
+            } else if (!HiddenFromDock(account)) {
                 [ordered addObject:account];
-            } else if (SameAccount(account, current)) {
+            } else if (SameAccount(account, current) && !(unifiedActive && unifiedShown)) {
                 // The account in use was left out of the dock: it still gets
                 // a place, first on the left, for as long as it is in use.
+                // Not while the unified account is in use and shown: its
+                // circle is the one in use, so A can stay out of the dock.
                 [ordered insertObject:account atIndex:0];
             } else {
                 [hidden addObject:account];
@@ -2376,17 +2504,6 @@ static id UnifiedMarker(void) {
         // The hidden ones go before the first account, beyond the row's left end.
         _hiddenCount = (NSInteger)hidden.count;
         [ordered insertObjects:hidden atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, hidden.count)]];
-        // "A/B" goes right before A (A/B, A, B, C, ...).
-        id unifiedA = nil, unifiedB = nil;
-        BOOL unifiedActive = NO;
-        if (NFBUnifiedDockPair(&unifiedA, &unifiedB)) {
-            unifiedActive = NFBUnifiedIsActive();
-            NSUInteger at = (NSUInteger)_hiddenCount;
-            for (NSUInteger i = (NSUInteger)_hiddenCount; i < ordered.count; i++) {
-                if (SameAccount(ordered[i], unifiedA)) at = i;
-            }
-            [ordered insertObject:UnifiedMarker() atIndex:at];
-        }
         NSInteger accountCount = (NSInteger)ordered.count;
         // Room on both ends so the first and the last account can reach the middle.
         CGFloat inset = (width - size) / 2.0;
@@ -2815,6 +2932,30 @@ static id UnifiedMarker(void) {
                 }
                 [self squash:bubble down:YES];
             }
+            // 7.3.151: the unified circle held still opens its settings sheet.
+            // The finger lifting, moving or the row scrolling clears `pressed`,
+            // and a new touch takes a new serial, so a tap or a turn of the
+            // dial never gets here. The dock is put away first, like the gear
+            // does for the order editor; the mode is not changed.
+            NSUInteger serial = ++gDockPressSerial;
+            if (bubble.unified) {
+                __weak typeof(self) weakSelf = self;
+                __weak NFBAccountBubble* held = bubble;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kUnifiedHoldDuration * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                                   NFBAccountDock* dock = weakSelf;
+                                   NFBAccountBubble* still = held;
+                                   if (!dock || !still || dock.closing || serial != gDockPressSerial || dock.pressed != still ||
+                                       dock.strip.isDragging || dock.strip.isDecelerating) {
+                                       return;
+                                   }
+                                   dock.pressed = nil;
+                                   [dock squash:still down:NO];
+                                   [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+                                   gDockOpensUnifiedSettings = YES;
+                                   [dock closeWith:nil];
+                               });
+            }
             break;
         }
         case UIGestureRecognizerStateChanged:
@@ -3062,6 +3203,9 @@ static id UnifiedMarker(void) {
         account = nil;
     }
     BOOL openOrder = chosen.settings;
+    // 7.3.151: closing after a hold on the unified circle (dockTouched:).
+    BOOL openUnifiedSettings = gDockOpensUnifiedSettings && !chosen;
+    gDockOpensUnifiedSettings = NO;
     UIView* rootView = self.rounded;
 
     [UIView animateWithDuration:0.34
@@ -3103,6 +3247,9 @@ static id UnifiedMarker(void) {
                 SwitchToAccount(account);
             } else if (openOrder) {
                 ShowOrderEditor();
+            } else if (openUnifiedSettings) {
+                gBubbleLog = @"dock: unified circle held, quick settings";
+                NFBUnifiedPresentQuickSettings();
             }
         }];
 }

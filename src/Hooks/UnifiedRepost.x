@@ -22,13 +22,38 @@
 
 #import "HookHelpers.h"
 
+extern BOOL NFBUnifiedIsActive(void);
+
+// 7.3.151: everything here acts only while the unified mode is in use. B's
+// reposts are remembered only when made from the unified mode (or while it is
+// in use), for the B they were made with, and only the newest kMaxRemembered.
+static const NSUInteger kMaxRemembered = 500;
+static const NSUInteger kMaxPending = 50;
+
 static NSMutableDictionary<NSNumber*, NSNumber*>* gBRepostIDs;  // original ID -> B's repost ID
+static NSMutableArray<NSNumber*>* gBRepostOrder;                // original IDs, oldest first
+static NSString* gBRepostOwner;                                 // the B (user ID) the IDs above belong to
+static NSMutableArray<NSNumber*>* gBPending;                    // originals a repost was sent for as B from the unified mode
+static NSString* gBPendingOwner;
+static NSUInteger gRepostsNotRecorded;                          // B's reposts seen outside the unified mode (left alone)
+static BOOL gRepostActive;
+static CFAbsoluteTime gRepostActiveAt;
 static NSMutableArray<NSString*>* gRepostLog;
+
+// 7.3.151: a lock of this file's own (was [NSObject class], shared process-wide).
+static id URLock(void) {
+    static id lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        lock = [NSObject new];
+    });
+    return lock;
+}
 
 static void URLog(NSString* line) {
     NSDateFormatter* formatter = [NSDateFormatter new];
     formatter.dateFormat = @"HH:mm:ss";
-    @synchronized([NSObject class]) {
+    @synchronized(URLock()) {
         if (!gRepostLog) gRepostLog = [NSMutableArray array];
         [gRepostLog addObject:[NSString stringWithFormat:@"%@ %@", [formatter stringFromDate:[NSDate date]], line]];
         while (gRepostLog.count > 20) [gRepostLog removeObjectAtIndex:0];
@@ -91,11 +116,61 @@ static id UROriginal(id status) {
     return original ?: status;
 }
 
+// Whether the unified mode is in use. It looks at the account in use, so it is
+// read on the main thread and remembered (1s) for callers on other threads.
+static BOOL URModeActive(void) {
+    if ([NSThread isMainThread]) {
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        BOOL stale;
+        @synchronized(URLock()) {
+            stale = now - gRepostActiveAt > 1.0;
+        }
+        if (stale) {
+            BOOL active = NO;
+            @try {
+                active = NFBUnifiedIsActive();
+            } @catch (__unused NSException* exception) {
+            }
+            @synchronized(URLock()) {
+                gRepostActive = active;
+                gRepostActiveAt = now;
+            }
+        }
+    }
+    @synchronized(URLock()) {
+        return gRepostActive;
+    }
+}
+
 BOOL NFBUnifiedUndoRepostAsB(id bAccount, id status, NSString** why) {
+    // 7.3.151: only from the unified mode. This is a button's action, so it
+    // runs on the main thread, where the mode can be read directly.
+    BOOL active = NO;
+    if ([NSThread isMainThread]) {
+        @try {
+            active = NFBUnifiedIsActive();
+        } @catch (__unused NSException* exception) {
+        }
+    }
+    if (!active) {
+        URLog(@"undo stopped: mode inactive");
+        if (why) *why = @"A/B 통합 모드가 아니어서 재게시 취소를 막았어요";
+        return NO;
+    }
     NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
-    // Only B's own account, and never the one in use.
-    if (!bAccount || bID.length == 0 || ![URAccountID(bAccount) isEqualToString:bID] || bAccount == URCurrentAccount()) {
-        URLog(@"undo stopped: not B's account");
+    NSString* sendingID = URAccountID(bAccount);
+    id current = URCurrentAccount();
+    NSString* currentID = URAccountID(current);
+    // Only B's own account as saved right now, and never the one in use (by
+    // object and by user ID; an unknown account in use also stops it). Nothing
+    // below waits, so this holds at the moment of sending.
+    if (!bAccount || bID.length == 0 || sendingID.length == 0 || ![sendingID isEqualToString:bID] || !current ||
+        currentID.length == 0 || bAccount == current || [currentID isEqualToString:sendingID]) {
+        URLog([NSString stringWithFormat:@"undo stopped: not B's account (account=%d savedB=%d same=%d inUseKnown=%d inUse=%d)",
+                                         bAccount != nil, bID.length > 0,
+                                         sendingID.length > 0 && bID.length > 0 && [sendingID isEqualToString:bID],
+                                         currentID.length > 0,
+                                         bAccount == current || (currentID.length > 0 && [currentID isEqualToString:sendingID])]);
         if (why) *why = @"B 계정을 확인하지 못해서 재게시 취소를 막았어요";
         return NO;
     }
@@ -113,8 +188,9 @@ BOOL NFBUnifiedUndoRepostAsB(id bAccount, id status, NSString** why) {
     }
     long long repostID = 0;
     NSString* source = nil;
-    @synchronized([NSObject class]) {
-        repostID = gBRepostIDs[@(originalID)].longLongValue;
+    @synchronized(URLock()) {
+        // Only IDs remembered for this B (a changed B never reuses another's).
+        if ([gBRepostOwner isEqualToString:bID]) repostID = gBRepostIDs[@(originalID)].longLongValue;
     }
     if (repostID > 0) {
         source = @"made as B this session";
@@ -136,8 +212,9 @@ BOOL NFBUnifiedUndoRepostAsB(id bAccount, id status, NSString** why) {
         if (why) *why = @"B로 재게시 취소를 보내지 못했어요";
         return NO;
     }
-    @synchronized([NSObject class]) {
+    @synchronized(URLock()) {
         [gBRepostIDs removeObjectForKey:@(originalID)];
+        [gBRepostOrder removeObject:@(originalID)];
     }
     URLog([NSString stringWithFormat:@"undo sent as B: repost %lld of %lld (%@)", repostID, originalID, source]);
     return YES;
@@ -145,8 +222,12 @@ BOOL NFBUnifiedUndoRepostAsB(id bAccount, id status, NSString** why) {
 
 NSString* NFBUnifiedRepostDebugText(void) {
     NSMutableString* out = [NSMutableString string];
-    @synchronized([NSObject class]) {
-        [out appendFormat:@"B reposts remembered: %lu\n", (unsigned long)gBRepostIDs.count];
+    BOOL active = URModeActive();
+    @synchronized(URLock()) {
+        [out appendFormat:@"B reposts remembered: %lu (max %lu, for B %@) pending=%lu notRecorded(mode inactive)=%lu modeActive=%d\n",
+                          (unsigned long)gBRepostIDs.count, (unsigned long)kMaxRemembered,
+                          gBRepostOwner.length ? @"set" : @"-", (unsigned long)gBPending.count,
+                          (unsigned long)gRepostsNotRecorded, active];
         [out appendFormat:@"%@\n", gRepostLog.count ? [gRepostLog componentsJoinedByString:@"\n"] : @"(no events)"];
     }
     return out;
@@ -154,20 +235,77 @@ NSString* NFBUnifiedRepostDebugText(void) {
 
 %hook TFNTwitterAccount
 
+// 7.3.151: a repost sent with B's account while the unified mode is in use (the
+// unified timeline's own repost-as-B goes through here). The original's ID is
+// noted so that the answer, which comes later and maybe on another thread or
+// after the mode was left, is still known to be the unified mode's. Nothing is
+// changed about the request itself.
+- (void)retweetWithStatusID:(long long)statusID responseBlock:(id)responseBlock {
+    @try {
+        NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
+        if (statusID > 0 && bID.length && [NSThread isMainThread] && [URAccountID(self) isEqualToString:bID] &&
+            URModeActive()) {
+            @synchronized(URLock()) {
+                if (!gBPending || ![gBPendingOwner isEqualToString:bID]) {
+                    gBPending = [NSMutableArray array];
+                    gBPendingOwner = [bID copy];
+                }
+                [gBPending removeObject:@(statusID)];
+                [gBPending addObject:@(statusID)];
+                while (gBPending.count > kMaxPending) [gBPending removeObjectAtIndex:0];
+            }
+        }
+    } @catch (__unused NSException* exception) {
+    }
+    %orig;
+}
+
 // X updates the account's state here once a repost is made; for B's account,
 // remember B's repost ID of the original.
+// 7.3.151: only for a repost the unified mode sent as B (noted above), or one
+// made while the mode is in use. A repost made while simply on B alone (or on
+// any other account) is not recorded.
 - (void)_updateStatesForRetweetStatus:(id)retweetStatus originalStatus:(id)originalStatus {
     %orig;
-    NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
-    if (bID.length == 0 || ![URAccountID(self) isEqualToString:bID]) return;
-    long long repostID = URNumber(retweetStatus, @"statusID");
-    long long originalID = URNumber(UROriginal(originalStatus), @"statusID");
-    if (repostID <= 0 || originalID <= 0 || repostID == originalID) return;
-    @synchronized([NSObject class]) {
-        if (!gBRepostIDs) gBRepostIDs = [NSMutableDictionary dictionary];
-        gBRepostIDs[@(originalID)] = @(repostID);
+    @try {
+        NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
+        if (bID.length == 0 || ![URAccountID(self) isEqualToString:bID]) return;
+        long long repostID = URNumber(retweetStatus, @"statusID");
+        long long givenID = URNumber(originalStatus, @"statusID");
+        long long originalID = URNumber(UROriginal(originalStatus), @"statusID");
+        if (repostID <= 0 || originalID <= 0 || repostID == originalID) return;
+        BOOL active = URModeActive();
+        BOOL pending = NO;
+        @synchronized(URLock()) {
+            if ([gBPendingOwner isEqualToString:bID]) {
+                pending = [gBPending containsObject:@(originalID)] || (givenID > 0 && [gBPending containsObject:@(givenID)]);
+                [gBPending removeObject:@(originalID)];
+                if (givenID > 0) [gBPending removeObject:@(givenID)];
+            }
+            if (!pending && !active) {
+                gRepostsNotRecorded++;
+            } else {
+                if (!gBRepostIDs || ![gBRepostOwner isEqualToString:bID]) {
+                    // Another B than the one the IDs were kept for: start over.
+                    gBRepostIDs = [NSMutableDictionary dictionary];
+                    gBRepostOrder = [NSMutableArray array];
+                    gBRepostOwner = [bID copy];
+                }
+                [gBRepostOrder removeObject:@(originalID)];
+                [gBRepostOrder addObject:@(originalID)];
+                gBRepostIDs[@(originalID)] = @(repostID);
+                while (gBRepostOrder.count > kMaxRemembered) {
+                    [gBRepostIDs removeObjectForKey:gBRepostOrder.firstObject];
+                    [gBRepostOrder removeObjectAtIndex:0];
+                }
+            }
+        }
+        // Outside the mode only the count above is kept (no IDs, no log line).
+        if (!pending && !active) return;
+        URLog([NSString stringWithFormat:@"B reposted %lld as %lld (%@)", originalID, repostID,
+                                         pending ? @"sent from the unified mode" : @"mode active"]);
+    } @catch (__unused NSException* exception) {
     }
-    URLog([NSString stringWithFormat:@"B reposted %lld as %lld", originalID, repostID]);
 }
 
 %end

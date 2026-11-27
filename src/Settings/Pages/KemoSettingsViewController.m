@@ -20,7 +20,12 @@
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
-extern NSArray<NSDictionary*>* NFBUnifiedAccountChoices(void);
+// 7.3.151: the unified account's pickers live in src/Hooks/UnifiedQuickSettings.x,
+// shared with the account dock's long-press sheet; `changed` runs after a choice is saved.
+extern void NFBUnifiedPickAccount(BOOL isA, void (^changed)(void));
+extern void NFBUnifiedPickBColor(void (^changed)(void));
+// The account dock's order editor (src/Hooks/AccountBubbles.x).
+extern void NFBShowAccountOrderEditor(void);
 
 static NSString* const kClientIDKey = @"spotify_client_id";
 static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
@@ -169,129 +174,26 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 // A and B of the unified timeline (kemo_unified_a_id / kemo_unified_b_id). The
 // account sheet's "A/B" row picks them too (long press).
 - (void)pickUnifiedAccount:(NSString*)which {
-    BOOL isA = [which isEqualToString:@"a"];
-    NSString* idKey = [NSString stringWithFormat:@"kemo_unified_%@_id", which];
-    NSString* nameKey = [NSString stringWithFormat:@"kemo_unified_%@_name", which];
-    NSString* otherKey = isA ? @"kemo_unified_b_id" : @"kemo_unified_a_id";
-    UIAlertController* sheet =
-        [UIAlertController alertControllerWithTitle:[self localized:isA ? @"KEMO_UNIFIED_A_TITLE" : @"KEMO_UNIFIED_B_TITLE"]
-                                            message:[self localized:isA ? @"KEMO_UNIFIED_A_MESSAGE" : @"KEMO_UNIFIED_B_MESSAGE"]
-                                     preferredStyle:UIAlertControllerStyleActionSheet];
-    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    NSString* current = [defaults stringForKey:idKey];
-    NSString* other = [defaults stringForKey:otherKey];
-    for (NSDictionary* choice in NFBUnifiedAccountChoices()) {
-        if ([choice[@"id"] isEqualToString:other]) continue;  // A and B are never the same
-        NSString* title = choice[@"name"];
-        if ([choice[@"id"] isEqualToString:current]) title = [title stringByAppendingString:@" ✓"];
-        if ([choice[@"active"] boolValue]) {
-            title = [NSString stringWithFormat:@"%@ (%@)", title, [self localized:@"KEMO_UNIFIED_B_ACTIVE"]];
-        }
-        [sheet addAction:[UIAlertAction actionWithTitle:title
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction* action) {
-                                                    [defaults setObject:choice[@"id"] forKey:idKey];
-                                                    [defaults setObject:choice[@"name"] forKey:nameKey];
-                                                    [self.tableView reloadData];
-                                                }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"KEMO_UNIFIED_B_CLEAR"]
-                                              style:UIAlertActionStyleDestructive
-                                            handler:^(UIAlertAction* action) {
-                                                [defaults removeObjectForKey:idKey];
-                                                [defaults removeObjectForKey:nameKey];
-                                                [self.tableView reloadData];
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-    sheet.popoverPresentationController.sourceView = self.view;
-    sheet.popoverPresentationController.sourceRect =
-        CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
-    [self presentViewController:sheet animated:YES completion:nil];
+    // 7.3.151: the shared sheet (UnifiedQuickSettings.x); this page only redraws.
+    __weak typeof(self) weakSelf = self;
+    NFBUnifiedPickAccount([which isEqualToString:@"a"], ^{
+        [weakSelf.tableView reloadData];
+    });
+}
+
+// 7.3.151: where the unified account sits in the dock, and whether A and B
+// show there, is set in the dock's order editor.
+- (void)openUnifiedDockOrder:(NSDictionary*)sender {
+    NFBShowAccountOrderEditor();
 }
 
 // The colour of tweets only B has (folded corner and display name), kemo_unified_b_color.
 - (void)pickUnifiedBColor:(NSDictionary*)sender {
-    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:[self localized:@"KEMO_UNIFIED_B_COLOR_TITLE"]
-                                                                   message:[self localized:@"KEMO_UNIFIED_B_COLOR_MESSAGE"]
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    NSString* current = [defaults stringForKey:@"kemo_unified_b_color"] ?: @"FF7A00";
-    NSArray* choices = @[
-        @[ @"FF7A00", @"KEMO_UNIFIED_COLOR_ORANGE" ], @[ @"1D9BF0", @"KEMO_UNIFIED_COLOR_BLUE" ],
-        @[ @"00BA7C", @"KEMO_UNIFIED_COLOR_GREEN" ], @[ @"F91880", @"KEMO_UNIFIED_COLOR_PINK" ],
-        @[ @"7856FF", @"KEMO_UNIFIED_COLOR_PURPLE" ], @[ @"E0A800", @"KEMO_UNIFIED_COLOR_YELLOW" ]
-    ];
-    for (NSArray* choice in choices) {
-        NSString* name = [self localized:choice[1]];
-        NSString* title = [choice[0] isEqualToString:current] ? [name stringByAppendingString:@" ✓"] : name;
-        [sheet addAction:[UIAlertAction actionWithTitle:title
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction* action) {
-                                                    [defaults setObject:choice[0] forKey:@"kemo_unified_b_color"];
-                                                    [defaults setObject:name forKey:@"kemo_unified_b_color_name"];
-                                                    [self.tableView reloadData];
-                                                }]];
-    }
-    NSString* themeName = [self localized:@"KEMO_UNIFIED_COLOR_THEME"];
-    [sheet addAction:[UIAlertAction actionWithTitle:[current isEqualToString:@"theme"] ? [themeName stringByAppendingString:@" ✓"] : themeName
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                [defaults setObject:@"theme" forKey:@"kemo_unified_b_color"];
-                                                [defaults setObject:themeName forKey:@"kemo_unified_b_color_name"];
-                                                [self.tableView reloadData];
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"KEMO_UNIFIED_COLOR_PICK"]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                [self showUnifiedColorPicker];
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-    sheet.popoverPresentationController.sourceView = self.view;
-    sheet.popoverPresentationController.sourceRect =
-        CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-// Any colour for B's tweets, kept as RRGGBB like the presets.
-- (void)showUnifiedColorPicker {
-    UIColorPickerViewController* picker = [UIColorPickerViewController new];
-    picker.supportsAlpha = NO;
-    picker.title = [self localized:@"KEMO_UNIFIED_B_COLOR_TITLE"];
-    NSString* hex = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_color"];
-    unsigned int value = 0;
-    if (hex.length == 6 && [[NSScanner scannerWithString:hex] scanHexInt:&value]) {
-        picker.selectedColor = [UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0
-                                               green:((value >> 8) & 0xFF) / 255.0
-                                                blue:(value & 0xFF) / 255.0
-                                               alpha:1];
-    }
-    picker.delegate = (id<UIColorPickerViewControllerDelegate>)self;
-    [self presentViewController:picker animated:YES completion:nil];
-}
-
-- (void)saveUnifiedColor:(UIColor*)color {
-    CGFloat red = 0, green = 0, blue = 0, alpha = 0;
-    if (![color getRed:&red green:&green blue:&blue alpha:&alpha]) return;
-    int r = (int)lround(MAX(0, MIN(1, red)) * 255), g = (int)lround(MAX(0, MIN(1, green)) * 255),
-        b = (int)lround(MAX(0, MIN(1, blue)) * 255);
-    NSString* hex = [NSString stringWithFormat:@"%02X%02X%02X", r, g, b];
-    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setObject:hex forKey:@"kemo_unified_b_color"];
-    [defaults setObject:[NSString stringWithFormat:@"%@ #%@", [self localized:@"KEMO_UNIFIED_COLOR_CUSTOM"], hex]
-                 forKey:@"kemo_unified_b_color_name"];
-    [self.tableView reloadData];
-}
-
-- (void)colorPickerViewController:(UIColorPickerViewController*)picker didSelectColor:(UIColor*)color continuously:(BOOL)continuously {
-    if (!continuously) [self saveUnifiedColor:color];
-}
-
-- (void)colorPickerViewControllerDidFinish:(UIColorPickerViewController*)picker {
-    [self saveUnifiedColor:picker.selectedColor];
+    // 7.3.151: the shared sheet and colour picker (UnifiedQuickSettings.x); this page only redraws.
+    __weak typeof(self) weakSelf = self;
+    NFBUnifiedPickBColor(^{
+        [weakSelf.tableView reloadData];
+    });
 }
 
 - (void)openAliasEditor:(NSDictionary*)sender {

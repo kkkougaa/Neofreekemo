@@ -578,19 +578,16 @@
 "KEMO_CLICKER_REMIND_TO" = "끝";
 
 "KEMO_UNIFIED_EXP_TITLE" = "A/B 통합 타임라인 (실험)";
-"KEMO_UNIFIED_EXP_DETAIL" = "A와 B 두 계정의 팔로우 중 타임라인을 섞어 보여줍니다. 하단 계정 독의 \"A/B 통합\"을 고르면 켜지고, 다른 계정을 고르면 꺼집니다. B만 가진 트윗은 B로 반응하고, 둘 다 가진 트윗은 어느 계정으로 할지 묻습니다.";
+"KEMO_UNIFIED_EXP_DETAIL" = "계정 독의 \"통합 계정\"을 고르면 A와 B의 타임라인을 섞어 보여주고, 쪽지는 A 것만 보입니다. B만 보는 게시물은 B로, 둘 다 보는 게시물은 A로 반응하며 마음에 들어요·재게시를 길게 누르면 계정을 묻습니다.";
 "KEMO_UNIFIED_B_TITLE" = "B 계정";
 "KEMO_UNIFIED_B_NONE" = "선택 안 함";
-"KEMO_UNIFIED_B_MESSAGE" = "B의 팔로우 중 타임라인을 A에 섞습니다. A와 같은 계정은 고를 수 없습니다.";
 "KEMO_UNIFIED_B_ACTIVE" = "지금 계정";
 "KEMO_UNIFIED_B_CLEAR" = "선택 해제";
 "KEMO_UNIFIED_A_TITLE" = "A 계정";
 "KEMO_UNIFIED_A_NONE" = "지금 쓰는 계정";
-"KEMO_UNIFIED_A_MESSAGE" = "A/B 통합을 고르면 이 계정으로 전환됩니다. 정하지 않으면 지금 쓰는 계정이 A입니다.";
 "KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "항상 계정 묻기";
-"KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "A만 가진 트윗에도 마음·재게시·답글할 때 어느 계정으로 할지 묻습니다. B만 가진 트윗은 언제나 B입니다.";
-"KEMO_UNIFIED_B_COLOR_TITLE" = "B 트윗 색";
-"KEMO_UNIFIED_B_COLOR_MESSAGE" = "B만 가진 트윗의 닉네임과 왼쪽 위 접힌 모서리에 쓰는 색입니다.";
+"KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "A만 보는 게시물에도 마음에 들어요·재게시·답글·북마크할 때 어느 계정으로 할지 묻습니다. B만 보는 게시물은 언제나 B입니다.";
+"KEMO_UNIFIED_B_COLOR_TITLE" = "B만 보는 게시물 색";
 "KEMO_UNIFIED_COLOR_ORANGE" = "주황";
 "KEMO_UNIFIED_COLOR_BLUE" = "파랑";
 "KEMO_UNIFIED_COLOR_GREEN" = "초록";
@@ -600,3 +597,8 @@
 "KEMO_UNIFIED_COLOR_THEME" = "테마 색";
 "KEMO_UNIFIED_COLOR_PICK" = "직접 고르기…";
 "KEMO_UNIFIED_COLOR_CUSTOM" = "직접 고른 색";
+"KEMO_UNIFIED_CHOSEN" = "선택됨";
+"KEMO_UNIFIED_DOCK_ORDER_TITLE" = "계정 독 순서";
+"KEMO_UNIFIED_ACCOUNT_NAME" = "통합 계정";
+"KEMO_UNIFIED_ON" = "켬";
+"KEMO_UNIFIED_OFF" = "끔";

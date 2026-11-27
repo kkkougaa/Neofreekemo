@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.158",
+      "subtitle": "NeoFreeBird version 7.3.160",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.160",
+          "buildVersion": "160",
+          "date": "2026-11-27T11:53:00Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.160/NeoFreeBird-Twitter-sideloaded_7.3.160_12.44.ipa",
+          "size": 273906900,
+          "minOSVersion": "15.0",
+          "localizedDescription": "알림 탭을 한 번 더 누르면 맨 위에서는 A↔B 전환, 스크롤 중에는 맨 위로 올라가요(어디서든 전환되던 문제 수정). 홈 상단의 B 사진 위치를 알림 탭과 똑같이 맞췄어요."
+        },
         {
           "version": "7.3.158",
           "buildVersion": "158",

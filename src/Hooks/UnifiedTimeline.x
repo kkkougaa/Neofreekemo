@@ -16,6 +16,10 @@
 //    and -updateSections:...) get B's top-level, non-promoted status view models
 //    merged in by the number in their entry ID (statusID if none), newest first,
 //    only within the range A has loaded. Tweets both have show once.
+//    7.3.134: in 7.3.133 the merge stopped at "A's items are wrapped": module
+//    (conversation) children are TFNDataViewItem-wrapped while standalone
+//    statuses are not. The section is now read as blocks (a standalone status,
+//    or a whole module) and B's statuses go between blocks, never into a module.
 //  - Reacting is not routed yet: on a tweet only B has, the inline like, repost,
 //    reply and bookmark buttons are stopped with a short notice.
 //
@@ -250,6 +254,50 @@ static void CollectStatusIDs(id item, NSMutableSet<NSNumber*>* ids, int depth) {
     }
 }
 
+// A section is a run of blocks: a standalone status view model on its own, or a
+// conversation module (header, wrapped TFNDataViewItem children, footer). B's
+// standalone statuses go between blocks, never inside a module.
+static NSArray<NSArray*>* Blocks(NSArray* items) {
+    NSMutableArray<NSArray*>* blocks = [NSMutableArray array];
+    NSMutableArray* module = nil;
+    for (id item in items) {
+        BOOL wrapped = unwrapDataViewItem(item) != item;
+        BOOL chrome = IsModuleHeaderItem(item) || IsModuleFooterItem(item);
+        if (wrapped || chrome) {
+            if (IsModuleHeaderItem(item) && module.count) {
+                [blocks addObject:module];
+                module = nil;
+            }
+            if (!module) module = [NSMutableArray array];
+            [module addObject:item];
+            if (IsModuleFooterItem(item)) {
+                [blocks addObject:module];
+                module = nil;
+            }
+            continue;
+        }
+        if (module.count) {
+            [blocks addObject:module];
+            module = nil;
+        }
+        [blocks addObject:@[ item ]];
+    }
+    if (module.count) [blocks addObject:module];
+    return blocks;
+}
+
+// Newest key of the statuses in a block; 0 when it has none.
+static long long BlockKey(NSArray* block) {
+    long long key = 0;
+    for (id item in block) {
+        id model = unwrapDataViewItem(item);
+        if (IsStatusItem(model)) key = MAX(key, SortKey(model));
+    }
+    return key;
+}
+
+static NSString* gTemplateNote = @"-";
+
 static NSArray* MergedSections(id controller, NSArray* sections) {
     id stream = Getter(gBTimeline, @"stream");
     id bObjects = Getter(stream, @"streamObjects");
@@ -258,41 +306,51 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         return sections;
     }
 
-    // The section with the most status items is the timeline.
-    NSUInteger target = NSNotFound, best = 0;
-    BOOL wrapped = NO;
+    // The section with the most statuses is the timeline.
+    NSUInteger target = NSNotFound, best = 0, raw = 0, wrappedCount = 0;
     for (NSUInteger i = 0; i < sections.count; i++) {
         if (![sections[i] isKindOfClass:[NSArray class]]) continue;
-        NSUInteger count = 0;
+        NSUInteger count = 0, rawHere = 0, wrappedHere = 0;
         for (id item in sections[i]) {
-            if (IsStatusItem(unwrapDataViewItem(item))) {
-                count++;
-                if (unwrapDataViewItem(item) != item) wrapped = YES;
-            }
+            id model = unwrapDataViewItem(item);
+            if (!IsStatusItem(model)) continue;
+            count++;
+            if (model == item) rawHere++; else wrappedHere++;
         }
         if (count > best) {
             best = count;
             target = i;
+            raw = rawHere;
+            wrappedCount = wrappedHere;
         }
     }
     if (target == NSNotFound) {
         gLastMerge = [NSString stringWithFormat:@"no status section in %lu sections", (unsigned long)sections.count];
         return sections;
     }
-    if (wrapped) {
-        gLastMerge = @"A's items are wrapped (TFNDataViewItem); not merging yet";
+    if (raw == 0) {
+        // Every status is wrapped; note what a wrapper carries for the next step.
+        for (id item in sections[target]) {
+            if (unwrapDataViewItem(item) == item) continue;
+            gTemplateNote = [NSString stringWithFormat:@"objectIdentifier=%@ options=%@ adapter=%@ section=%@",
+                                                       NSStringFromClass([Getter(item, @"objectIdentifier") class]),
+                                                       [[Getter(item, @"options") allKeys] componentsJoinedByString:@","],
+                                                       NSStringFromClass([Getter(item, @"dataViewAdapter") class]),
+                                                       NSStringFromClass([Getter(item, @"sectionController") class])];
+            break;
+        }
+        gLastMerge = [NSString stringWithFormat:@"all %lu statuses wrapped; not merging", (unsigned long)wrappedCount];
         return sections;
     }
 
     NSArray* aItems = sections[target];
     NSMutableSet<NSNumber*>* aIDs = [NSMutableSet set];
+    for (id item in aItems) CollectStatusIDs(unwrapDataViewItem(item), aIDs, 0);
+    NSArray<NSArray*>* blocks = Blocks(aItems);
     long long oldestA = LLONG_MAX;
-    for (id item in aItems) {
-        CollectStatusIDs(item, aIDs, 0);
-        if (IsStatusItem(item)) {
-            long long key = SortKey(item);
-            if (key > 0 && key < oldestA) oldestA = key;
-        }
+    for (NSArray* block in blocks) {
+        long long key = BlockKey(block);
+        if (key > 0) oldestA = MIN(oldestA, key);
     }
 
     NSMutableArray* bItems = [NSMutableArray array];
@@ -324,31 +382,29 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
     NSMutableArray* merged = [NSMutableArray arrayWithCapacity:aItems.count + bItems.count];
     NSUInteger next = 0, outOfOrder = 0;
     long long running = LLONG_MAX;
-    for (id item in aItems) {
-        long long key = IsStatusItem(item) ? SortKey(item) : 0;
+    for (NSArray* block in blocks) {
+        long long key = BlockKey(block);
         if (key > 0) {
             if (key > running) outOfOrder++;
             running = MIN(running, key);
-        }
-        if (running != LLONG_MAX) {
             while (next < bItems.count && SortKey(bItems[next]) > running) {
                 [merged addObject:bItems[next++]];
             }
         }
-        [merged addObject:item];
+        [merged addObjectsFromArray:block];
     }
-    while (next < bItems.count) [merged addObject:bItems[next++]];
 
     @synchronized([NSObject class]) {
         if (!gBOnlyIDs) gBOnlyIDs = [NSMutableSet set];
         [gBOnlyIDs unionSet:bOnly];
     }
-    gLastMerge = [NSString stringWithFormat:@"A items=%lu statuses=%lu | B statuses inserted=%lu both=%lu "
-                                            @"olderThanA=%lu promoted=%lu | A outOfOrder=%lu sections=%lu",
-                                            (unsigned long)aItems.count, (unsigned long)best,
-                                            (unsigned long)bItems.count, (unsigned long)dupes, (unsigned long)older,
-                                            (unsigned long)promoted, (unsigned long)outOfOrder,
-                                            (unsigned long)sections.count];
+    gLastMerge = [NSString stringWithFormat:@"A items=%lu blocks=%lu statuses=%lu (raw %lu, wrapped %lu) | B inserted=%lu "
+                                            @"both=%lu olderThanA=%lu promoted=%lu leftOver=%lu | A outOfOrder=%lu",
+                                            (unsigned long)aItems.count, (unsigned long)blocks.count,
+                                            (unsigned long)best, (unsigned long)raw, (unsigned long)wrappedCount,
+                                            (unsigned long)next, (unsigned long)dupes, (unsigned long)older,
+                                            (unsigned long)promoted, (unsigned long)(bItems.count - next),
+                                            (unsigned long)outOfOrder];
     NSMutableArray* result = [sections mutableCopy];
     result[target] = merged;
     return result;
@@ -457,6 +513,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
     id objects = Getter(stream, @"streamObjects");
     [out appendFormat:@"B timeline=%@ stream=%@ objects=%lu\n", gBTimeline ? @"made" : @"none", stream ? @"set" : @"nil",
                       (unsigned long)([objects respondsToSelector:@selector(count)] ? [objects count] : 0)];
+    [out appendFormat:@"wrapper: %@\n", gTemplateNote];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu blocked=%lu\n", gLastMerge, (unsigned long)gBOnlyIDs.count,
                       (unsigned long)gBlocked];
     @synchronized([NSObject class]) {

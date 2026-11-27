@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.157",
+      "subtitle": "NeoFreeBird version 7.3.158",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.158",
+          "buildVersion": "158",
+          "date": "2026-11-27T11:39:12Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.158/NeoFreeBird-Twitter-sideloaded_7.3.158_12.44.ipa",
+          "size": 273904855,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 상단의 두 사진을 다른 화면과 같은 크기로 되돌리고, 알약을 사진보다 넉넉하게 키웠어요. 알림 탭을 한 번 더 눌러 A↔B를 바꾸는 동작을 터치 기준으로 다시 만들었어요."
+        },
         {
           "version": "7.3.157",
           "buildVersion": "157",

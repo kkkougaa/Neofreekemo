@@ -434,7 +434,10 @@ static void UPUpdateChips(UIViewController* profile) {
                                                (long)bFollow, NSStringFromClass([follow class]),
                                                NSStringFromCGRect(follow.frame)];
 
-    UIView* holder = follow.superview;
+    // 7.3.149: inside the follow button, on its left (below it there was no
+    // room: the profile's tab strip sits right under the button). A and B as
+    // small pictures, a check on the ones that follow, dim for the ones that do not.
+    UIView* holder = follow;
     if (existing && existing.superview != holder) {
         [existing removeFromSuperview];
         existing = nil;
@@ -446,16 +449,37 @@ static void UPUpdateChips(UIViewController* profile) {
         [holder addSubview:existing];
     }
     [existing.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
-    UIView* chipA = UPChip(aID, @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1], UPFollowText(aFollow));
-    UIView* chipB = UPChip(bID, @"B", UPBColor(), UPFollowText(bFollow));
-    CGFloat gap = 6;
-    CGFloat width = CGRectGetWidth(chipA.frame) + gap + CGRectGetWidth(chipB.frame);
-    chipB.frame = CGRectOffset(chipB.frame, CGRectGetWidth(chipA.frame) + gap, 0);
-    [existing addSubview:chipA];
-    [existing addSubview:chipB];
-    CGRect frame = follow.frame;
-    CGFloat x = MAX(8, CGRectGetMaxX(frame) - width);
-    existing.frame = CGRectMake(x, CGRectGetMaxY(frame) + 6, width, 22);
+    const CGFloat size = 20, step = 15;
+    NSArray* rows = @[ @[ aID ?: @"", @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1], @(aFollow) ],
+                       @[ bID ?: @"", @"B", UPBColor(), @(bFollow) ] ];
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        NSArray* row = rows[i];
+        UPFollow state = (UPFollow)[row[3] integerValue];
+        UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(i * step, 0, size, size)];
+        picture.image = UPAvatar(row[0], row[1], row[2]);
+        picture.contentMode = UIViewContentModeScaleAspectFill;
+        picture.clipsToBounds = YES;
+        picture.layer.cornerRadius = size / 2;
+        picture.layer.borderWidth = 1.5;
+        picture.layer.borderColor = (follow.backgroundColor ?: [UIColor systemBackgroundColor]).CGColor;
+        picture.alpha = state == UPFollowYes ? 1.0 : 0.35;
+        [existing addSubview:picture];
+        if (state == UPFollowYes) {
+            UILabel* check = [[UILabel alloc] initWithFrame:CGRectMake(i * step + size - 9, size - 9, 11, 11)];
+            check.text = @"✓";
+            check.font = [UIFont systemFontOfSize:8 weight:UIFontWeightBlack];
+            check.textAlignment = NSTextAlignmentCenter;
+            check.textColor = UIColor.whiteColor;
+            check.backgroundColor = [UIColor systemGreenColor];
+            check.layer.cornerRadius = 5.5;
+            check.clipsToBounds = YES;
+            [existing addSubview:check];
+        }
+    }
+    CGFloat width = size + step * (rows.count - 1) + 2;
+    existing.frame = CGRectMake(12, (CGRectGetHeight(follow.bounds) - size) / 2, width, size + 2);
+    existing.isAccessibilityElement = YES;
+    existing.accessibilityLabel = [NSString stringWithFormat:@"A %@, B %@", UPFollowText(aFollow), UPFollowText(bFollow)];
     existing.hidden = NO;
     [holder bringSubviewToFront:existing];
 }
@@ -681,6 +705,128 @@ static BOOL UPShouldAsk(id performer, long long userID) {
     }, ^{
         UPDoAsB(action, reference);
     });
+}
+
+%end
+
+// MARK: - Follow / unfollow as A or B (the follow button opens a sheet)
+
+static void UPRememberBFollow(long long userID, BOOL following) {
+    if (!gBFollowByUser) gBFollowByUser = [NSMutableDictionary dictionary];
+    gBFollowByUser[@(userID)] = @(following ? UPFollowYes : UPFollowNo);
+    NSString* key = [@"kemo_unified_follows_" stringByAppendingString:UPBID() ?: @""];
+    NSMutableSet* list = [NSMutableSet setWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:key] ?: @[]];
+    if (following) [list addObject:@(userID)];
+    else [list removeObject:@(userID)];
+    if (UPBID().length) [[NSUserDefaults standardUserDefaults] setObject:[list allObjects] forKey:key];
+    extern void NFBUnifiedAddKnownFollows(NSString* accountID, NSSet<NSNumber*>* userIDs);
+    if (UPBID().length) NFBUnifiedAddKnownFollows(UPBID(), list);
+}
+
+// B follows or unfollows with B's own account; stops unless that is sure.
+static void UPFollowAsB(BOOL follow, long long userID, id reference) {
+    id b = UPBAccount();
+    if (!b || !reference || userID <= 0) {
+        UPLog(@"follow as B stopped: B account or user missing");
+        UPNotice(@"B 계정이나 대상을 확인하지 못해서 보내지 않았어요");
+        return;
+    }
+    SEL selector = NSSelectorFromString(follow ? @"followUserWithUserReference:impressionID:isEarned:supportsChallenges:responseBlock:"
+                                               : @"unfollowUserWithUserReference:impressionID:isEarned:associatedStatusForLeaveBehindConfirmation:responseBlock:");
+    if (![b respondsToSelector:selector]) {
+        UPNotice(@"이 X 버전에서는 B로 보낼 수 없어요");
+        return;
+    }
+    void (^response)(void) = ^{
+    };
+    @try {
+        if (follow) {
+            ((void (*)(id, SEL, id, id, BOOL, BOOL, id))objc_msgSend)(b, selector, reference, nil, NO, NO, response);
+        } else {
+            ((void (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(b, selector, reference, nil, NO, nil, response);
+        }
+        UPRememberBFollow(userID, follow);
+        UPLog([NSString stringWithFormat:@"%@ %lld as B sent", follow ? @"follow" : @"unfollow", userID]);
+        UPNotice([NSString stringWithFormat:@"%@로 %@ 요청을 보냈어요", UPBName(), follow ? @"팔로우" : @"언팔로우"]);
+    } @catch (NSException* exception) {
+        UPLog([NSString stringWithFormat:@"follow as B threw %@", exception.name]);
+        UPNotice(@"B로 보내지 못했어요");
+    }
+}
+
+static UIViewController* UPProfileOf(UIView* view) {
+    for (UIResponder* responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            for (UIViewController* controller = (UIViewController*)responder; controller; controller = controller.parentViewController) {
+                if ([NSStringFromClass([controller class]) isEqualToString:@"T1ProfileViewController"]) return controller;
+            }
+            return nil;
+        }
+    }
+    return nil;
+}
+
+// YES when the sheet was shown instead of X's own follow / unfollow.
+static BOOL UPShowFollowSheet(UIView* button, void (^asA)(void)) {
+    if (!UPActive()) return NO;
+    UIViewController* profile = UPProfileOf(button);
+    if (!profile || profile != gVisibleProfile) return NO;
+    // The button must be the account in use's (A's), so X's own path is A.
+    if (UPGetter(button, @"account") != UPCurrentAccount()) return NO;
+    long long userID = UPProfileUserID(profile);
+    NSString* aID = UPAccountUserID(UPCurrentAccount());
+    NSString* idText = [NSString stringWithFormat:@"%lld", userID];
+    if (userID <= 0 || [idText isEqualToString:aID] || [idText isEqualToString:UPBID()]) return NO;
+    long long raw = -1;
+    UPFollow aFollow = UPFollowFromUser(UPProfileUser(profile), &raw);
+    NSNumber* bKnown = gBFollowByUser[@(userID)];
+    UPFollow bFollow = bKnown ? (UPFollow)bKnown.integerValue : UPFollowUnknown;
+    id reference = UPGetter(UPProfileUser(profile), @"userReference");
+    NSString* aName = UPAName(), *bName = UPBName();
+    UIAlertController* sheet = [UIAlertController
+        alertControllerWithTitle:@"어느 계정으로 할까요?"
+                         message:[NSString stringWithFormat:@"%@ (A): %@\n%@ (B): %@", aName, UPFollowText(aFollow), bName,
+                                                            UPFollowText(bFollow)]
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString* aAtAsk = aID;
+    BOOL (^same)(void) = ^BOOL {
+        if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
+        UPNotice(@"계정이 바뀌어서 보내지 않았어요");
+        return NO;
+    };
+    // A: X's own button action, which follows or unfollows as A.
+    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A) %@", aName,
+                                                                                aFollow == UPFollowYes ? @"언팔로우" : @"팔로우"]
+                                              style:aFollow == UPFollowYes ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                if (same()) asA();
+                                            }]];
+    if (bFollow != UPFollowUnknown) {
+        BOOL bFollows = bFollow == UPFollowYes;
+        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (B) %@", bName, bFollows ? @"언팔로우" : @"팔로우"]
+                                                  style:bFollows ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction* action) {
+                                                    if (same()) UPFollowAsB(!bFollows, userID, reference);
+                                                    [profile.viewIfLoaded setNeedsLayout];
+                                                }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
+    UIViewController* top = UPTopController();
+    sheet.popoverPresentationController.sourceView = button;
+    sheet.popoverPresentationController.sourceRect = button.bounds;
+    [top presentViewController:sheet animated:YES completion:nil];
+    UPLog([NSString stringWithFormat:@"follow sheet for %lld (A=%ld B=%ld)", userID, (long)aFollow, (long)bFollow]);
+    return YES;
+}
+
+%hook TUIFollowButtonV2
+
+- (void)buttonTapped {
+    if (UPShowFollowSheet((UIView*)self, ^{
+            %orig;
+        }))
+        return;
+    %orig;
 }
 
 %end

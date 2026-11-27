@@ -574,3 +574,11 @@
 "KEMO_CLICKER_REMIND_MINUTES" = "%ld min";
 "KEMO_CLICKER_REMIND_FROM" = "From";
 "KEMO_CLICKER_REMIND_TO" = "To";
+
+"KEMO_UNIFIED_EXP_TITLE" = "A/B unified timeline (experiment)";
+"KEMO_UNIFIED_EXP_DETAIL" = "Mixes account B's Following timeline into the Following tab of the account in use (A). Like, repost, reply and bookmark stay blocked on tweets only B has.";
+"KEMO_UNIFIED_B_TITLE" = "Account B";
+"KEMO_UNIFIED_B_NONE" = "None";
+"KEMO_UNIFIED_B_MESSAGE" = "A is the account in use. Nothing is mixed while B is the account in use.";
+"KEMO_UNIFIED_B_ACTIVE" = "in use";
+"KEMO_UNIFIED_B_CLEAR" = "Clear";

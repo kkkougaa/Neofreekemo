@@ -20,6 +20,8 @@
 #import "Settings/Pages/KemoEventListViewController.h"
 #import "Settings/Pages/KemoKeywordListViewController.h"
 
+extern NSArray<NSDictionary*>* NFBUnifiedAccountChoices(void);
+
 static NSString* const kClientIDKey = @"spotify_client_id";
 static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 
@@ -153,6 +155,44 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 
 - (void)openKeywordEditor:(NSDictionary*)sender {
     [self.navigationController pushViewController:[KemoKeywordListViewController new] animated:YES];
+}
+
+// Account B of the A/B unified timeline experiment. A is whichever account is active.
+- (void)pickUnifiedAccountB:(NSDictionary*)sender {
+    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:[self localized:@"KEMO_UNIFIED_B_TITLE"]
+                                                                   message:[self localized:@"KEMO_UNIFIED_B_MESSAGE"]
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString* current = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
+    for (NSDictionary* choice in NFBUnifiedAccountChoices()) {
+        NSString* title = choice[@"name"];
+        if ([choice[@"id"] isEqualToString:current]) title = [title stringByAppendingString:@" ✓"];
+        if ([choice[@"active"] boolValue]) {
+            title = [NSString stringWithFormat:@"%@ (%@)", title, [self localized:@"KEMO_UNIFIED_B_ACTIVE"]];
+        }
+        [sheet addAction:[UIAlertAction actionWithTitle:title
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction* action) {
+                                                    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+                                                    [defaults setObject:choice[@"id"] forKey:@"kemo_unified_b_id"];
+                                                    [defaults setObject:choice[@"name"] forKey:@"kemo_unified_b_name"];
+                                                    [self.tableView reloadData];
+                                                }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"KEMO_UNIFIED_B_CLEAR"]
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction* action) {
+                                                NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+                                                [defaults removeObjectForKey:@"kemo_unified_b_id"];
+                                                [defaults removeObjectForKey:@"kemo_unified_b_name"];
+                                                [self.tableView reloadData];
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect =
+        CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)openAliasEditor:(NSDictionary*)sender {

@@ -576,3 +576,11 @@
 "KEMO_CLICKER_REMIND_MINUTES" = "%ld분마다";
 "KEMO_CLICKER_REMIND_FROM" = "시작";
 "KEMO_CLICKER_REMIND_TO" = "끝";
+
+"KEMO_UNIFIED_EXP_TITLE" = "A/B 통합 타임라인 (실험)";
+"KEMO_UNIFIED_EXP_DETAIL" = "지금 쓰는 계정(A)의 팔로우 중 탭에 B 계정의 팔로우 중 타임라인을 섞어 보여줍니다. B만 가진 트윗의 마음·재게시·답글·북마크는 아직 막혀 있습니다.";
+"KEMO_UNIFIED_B_TITLE" = "B 계정";
+"KEMO_UNIFIED_B_NONE" = "선택 안 함";
+"KEMO_UNIFIED_B_MESSAGE" = "A는 지금 쓰고 있는 계정입니다. B가 지금 쓰는 계정과 같으면 섞지 않습니다.";
+"KEMO_UNIFIED_B_ACTIVE" = "지금 계정";
+"KEMO_UNIFIED_B_CLEAR" = "선택 해제";

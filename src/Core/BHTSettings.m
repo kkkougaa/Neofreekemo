@@ -409,6 +409,20 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openEventEditor:"
                     },
                     @{
+                        @"key": @"kemo_unified_exp",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_unified_b_button",
+                        @"titleKey": @"KEMO_UNIFIED_B_TITLE",
+                        @"action": @"pickUnifiedAccountB:",
+                        @"prefKeyForSubtitle": @"kemo_unified_b_name",
+                        @"subtitleDefaultKey": @"KEMO_UNIFIED_B_NONE",
+                        @"parentKey": @"kemo_unified_exp"
+                    },
+                    @{
                         @"key": @"kemo_draft_autosave",
                         @"default": @YES,
                         @"type": @"toggle"

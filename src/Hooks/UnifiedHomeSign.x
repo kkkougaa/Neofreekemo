@@ -297,9 +297,11 @@ static void HSPairRemove(NSString* why) {
     gPairGlassMode = 0;
     HSLog([NSString stringWithFormat:@"pair taken off (%@)", why]);
     void (^drop)(void) = ^{
-        // The capsule goes and the bar's own glass round X's avatar comes back.
+        // The capsule goes and the bar's own glass round X's avatar comes back,
+        // unless a pair is on that very item again by now (this runs after
+        // the fade, and it undid the new pair's sharing: two platters).
         [capsule removeFromSuperview];
-        HSRestoreSharedBackground(avatarItem);
+        if (avatarItem != gPairAvatarItem) HSRestoreSharedBackground(avatarItem);
         NSMutableArray<UIBarButtonItem*>* items = [holder.navigationItem.leftBarButtonItems mutableCopy];
         if ([items containsObject:ours]) {
             [items removeObject:ours];
@@ -592,6 +594,11 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
     if (gPairFailed) return NO;
     UIBarButtonItem* ours = gPairItem;
     if (!recheck) return ours != nil && gPairContainer == container;
+    // 7.3.157 (device dump of 7.3.155): after an account switch two home
+    // avatar buttons were alive, the old one off screen, and every look took
+    // the pair from one and gave it to the other ("the avatar item changed",
+    // over and over). Only a button on screen gets or loses the pair.
+    if (!container.window) return ours != nil && gPairContainer == container;
     UIViewController* holder = nil;
     UIBarButtonItem* avatarItem = HSAvatarItemFor(container, &holder);
     if (!avatarItem || !holder) {
@@ -677,8 +684,10 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
     // in the bar), never less than the picture plus the capsule's margin; the
     // picture stays in its middle whatever size the bar gives it.
     CGFloat box = size + 2 * kPairPad;
-    CGFloat boxWidth = box;
-    CGFloat boxHeight = box;
+    // The bar puts 4pt of platter round every item (dump: a 36pt item in a
+    // 44pt platter), so our item is just the picture, as X's button is.
+    CGFloat boxWidth = box - 2 * kPairPad;
+    CGFloat boxHeight = box - 2 * kPairPad;
     if (gPairWidth.constant != boxWidth) gPairWidth.constant = boxWidth;
     if (gPairHeight.constant != boxHeight) gPairHeight.constant = boxHeight;
     if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);

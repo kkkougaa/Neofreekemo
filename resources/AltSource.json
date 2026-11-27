@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.139",
+      "subtitle": "NeoFreeBird version 7.3.140",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.140",
+          "buildVersion": "140",
+          "date": "2026-11-27T05:39:35Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.140/NeoFreeBird-Twitter-sideloaded_7.3.140_12.44.ipa",
+          "size": 273593879,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: 독의 이름을 \"통합 계정\"으로 바꾸고 B 사진을 키웠습니다. 작은 계정 아이콘은 B 트윗에만 붙습니다. A를 새로고침할 때마다 B도 같이 새로고침하고, A가 아래를 더 불러오면 B도 더 불러옵니다."
+        },
         {
           "version": "7.3.139",
           "buildVersion": "139",

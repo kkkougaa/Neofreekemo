@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.142",
+      "subtitle": "NeoFreeBird version 7.3.143",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.143",
+          "buildVersion": "143",
+          "date": "2026-11-27T06:29:58Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.143/NeoFreeBird-Twitter-sideloaded_7.3.143_12.44.ipa",
+          "size": 273613185,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: 재게시가 섞여 순서가 뒤엉키던 정렬을 고쳤습니다. 재게시한 사람과 원본 작성자의 팔로우를 따로 판단해, B만 팔로우한 사람의 재게시는 \"재게시함\" 줄에 색을 칠합니다. 비공개 계정 트윗 재게시를 막고, B 트윗은 B로 북마크합니다."
+        },
         {
           "version": "7.3.142",
           "buildVersion": "142",

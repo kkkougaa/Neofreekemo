@@ -60,6 +60,12 @@
 //    open a protected tweet only B can see; tapping one offers to switch to B.
 //    Bookmarks: B's own T1BookmarksManager (initWithAccount:) adds and removes
 //    them as B on tweets only B has; on tweets both have it asks.
+//  - 7.3.144: a tweet only B has opens its tweet screen as B: X's own
+//    T1ConversationContainerViewController init gets B's account instead of A's,
+//    and B's picture sits next to the back button. Inside such a screen like,
+//    repost and bookmark are sent with B's account by this file (whatever X
+//    would pick), and a reply composer is switched to B with the send check on.
+//    The 7.3.143 "switch to B?" prompt for protected tweets is gone.
 //  - 7.3.140: only B's tweets get the small account picture (A-only ones had
 //    A's). B loaded only its first page, so scrolling A down ran past B's
 //    tweets; when A's Following stream loads more (-[TFSTwitterStream
@@ -1177,12 +1183,60 @@ static void MarkReplyAsB(id viewModel, long long statusID) {
 
 // YES when the tap was handled here (sent as B, a sheet shown, or stopped).
 // `orig` runs X's own handling, which acts as A.
+// A tweet screen opened as B (see the T1ConversationContainerViewController hook).
+static BOOL IsBScreen(UIViewController* controller) {
+    return gBAccount && Getter(controller, @"account") == gBAccount && CurrentAccount() != gBAccount &&
+           [NSStringFromClass([controller class]) isEqualToString:@"T1ConversationContainerViewController"];
+}
+
+static BOOL IsInBScreen(UIView* view) {
+    for (UIResponder* responder = view; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            for (UIViewController* controller = (UIViewController*)responder; controller; controller = controller.parentViewController) {
+                if (IsBScreen(controller)) return YES;
+            }
+            return NO;
+        }
+    }
+    return NO;
+}
+
 static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     if (!UnifiedActive()) return NO;
     EnsurePair();
     NSString* buttonClass = NSStringFromClass([button class]);
     if ([buttonClass containsString:@"Share"] || [buttonClass containsString:@"Analytics"]) return NO;
     id viewModel = Getter(actionsView, @"viewModel");
+    if ([actionsView isKindOfClass:[UIView class]] && IsInBScreen((UIView*)actionsView)) {
+        // Everything on a screen opened as B goes as B, sent with B's account here.
+        if (!gBAccount) {
+            ShowNotice(@"B 계정을 찾지 못해서 막았어요");
+            return YES;
+        }
+        UIView* source = [button isKindOfClass:[UIView class]] ? button : nil;
+        if ([buttonClass containsString:@"Favorite"]) {
+            LikeAsB(viewModel);
+            return YES;
+        }
+        if ([buttonClass containsString:@"Retweet"]) {
+            RepostAsB(viewModel);
+            return YES;
+        }
+        if ([buttonClass containsString:@"Bookmark"]) {
+            BookmarkAsB(viewModel, source);
+            return YES;
+        }
+        if ([buttonClass containsString:@"Reply"]) {
+            long long target = ViewModelStatusID(viewModel);
+            gComposeAsBUntil = CFAbsoluteTimeGetCurrent() + 6;
+            gComposeTargets = [NSSet setWithObjects:@(target), @(NumberGetter(ActedStatus(viewModel), @"statusID")), nil];
+            UnifiedLog(@"reply on a B screen: composer will switch to B");
+            return NO;
+        }
+        gBlocked++;
+        ShowNotice(@"B로 보는 화면이에요. 이 버튼은 아직 B로 보낼 수 없어서 막아뒀어요.");
+        return YES;
+    }
     long long statusID = ViewModelStatusID(viewModel);
     if (statusID <= 0) return NO;
     BOOL bOnly = [gBOnlyIDs containsObject:@(statusID)];
@@ -1772,40 +1826,8 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 %end
 
-// A tweet only B has from a protected account: A cannot open it.
-static BOOL StopProtectedOpen(id controller, id item) {
-    if (!UnifiedActive() || !(IsFollowingController(controller) || IsForYouController(controller))) return NO;
-    id model = unwrapDataViewItem(item);
-    if (!IsStatusItem(model)) return NO;
-    long long statusID = NumberGetter(model, @"statusID");
-    if (statusID <= 0 || ![gBOnlyIDs containsObject:@(statusID)] || !IsProtectedStatus(ActedStatus(model))) return NO;
-    id b = gBAccount;
-    UIAlertController* alert =
-        [UIAlertController alertControllerWithTitle:@"B만 볼 수 있는 게시물이에요"
-                                            message:[NSString stringWithFormat:@"비공개 계정이라 %@로는 열 수 없어요. %@로 전환해서 볼까요?",
-                                                                               AName(), BName()]
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@로 전환", BName()]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                id host = HostController();
-                                                SEL view = NSSelectorFromString(@"viewAccount:animated:");
-                                                if (b && [host respondsToSelector:view]) {
-                                                    ((void (*)(id, SEL, id, BOOL))objc_msgSend)(host, view, b, YES);
-                                                }
-                                            }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
-    [TopController() presentViewController:alert animated:YES completion:nil];
-    UnifiedLog(@"protected B tweet: open stopped");
-    return YES;
-}
-
 %hook TFNItemsDataViewController
 
-- (void)didSelectItem:(id)item atIndexPath:(id)indexPath {
-    if (StopProtectedOpen(self, item)) return;
-    %orig;
-}
 
 - (void)setSections:(NSArray*)sections restoreScrollPosition:(BOOL)restoreScrollPosition {
     %orig(SectionsForController(self, sections), restoreScrollPosition);
@@ -2180,6 +2202,83 @@ static void UpdateOtherAvatar(UIView* singleView) {
 - (void)handleSendTweetKeyCommand {
     if (!SendAllowed((UIViewController*)self)) return;
     %orig;
+}
+
+%end
+
+// MARK: - Tweet screen as B
+
+static id AccountForOpening(id account, long long statusID) {
+    if (!UnifiedActive() || !gBAccount || account != CurrentAccount() || statusID <= 0) return account;
+    EnsurePair();
+    if (![gBOnlyIDs containsObject:@(statusID)]) return account;
+    UnifiedLog(@"tweet screen opens as B");
+    return gBAccount;
+}
+
+static const NSInteger kBScreenAvatarTag = 0x4E4653;  // "NFS"
+
+static void ShowBOnScreen(UIViewController* controller) {
+    if (!IsBScreen(controller)) return;
+    UINavigationItem* item = controller.navigationItem;
+    for (UIBarButtonItem* existing in item.leftBarButtonItems) {
+        if (existing.customView.tag == kBScreenAvatarTag) return;
+    }
+    const CGFloat size = 28;
+    UIView* holder = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size + 8, size)];
+    holder.tag = kBScreenAvatarTag;
+    UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(4, 0, size, size)];
+    picture.image = AccountAvatar(gBAccount, @"B", BColor());
+    picture.contentMode = UIViewContentModeScaleAspectFill;
+    picture.clipsToBounds = YES;
+    picture.layer.cornerRadius = size / 2;
+    picture.layer.borderWidth = 1.5;
+    picture.layer.borderColor = BColor().CGColor;
+    [holder addSubview:picture];
+    [holder.widthAnchor constraintEqualToConstant:size + 8].active = YES;
+    [holder.heightAnchor constraintEqualToConstant:size].active = YES;
+    holder.isAccessibilityElement = YES;
+    holder.accessibilityLabel = [NSString stringWithFormat:@"%@로 보는 중", BName()];
+    UIBarButtonItem* avatar = [[UIBarButtonItem alloc] initWithCustomView:holder];
+    item.leftItemsSupplementBackButton = YES;
+    NSMutableArray* items = [item.leftBarButtonItems mutableCopy] ?: [NSMutableArray array];
+    [items insertObject:avatar atIndex:0];
+    item.leftBarButtonItems = items;
+    ShowNotice([NSString stringWithFormat:@"%@ 계정으로 보고 있어요. 여기서 하는 반응은 %@로 가요", BName(), BName()]);
+}
+
+%hook T1ConversationContainerViewController
+
+- (id)initWithAccount:(id)account
+                    statusID:(long long)statusID
+     statusNavigationContext:(id)navigationContext
+               scribeContext:(id)scribeContext
+    sourceNavigationMetadata:(id)sourceMetadata
+  overrideNavigationMetadata:(id)overrideMetadata
+ shouldIncludeReferrerParams:(BOOL)referrer
+shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
+           excludedStatusIDs:(id)excluded {
+    return %orig(AccountForOpening(account, statusID), statusID, navigationContext, scribeContext, sourceMetadata,
+                 overrideMetadata, referrer, quickPromote, excluded);
+}
+
+- (id)initWithAccount:(id)account
+                    viewModel:(id)viewModel
+      statusNavigationContext:(id)navigationContext
+                scribeContext:(id)scribeContext
+     sourceNavigationMetadata:(id)sourceMetadata
+   overrideNavigationMetadata:(id)overrideMetadata
+  shouldIncludeReferrerParams:(BOOL)referrer
+shouldNotifyDisplayLatestEdit:(BOOL)notifyEdit
+shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
+            excludedStatusIDs:(id)excluded {
+    return %orig(AccountForOpening(account, ViewModelStatusID(viewModel)), viewModel, navigationContext, scribeContext,
+                 sourceMetadata, overrideMetadata, referrer, notifyEdit, quickPromote, excluded);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    ShowBOnScreen((UIViewController*)self);
 }
 
 %end

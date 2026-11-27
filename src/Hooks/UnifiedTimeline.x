@@ -2485,6 +2485,10 @@ static NSString* BScreenTrouble(UIView* view) {
 
 static BOOL gInlineBypass;  // X's own tap path as A, chosen in the long-press sheet
 
+// X's own handling of the long press being answered (set by the hook only
+// while LongPressChooser runs); the repost sheet offers it as a row.
+static void (^gLongPressXPath)(void);
+
 static BOOL PresentReactionSheet(id actionsView, id button, NSString* gesture, void (^xPath)(void));
 static void PresentBRepostSheet(UIView* actionsView, id viewModel, NSString* gesture);
 
@@ -2879,6 +2883,23 @@ static BOOL PresentReactionSheet(id actionsView, id button, NSString* gesture, v
             @"title" : [NSString stringWithFormat:@"%@로 인용", AName()],
             @"image" : AccountAvatar(CurrentAccount(), @"A", purple),
             @"action" : quoteAsA,
+        }];
+    }
+    // 7.3.152: the long press on the repost button is X's way to the list of
+    // quotes, and this sheet took its place. From X's own long-press callback
+    // the sheet gets one more row that runs X's handling of that very press
+    // (the callback's %orig), so the list is still one tap away. Not on B's
+    // screens or on rows only B has: X would open it with A's account there.
+    void (^xLongPress)(void) = gLongPressXPath;
+    if (kind == 1 && xLongPress && !inB && cls != kProvBOnly) {
+        [rows addObject:@{
+            @"title" : @"인용 목록 보기",
+            @"image" : [UIImage systemImageNamed:@"quote.bubble"] ?: [UIImage new],
+            @"action" : ^{
+                if (!PairStill(pairAtAsk, @"sheet choice")) return;
+                UnifiedLog(@"sheet: X's own repost long press (the quotes list)");
+                xLongPress();
+            },
         }];
     }
     NSString* title = kind == 0 ? @"어느 계정으로 마음에 들어요를 누를까요?"
@@ -4206,7 +4227,12 @@ static void FollowBottomLoad(id stream, long long source) {
         %orig;
         return;
     }
-    if (LongPressChooser(self, button, @"X's long-press callback")) return;
+    gLongPressXPath = ^{
+        %orig;
+    };
+    BOOL chose = LongPressChooser(self, button, @"X's long-press callback");
+    gLongPressXPath = nil;
+    if (chose) return;
     if (HandleInlineAction(self, button, ^{
             %orig;
         }))

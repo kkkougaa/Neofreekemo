@@ -87,6 +87,9 @@ static NSUInteger gOpenedAsB;
 static NSString* gFilterPlace = @"not installed";
 static NSUInteger gTabRetapToggles;
 static NSString* gTabRetapNote = @"never called";
+static NSString* gTabRetapSeen = @"-";
+static NSString* gTabRetapClass = @"-";
+static BOOL gTabRetapInside;
 static __weak UIView* gFilterView;
 
 static const NSTimeInterval kNotifEvery = 10 * 60;
@@ -1968,7 +1971,8 @@ NSString* NFBUnifiedNotificationsDebugText(void) {
                       (unsigned long)gBSeenBatches, gBSeenSignature ?: @"-",
                       seen ? [NSString stringWithFormat:@"on for %@ (dock number then %@)", seen[@"id"], seen[@"base"]] : @"off",
                       (unsigned long)gSilentViewedStopped];
-    [out appendFormat:@"tab again: %@ (toggles %lu)%c", gTabRetapNote, (unsigned long)gTabRetapToggles, 10];
+    [out appendFormat:@"tab again: %@ (toggles %lu) on %@, list: %@%c", gTabRetapNote, (unsigned long)gTabRetapToggles, gTabRetapClass,
+                      gTabRetapSeen, 10];
     UIView* glassContainer = UNAvatarContainer();
     [out appendFormat:@"avatar pair: A rect %@ in button %@, B item %@%c", NSStringFromCGRect(UNAvatarRectIn(glassContainer)),
                       NSStringFromCGRect(glassContainer.bounds), NSStringFromCGRect(gBBarItem.customView.bounds), 10];
@@ -2212,7 +2216,20 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
     UIScrollView* list = onB ? UNScrollInside(gBLiveHost, 0) : UNListScrollView(a.view, 0);
     if (list) {
         CGFloat top = -list.adjustedContentInset.top;
-        if (list.contentOffset.y > top + 8) {
+        // 7.3.155: X's own word for "at the top" when the list has it
+        // (-tfn_isScrolledToTop, B16@0:8, a category in XServiceLibraries);
+        // 7.3.152 compared offsets itself and on the device never saw the top.
+        BOOL scrolled = list.contentOffset.y > top + 8;
+        SEL atTop = NSSelectorFromString(@"tfn_isScrolledToTop");
+        if ([list respondsToSelector:atTop]) {
+            NSMethodSignature* signature = [list methodSignatureForSelector:atTop];
+            if (signature.numberOfArguments == 2 && signature.methodReturnType[0] == 'B') {
+                scrolled = !((BOOL (*)(id, SEL))objc_msgSend)(list, atTop);
+            }
+        }
+        gTabRetapSeen = [NSString stringWithFormat:@"offset %.1f, inset top %.1f, X says top=%d", list.contentOffset.y, -top,
+                                                   [list respondsToSelector:atTop] ? !scrolled : -1];
+        if (scrolled) {
             if (!onB) {
                 gTabRetapNote = @"A's list scrolled down: X's own (to the top)";
                 return NO;
@@ -2228,19 +2245,74 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
     return YES;
 }
 
+// One tap is answered once: a subclass's method calling the base class's
+// comes through here twice.
+static BOOL UNTabRetapAnswer(id navigation) {
+    gTabRetapClass = NSStringFromClass([navigation class]);
+    BOOL toggled = NO;
+    @try {
+        toggled = UNTabRetapToggles((UINavigationController*)navigation);
+    } @catch (__unused NSException* exception) {
+        toggled = NO;
+    }
+    return toggled;
+}
+
 %group UnifiedNotifTabRetap
 
 %hook T1TabNavigationController
 
 - (void)handleTabSelectionIfAlreadySelected {
-    BOOL toggled = NO;
-    @try {
-        toggled = UNTabRetapToggles((UINavigationController*)self);
-    } @catch (__unused NSException* exception) {
-        toggled = NO;
+    if (gTabRetapInside) {
+        %orig;
+        return;
     }
-    if (toggled) return;
+    if (UNTabRetapAnswer(self)) return;
+    gTabRetapInside = YES;
     %orig;
+    gTabRetapInside = NO;
+}
+
+%end
+
+%end
+
+// 7.3.155: the subclasses that have a method of their own for it (12.44
+// T1Twitter dump: T1TimelineNavigationController and T1GuideNavigationController
+// each implement -handleTabSelectionIfAlreadySelected); the base class's hook
+// is not reached when they do not call it.
+%group UnifiedNotifTabRetapTimeline
+
+%hook T1TimelineNavigationController
+
+- (void)handleTabSelectionIfAlreadySelected {
+    if (gTabRetapInside) {
+        %orig;
+        return;
+    }
+    if (UNTabRetapAnswer(self)) return;
+    gTabRetapInside = YES;
+    %orig;
+    gTabRetapInside = NO;
+}
+
+%end
+
+%end
+
+%group UnifiedNotifTabRetapGuide
+
+%hook T1GuideNavigationController
+
+- (void)handleTabSelectionIfAlreadySelected {
+    if (gTabRetapInside) {
+        %orig;
+        return;
+    }
+    if (UNTabRetapAnswer(self)) return;
+    gTabRetapInside = YES;
+    %orig;
+    gTabRetapInside = NO;
 }
 
 %end
@@ -2276,6 +2348,19 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
         %init(UnifiedNotifTabRetap);
     } else {
         gTabRetapNote = @"not hooked (no such method)";
+    }
+    // Only where the class has the method itself (not just inherited).
+    SEL retap = NSSelectorFromString(@"handleTabSelectionIfAlreadySelected");
+    Method baseRetap = tabNavigation ? class_getInstanceMethod(tabNavigation, retap) : NULL;
+    Class timelineNavigation = objc_getClass("T1TimelineNavigationController");
+    Method timelineRetap = timelineNavigation ? class_getInstanceMethod(timelineNavigation, retap) : NULL;
+    if (timelineRetap && timelineRetap != baseRetap) {
+        %init(UnifiedNotifTabRetapTimeline);
+    }
+    Class guideNavigation = objc_getClass("T1GuideNavigationController");
+    Method guideRetap = guideNavigation ? class_getInstanceMethod(guideNavigation, retap) : NULL;
+    if (guideRetap && guideRetap != baseRetap) {
+        %init(UnifiedNotifTabRetapGuide);
     }
     // Unified mode, the pair or the switch changed in settings (or from the
     // dock): what no longer holds is taken away. queue:nil, then main (a main

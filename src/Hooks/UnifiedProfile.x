@@ -573,6 +573,15 @@ extern void NFBPresentAccountSheet(NSString* title, NSString* message, NSArray<N
 // A, B or both. asA runs X's own path (as the account in use, A).
 static void UPAskWhich(UPAction action, void (^asA)(void), void (^asB)(void)) {
     NSString* title = [NSString stringWithFormat:@"어느 계정으로 %@할까요?", UPActionTitle(action)];
+    NSString* aName = UPAName();
+    NSString* bName = UPBName();
+    // Answers hold only for the accounts in use when asked.
+    NSString* aAtAsk = UPAccountUserID(UPCurrentAccount());
+    BOOL (^same)(void) = ^BOOL {
+        if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
+        UPNotice(@"계정이 바뀌어서 보내지 않았어요");
+        return NO;
+    };
     UIColor* purple = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
     NFBPresentAccountSheet(title, nil, @[
         @{ @"title" : [NSString stringWithFormat:@"%@ (A)", aName],

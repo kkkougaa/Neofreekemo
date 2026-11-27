@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.134",
+      "subtitle": "NeoFreeBird version 7.3.135",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.135",
+          "buildVersion": "135",
+          "date": "2026-11-27T04:27:14Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.135/NeoFreeBird-Twitter-sideloaded_7.3.135_12.44.ipa",
+          "size": 273573699,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: B만 가진 트윗의 마음·재게시는 B 계정으로, 답글은 B로 바뀐 작성 화면으로 보냅니다. 두 계정이 다 가진 트윗은 어느 계정으로 할지 묻습니다. 한 계정만 가진 트윗에는 시간 옆에 그 계정의 작은 프로필 사진이 붙습니다."
+        },
         {
           "version": "7.3.134",
           "buildVersion": "134",

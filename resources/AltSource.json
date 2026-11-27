@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.140",
+      "subtitle": "NeoFreeBird version 7.3.141",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.141",
+          "buildVersion": "141",
+          "date": "2026-11-27T06:08:22Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.141/NeoFreeBird-Twitter-sideloaded_7.3.141_12.44.ipa",
+          "size": 273598070,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: 둘 다 팔로우하는 사람의 트윗(다른 사람이 재게시한 같은 트윗 포함)이 B 트윗으로 잘못 표시되던 문제를 고쳤습니다. B 트윗이 한곳에 몰려 타임라인을 채우던 정렬 문제를 고쳤고, A가 더 내려가면 B도 더 불러옵니다."
+        },
         {
           "version": "7.3.140",
           "buildVersion": "140",

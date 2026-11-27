@@ -187,8 +187,10 @@ static BOOL UNActive(void) {
     NSString* bID = [defaults stringForKey:@"kemo_unified_b_id"];
     NSString* currentID = UNAccountID(UNCurrentAccount());
     if (bID.length == 0 || currentID.length == 0 || [bID isEqualToString:currentID]) return NO;
+    // 7.3.153: a saved A is required, as in UnifiedTimeline.x (it used to
+    // count as on with only B saved, on any account that was not B).
     NSString* aID = [defaults stringForKey:@"kemo_unified_a_id"];
-    return aID.length == 0 || [aID isEqualToString:currentID];
+    return aID.length > 0 && ![aID isEqualToString:bID] && [aID isEqualToString:currentID];
 }
 
 // B's account, only if it really is B's and not the one in use.
@@ -1723,6 +1725,8 @@ void NFBUnifiedNotificationsReactionsWired(void) {
 // were looked at here since the dock last saved a different number for B;
 // -1 = no opinion, use the dock's own number.
 NSInteger NFBUnifiedNotificationsBadgeOverride(id account) {
+    // 7.3.153: only while the mode is on; a single account's dock number is its own.
+    if (!UNActive()) return -1;
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     NSDictionary* seen = [defaults dictionaryForKey:kNotifSeenKey];
     NSString* accountID = UNAccountID(account);

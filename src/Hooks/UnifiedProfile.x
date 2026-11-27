@@ -141,8 +141,10 @@ static BOOL UPActive(void) {
     NSString* bID = UPBID();
     NSString* currentID = UPAccountUserID(UPCurrentAccount());
     if (bID.length == 0 || currentID.length == 0 || [bID isEqualToString:currentID]) return NO;
+    // 7.3.153: a saved A is required, as in UnifiedTimeline.x (it used to
+    // count as on with only B saved, on any account that was not B).
     NSString* aID = UPAID();
-    return aID.length == 0 || [aID isEqualToString:currentID];
+    return aID.length > 0 && ![aID isEqualToString:bID] && [aID isEqualToString:currentID];
 }
 
 // B's account object, only if it really is B's.
@@ -929,21 +931,24 @@ static void UPAllowX(UIView* button) {
 
 // The user already chose in the sheet: X's own action must not ask again.
 // -setConfirmUnfollow: is on both TUIFollowButtonV2 and TUIFollowControl.
-static void UPQuietConfirm(UIView* button, NSString* entry) {
+// Returns what X's button had (to put back after X's action ran), -1 when
+// nothing was changed.
+static long long UPQuietConfirm(UIView* button, NSString* entry) {
     SEL selector = NSSelectorFromString(@"setConfirmUnfollow:");
     if (!button || ![button respondsToSelector:selector]) {
         UPLog([NSString stringWithFormat:@"X confirm not turned off (%@): no setConfirmUnfollow:", entry]);
-        return;
+        return -1;
     }
     long long before = UPNumber(button, @"confirmUnfollow");
     @try {
         ((void (*)(id, SEL, BOOL))objc_msgSend)(button, selector, NO);
     } @catch (NSException* exception) {
         UPLog([NSString stringWithFormat:@"X confirm not turned off (%@): threw %@", entry, exception.name]);
-        return;
+        return -1;
     }
     UPLog([NSString stringWithFormat:@"X confirm turned off for the sheet's choice (%@, confirmUnfollow %lld -> %lld)", entry, before,
                                      UPNumber(button, @"confirmUnfollow")]);
+    return before;
 }
 
 // NO when X's own follow-button action must not run: the mode is active and
@@ -1070,11 +1075,19 @@ static BOOL UPShowFollowSheet(UIView* button, NSString* entry, BOOL xToggles, vo
                 UPLog([NSString stringWithFormat:@"%@ %lld as %@ via X", follow ? @"follow" : @"unfollow", userID, letter]);
                 // 7.3.151: no second question from X, and X's action is
                 // let through for this button.
-                UPQuietConfirm(weakButton, entry);
+                long long confirmWas = UPQuietConfirm(weakButton, entry);
                 UPAllowX(weakButton);
                 gFollowSheetBypass = YES;
                 xPath();
                 gFollowSheetBypass = NO;
+                // 7.3.153: X's button gets its own setting back (it stayed off).
+                UIView* quieted = weakButton;
+                if (confirmWas > 0 && [quieted respondsToSelector:NSSelectorFromString(@"setConfirmUnfollow:")]) {
+                    @try {
+                        ((void (*)(id, SEL, BOOL))objc_msgSend)(quieted, NSSelectorFromString(@"setConfirmUnfollow:"), YES);
+                    } @catch (__unused NSException* exception) {
+                    }
+                }
                 UPRememberFollow(accountID, userID, follow);
             } else {
                 id account = [letter isEqualToString:@"A"] ? UPCurrentAccount() : UPBAccount();

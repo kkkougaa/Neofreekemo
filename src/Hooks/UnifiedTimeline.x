@@ -374,7 +374,13 @@ static BOOL ComputeActive(NSString** pairOut, NSString** whyNot) {
         why = @"A and B are the same account";
     } else {
         NSString* currentID = AccountUserID(CurrentAccount());
-        if (currentID.length == 0 || ![aID isEqualToString:currentID]) why = @"the account in use is not A";
+        if (currentID.length == 0 || ![aID isEqualToString:currentID]) {
+            why = @"the account in use is not A";
+        } else if (!AccountForID(bID)) {
+            // 7.3.153: B has to be signed in on this device (a logged-out B
+            // left the mode on, with its rows opening as A).
+            why = @"B is not signed in";
+        }
     }
     if (whyNot) *whyNot = why;
     if (why) return NO;
@@ -2335,7 +2341,10 @@ static void RepostAs(BOOL asB, id viewModel, BOOL screenIsTheirs) {
             // also carries B's repost ID for the undo.
             id bStatus = BStatusFor(statusID) ?: LookedUp(YES, statusID)[@"status"];
             if (!bStatus && screenIsTheirs) bStatus = status;
-            sent = NFBUnifiedUndoRepostAsB(account, bStatus ?: status, &why);
+            // 7.3.153: never A's copy of the tweet (it carries A's repost ID);
+            // without B's own it is not sent.
+            sent = bStatus ? NFBUnifiedUndoRepostAsB(account, bStatus, &why) : NO;
+            if (!bStatus) UnifiedLog([NSString stringWithFormat:@"unrepost as B stopped: no status of B's for %lld", statusID]);
         } else {
             sent = UndoRepostAsA(account, statusID, &why);
         }
@@ -2784,6 +2793,16 @@ static BOOL PresentReactionSheet(id actionsView, id button, NSString* gesture, v
         // (7.3.151: also that what the row shows was not loaded as B).
         if (IsInBScreen(actions) || ProvIsBLoaded(ProvOf(Getter(actions, @"viewModel")))) {
             ShowBlockNotice([NSString stringWithFormat:@"%@로 보는 화면이라 %@로는 보내지 않았어요. 뒤로 나가서 다시 눌러주세요", BName(), AName()]);
+            return;
+        }
+        // 7.3.153: X's own tap goes out as the action bar's account
+        // (-[TTAStatusInlineActionsView account], 12.44 XAppLibraries dump).
+        // On a screen that was pushed from a B screen and is not one this
+        // file knows, that is not A: the row says A, so it is not sent.
+        NSString* barAccountID = AccountUserID(Getter(actions, @"account"));
+        if (barAccountID.length > 0 && ![barAccountID isEqualToString:AID()]) {
+            Blocked([NSString stringWithFormat:@"sheet: %@ as A, but the action bar's account is %@", ReactionName(kind), barAccountID],
+                    [NSString stringWithFormat:@"%@의 화면이 아니라서 %@로는 보내지 않았어요. 뒤로 나가서 다시 눌러주세요", AName(), AName()]);
             return;
         }
         UnifiedLog([NSString stringWithFormat:@"sheet: %@ as A via X (%@)", ReactionName(kind),
@@ -3806,7 +3825,10 @@ static NSUInteger CloseBScreens(NSUInteger* leftOut) {
 // feature was switched off, the saved pair changed, or the account in use is
 // no longer A (called by UnifiedActive() the first time it sees it). Nothing
 // built for the unified mode may go on having an effect after this.
+extern void NFBUnifiedGuardReset(void);
+
 static void UnifiedBecameInactive(NSString* why) {
+    NFBUnifiedGuardReset();
     gWasActive = NO;
     gPairKey = nil;
     // (1) A's lists as X made them, once; then nothing is kept that a later
@@ -4712,6 +4734,20 @@ static BOOL SendAllowed(UIViewController* composer) {
         }
     }
     if (intended.length == 0) return YES;
+    // 7.3.153: the account the composer was marked for has to be one that may
+    // send now: A or B of the pair while the mode is on, and only the account
+    // in use once it is off (a composer marked for B used to send as B after
+    // the mode had ended, and one marked for an earlier B at any time).
+    NSString* currentID = AccountUserID(CurrentAccount());
+    BOOL mayHold = active ? ([intended isEqualToString:AID()] || [intended isEqualToString:BID()])
+                          : (currentID.length > 0 && [intended isEqualToString:currentID]);
+    if (!mayHold) {
+        Blocked([NSString stringWithFormat:@"send: the composer is marked for %@, which may not send now (mode %@)", intended,
+                                           active ? @"on, not this pair" : @"off"],
+                nil);
+        SendAlert(composer, @"통합 계정 상태가 바뀌어서 보내지 않았어요. 글은 그대로 있어요. 작성 화면을 닫고 게시물에서 다시 눌러주세요.");
+        return NO;
+    }
     BOOL isB = [intended isEqualToString:BID()];
     id account = (isB && active) ? VerifiedB() : AccountForID(intended);
     if (account && ![AccountUserID(account) isEqualToString:intended]) account = nil;
@@ -5109,6 +5145,10 @@ static BOOL UnifiedHomeOnScreen(void) {
     return NO;
 }
 
+// Set by the hooks that can simply not open the screen (the "show" calls).
+static BOOL gOpenCanRefuse;
+static BOOL gOpenRefused;
+
 static id AccountForOpening(id account, long long statusID, id viewModel, NSString* where) {
     if (!gEverActive || !UnifiedActive()) return account;
     NSString* accountID = AccountUserID(account);
@@ -5142,6 +5182,14 @@ static id AccountForOpening(id account, long long statusID, id viewModel, NSStri
                                           asB ? @"B" : @"as is", how]);
     if (!asB) return account;
     id b = VerifiedB();
+    if (!b && gOpenCanRefuse) {
+        // 7.3.153: from a "show" call the screen is not opened at all.
+        gOpenRefused = YES;
+        Blocked([NSString stringWithFormat:@"tweet screen for %lld should open as B but B is not verified (%@); not opened", statusID,
+                                           gVerifiedBWhy ?: @"?"],
+                @"B 계정을 확인하지 못해서 열지 않았어요. kemo 설정에서 B 계정을 다시 골라주세요");
+        return account;
+    }
     if (!b) {
         // An init cannot be refused; it opens as X asked and says so.
         Blocked([NSString stringWithFormat:@"tweet screen for %lld should open as B but B is not verified (%@)", statusID, gVerifiedBWhy ?: @"?"],
@@ -5317,8 +5365,12 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
                           sourceNavigationMetadata:(id)sourceMetadata
                                 fromViewController:(id)fromController
                                           animated:(BOOL)animated {
-    %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"navigation show"), navigationContext,
-          scribeContext, sourceMetadata, fromController, animated);
+    gOpenCanRefuse = YES;
+    gOpenRefused = NO;
+    id opening = AccountForOpening(account, statusID, viewModel, @"navigation show");
+    gOpenCanRefuse = NO;
+    if (gOpenRefused) return;
+    %orig(viewModel, statusID, opening, navigationContext, scribeContext, sourceMetadata, fromController, animated);
 }
 
 %end
@@ -5348,8 +5400,12 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
                           sourceNavigationMetadata:(id)sourceMetadata
                                 fromViewController:(id)fromController
                                           animated:(BOOL)animated {
-    %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"x navigation show"), navigationContext,
-          scribeContext, sourceMetadata, fromController, animated);
+    gOpenCanRefuse = YES;
+    gOpenRefused = NO;
+    id opening = AccountForOpening(account, statusID, viewModel, @"x navigation show");
+    gOpenCanRefuse = NO;
+    if (gOpenRefused) return;
+    %orig(viewModel, statusID, opening, navigationContext, scribeContext, sourceMetadata, fromController, animated);
 }
 
 %end

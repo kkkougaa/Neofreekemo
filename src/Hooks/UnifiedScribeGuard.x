@@ -95,6 +95,16 @@ void NFBUnifiedGuardNote(NSSet<NSNumber*>* ids, id bAccount) {
     }
 }
 
+// 7.3.153, from UnifiedTimeline.x when the mode stops or the pair changes:
+// nothing noted for the old pair is kept (the IDs only ever grew before).
+void NFBUnifiedGuardReset(void) {
+    @synchronized(GuardLock()) {
+        gGuardIDs = nil;
+        gGuardBID = nil;
+        gGuardBLogger = nil;
+    }
+}
+
 extern BOOL NFBUnifiedIsActive(void);
 
 // Only while the unified mode is in use: on A alone or B alone nothing here

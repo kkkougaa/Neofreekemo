@@ -85,6 +85,8 @@ static BOOL gReactionsWired;
 static NSUInteger gReactionsBlocked;
 static NSUInteger gOpenedAsB;
 static NSString* gFilterPlace = @"not installed";
+static NSUInteger gTabRetapToggles;
+static NSString* gTabRetapNote = @"never called";
 static __weak UIView* gFilterView;
 
 static const NSTimeInterval kNotifEvery = 10 * 60;
@@ -2116,8 +2118,6 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 // scrolls it to the top as X does (A's list by X's own code, B's embedded
 // list here, since X's code only knows A's). Anywhere else, and with unified
 // off, X's own.
-static NSUInteger gTabRetapToggles;
-static NSString* gTabRetapNote = @"never called";
 
 // The list inside B's embedded screen (UNListScrollView skips that screen).
 static UIScrollView* UNScrollInside(UIView* view, int depth) {

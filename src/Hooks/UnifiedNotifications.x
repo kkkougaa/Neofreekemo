@@ -2319,6 +2319,43 @@ static BOOL UNTabRetapAnswer(id navigation) {
 
 %end
 
+// 7.3.156 (device dump of 7.3.155: "tab again: never called"). The tabs'
+// navigation controllers are XNAVNavigationController here, not
+// T1TabNavigationController, so none of the hooks above is reached. What a
+// tap on the tab already showing does there is scroll to the top:
+// -xnav_scrollToTopAnimated:completion: (B28@0:8B16@?20), a category method
+// on the navigation controller (XServiceLibraries dump, category TFNUISwift,
+// next to pushViewController:animated:completion:). X's own call always runs;
+// when the finger came down on the tab bar and the list was already at its
+// top, the list then goes over to the other account.
+extern BOOL NFBTouchCameFromTabBar(void);
+
+%group UnifiedNotifTabRetapXNav
+
+%hook UINavigationController
+
+- (BOOL)xnav_scrollToTopAnimated:(BOOL)animated completion:(id)completion {
+    BOOL fromTabBar = NO;
+    @try {
+        fromTabBar = [NSThread isMainThread] && !gTabRetapInside && NFBTouchCameFromTabBar();
+    } @catch (__unused NSException* exception) {
+    }
+    if (!fromTabBar) return %orig;
+    // Asked before X scrolls (afterwards the list is at the top either way).
+    gTabRetapInside = YES;
+    @try {
+        UNTabRetapAnswer(self);
+    } @catch (__unused NSException* exception) {
+    }
+    BOOL result = %orig;
+    gTabRetapInside = NO;
+    return result;
+}
+
+%end
+
+%end
+
 %group UnifiedNotifAvatarButton
 
 // The tab roots' avatar bar button (private Swift class of TwitterDash, 12.44).
@@ -2348,6 +2385,14 @@ static BOOL UNTabRetapAnswer(id navigation) {
         %init(UnifiedNotifTabRetap);
     } else {
         gTabRetapNote = @"not hooked (no such method)";
+    }
+    Method xnavTop = class_getInstanceMethod([UINavigationController class], NSSelectorFromString(@"xnav_scrollToTopAnimated:completion:"));
+    const char* xnavTypes = xnavTop ? method_getTypeEncoding(xnavTop) : NULL;
+    if (xnavTypes && strcmp(xnavTypes, "B28@0:8B16@?20") == 0) {
+        %init(UnifiedNotifTabRetapXNav);
+        gTabRetapNote = @"never called (xnav hook on)";
+    } else {
+        gTabRetapNote = [NSString stringWithFormat:@"xnav_scrollToTopAnimated:completion: not hooked (%s)", xnavTypes ?: "no such method"];
     }
     // Only where the class has the method itself (not just inherited).
     SEL retap = NSSelectorFromString(@"handleTabSelectionIfAlreadySelected");

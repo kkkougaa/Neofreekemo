@@ -87,6 +87,7 @@ static BOOL gPairFailed = NO;
 static BOOL gPairNotFoundLogged = NO;
 static NSString* gPairPlacement = @"none";
 static CGFloat gPairPictureSize = 0;
+static CGFloat gPairNaturalSize = 0;  // X's avatar as X draws it, before our scale
 // 7.3.152: one glass capsule behind both pictures (see "The capsule" below).
 static const CGFloat kPairPad = 4.0;             // glass past the pictures, every side
 static UIVisualEffectView* gPairCapsule;
@@ -280,6 +281,10 @@ static void HSPairRemove(NSString* why) {
     UIViewController* holder = gPairHolder;
     UIBarButtonItem* avatarItem = gPairAvatarItem;
     UIVisualEffectView* capsule = gPairCapsule;
+    // X's avatar is its own size again.
+    UIView* scaled = gPairContainer;
+    if (scaled && !CATransform3DIsIdentity(scaled.layer.sublayerTransform)) scaled.layer.sublayerTransform = CATransform3DIdentity;
+    gPairNaturalSize = 0;
     gPairItem = nil;
     gPairHolder = nil;
     gPairAvatarItem = nil;
@@ -654,14 +659,26 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
     UIView* side = ours.customView;
     UIImageView* picture = (UIImageView*)[side viewWithTag:2];
     // The same size as X's A picture; always whole and in full colour here.
-    CGFloat size = HSAvatarSizeIn(container);
+    // 7.3.156 (device, 7.3.155): X's avatar is 44pt in a 36pt button, the
+    // whole height of the bar's 44pt platter, so the shared capsule had no
+    // margin above, below or left of the pictures. While the pair is shown
+    // both pictures are kPairPad smaller all round: X's avatar by a scale on
+    // what its button draws (its layer's sublayerTransform; no frame of X's
+    // is touched, and it is taken off with the pair), ours by its size.
+    BOOL scaledNow = !CATransform3DIsIdentity(container.layer.sublayerTransform);
+    CGFloat natural = (scaledNow && gPairNaturalSize > 0) ? gPairNaturalSize : HSAvatarSizeIn(container);
+    gPairNaturalSize = natural;
+    CGFloat size = MAX(natural - 2 * kPairPad, 24);
+    CGFloat factor = natural > 0 ? size / natural : 1.0;
+    CATransform3D wanted = CATransform3DMakeScale(factor, factor, 1.0);
+    if (!CATransform3DEqualToTransform(container.layer.sublayerTransform, wanted)) container.layer.sublayerTransform = wanted;
     gPairPictureSize = size;
     // Our item is as big as X's avatar button (so the two take the same room
     // in the bar), never less than the picture plus the capsule's margin; the
     // picture stays in its middle whatever size the bar gives it.
     CGFloat box = size + 2 * kPairPad;
-    CGFloat boxWidth = MIN(MAX(box, CGRectGetWidth(container.bounds)), 64);
-    CGFloat boxHeight = MIN(MAX(box, CGRectGetHeight(container.bounds)), 64);
+    CGFloat boxWidth = box;
+    CGFloat boxHeight = box;
     if (gPairWidth.constant != boxWidth) gPairWidth.constant = boxWidth;
     if (gPairHeight.constant != boxHeight) gPairHeight.constant = boxHeight;
     if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);

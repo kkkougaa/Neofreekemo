@@ -2037,6 +2037,15 @@ static BOOL TouchStartedOnTabBar(UIWindow* window) {
     return gTouchStartPoint.y >= bottom;
 }
 
+// 7.3.156, for UnifiedNotifications.x: the finger now down (or just lifted)
+// came down on the tab bar. YES when touches are not followed at all (both
+// the circles and the dock off), so nothing depends on these switches.
+BOOL NFBTouchCameFromTabBar(void) {
+    if (!(BubblesOn() || DockOn())) return YES;
+    if (!gTouchDown && NSProcessInfo.processInfo.systemUptime - gTouchEnd > 0.8) return NO;
+    return TouchStartedOnTabBar(nil);
+}
+
 static BOOL FanIsUp(void) {
     return [NFBAccountPressHandler shared].fan.superview != nil || gCaughtFan.superview != nil ||
            gLiveDock != nil;

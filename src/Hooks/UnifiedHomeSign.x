@@ -648,9 +648,10 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
     // in the bar), never less than the picture plus the capsule's margin; the
     // picture stays in its middle whatever size the bar gives it.
     CGFloat box = size + 2 * kPairPad;
-    // The bar puts 4pt of platter round every item (dump: a 36pt item in a
-    // 44pt platter), so our item is just the picture, as X's button is.
-    CGFloat boxWidth = box - 2 * kPairPad;
+    // 7.3.160: as wide as the notifications switch's B item (picture + 4pt each
+    // side), so B's picture stands at the same place on both tabs; it was 4pt
+    // further left here (device screenshots of 7.3.158).
+    CGFloat boxWidth = box;
     CGFloat boxHeight = box - 2 * kPairPad;
 
     if (gPairWidth.constant != boxWidth) gPairWidth.constant = boxWidth;

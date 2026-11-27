@@ -4921,6 +4921,22 @@ static UIVisualEffect* GlassEffect(void) {
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
 }
 
+// 7.3.155: the slots' holder covers the whole tweet view (the slots are
+// placed in its coordinates) and, as a plain view on top, it took every touch
+// meant for what is under it: the text, the photos and their edit buttons.
+// It now takes a touch only where one of the two slots is.
+@interface NFBComposerSlotsHolder : UIView
+@end
+
+@implementation NFBComposerSlotsHolder
+
+- (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
+    UIView* hit = [super hitTest:point withEvent:event];
+    return [hit isKindOfClass:[UIButton class]] ? hit : nil;
+}
+
+@end
+
 static void UpdateOtherAvatar(UIView* singleView) {
     UIView* holder = [singleView viewWithTag:kOtherAvatarTag];
     UIView* avatar = ComposerAvatar(singleView);
@@ -4940,7 +4956,7 @@ static void UpdateOtherAvatar(UIView* singleView) {
     CGPoint top = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
     CGPoint bottom = CGPointMake(top.x, top.y + big / 2 + pad * 2 + big / 2);
     if (!holder) {
-        holder = [[UIView alloc] initWithFrame:singleView.bounds];
+        holder = [[NFBComposerSlotsHolder alloc] initWithFrame:singleView.bounds];
         holder.tag = kOtherAvatarTag;
         holder.clipsToBounds = NO;
         UIVisualEffectView* glass = [[UIVisualEffectView alloc] initWithEffect:GlassEffect()];

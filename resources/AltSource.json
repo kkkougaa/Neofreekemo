@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.151",
+      "subtitle": "NeoFreeBird version 7.3.152",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.152",
+          "buildVersion": "152",
+          "date": "2026-11-27T10:09:34Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.152/NeoFreeBird-Twitter-sideloaded_7.3.152_12.44.ipa",
+          "size": 273897693,
+          "minOSVersion": "15.0",
+          "localizedDescription": "통합 계정 아이콘 정리: 홈 상단의 A·B 사진 크기를 똑같이 맞추고 알약형 글래스 하나로 감쌌어요. 알림·이전내역의 A | B 전환도 사진 크기가 같고, 안 보고 있는 계정만 흐리게 보여요. 알림 탭을 한 번 더 누르면 맨 위에서는 A↔B 전환, 스크롤 중에는 맨 위로 올라가요. 홈 탭을 길게 눌러 계정 독을 여는 동작을 다시 손봤어요."
+        },
         {
           "version": "7.3.151",
           "buildVersion": "151",

@@ -74,6 +74,9 @@ static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
 static NSUInteger gBBottomLoads;
 static CFAbsoluteTime gBLastBottom;
+static long long gLastASource = 101;
+static void FollowBottomLoad(id stream, long long source);
+static void LoadMoreB(long long source, NSString* why);
 static NSMutableSet<NSNumber*>* gBOnlyIDs;
 static NSMutableSet<NSNumber*>* gBothIDs;
 static NSMutableSet<NSNumber*>* gAOnlyIDs;
@@ -302,6 +305,7 @@ static void RefreshB(long long source, NSString* why) {
     // X refreshes a timeline through several calls at once; one B refresh per A refresh.
     if (CFAbsoluteTimeGetCurrent() - gBLastRefresh < 3) return;
     gBLastRefresh = CFAbsoluteTimeGetCurrent();
+    gLastASource = source;
     UnifiedLog([NSString stringWithFormat:@"refresh B (%@, source %lld)", why, source]);
     void (^completion)(void) = ^{
     };
@@ -320,16 +324,41 @@ static BOOL IsFollowingController(id controller) {
     return timeline && [gFollowingTimelines containsObject:timeline];
 }
 
-// Number in an entry ID like "tweet-123…"; the status ID otherwise.
+static id ActedStatusOf(id viewModel);
+
+// When it reached the timeline: the status ID (a snowflake, so in time order;
+// for a repost it is the repost's own ID). 7.3.141: it was every digit of the
+// entry ID run together, which for a conversation module made a huge number,
+// put A out of order (163 of 171 blocks) and piled B's tweets up in one place.
 static long long SortKey(id item) {
+    long long statusID = NumberGetter(item, @"statusID");
+    if (statusID > 0) return statusID;
     id entryID = Getter(item, @"entryID");
     if ([entryID isKindOfClass:[NSString class]]) {
-        NSString* digits = [[entryID componentsSeparatedByCharactersInSet:
-                                         [[NSCharacterSet decimalDigitCharacterSet] invertedSet]]
-                            componentsJoinedByString:@""];
-        if (digits.length >= 10) return digits.longLongValue;
+        // The first long run of digits only ("tweet-123", "home-conversation-123-...").
+        for (NSString* part in [entryID componentsSeparatedByCharactersInSet:
+                                            [[NSCharacterSet decimalDigitCharacterSet] invertedSet]]) {
+            if (part.length >= 10) return part.longLongValue;
+        }
     }
-    return NumberGetter(item, @"statusID");
+    return 0;
+}
+
+// Who brought a tweet into a Following timeline: the reposter for a repost,
+// the author otherwise (the status the timeline item is, not the one it shows).
+static long long BringerID(id item) {
+    long long userID = NumberGetter(item, @"fromUserID");
+    if (userID <= 0) userID = NumberGetter(Getter(item, @"status"), @"fromUserID");
+    return userID;
+}
+
+static long long ActedID(id item) {
+    return NumberGetter(ActedStatusOf(item), @"statusID");
+}
+
+static id ActedStatusOf(id viewModel) {
+    id status = Getter(viewModel, @"representedStatus") ?: Getter(viewModel, @"status");
+    return Getter(status, @"representedStatus") ?: status;
 }
 
 static BOOL IsStatusItem(id item) {
@@ -439,8 +468,29 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
     }
 
     NSArray* aItems = sections[target];
+    if (best < 5) {
+        // X is still loading or showing a placeholder; mixing B into a handful
+        // of A's tweets would fill the screen with B.
+        gLastMerge = [NSString stringWithFormat:@"A has only %lu statuses; not merging", (unsigned long)best];
+        return sections;
+    }
     NSMutableSet<NSNumber*>* aIDs = [NSMutableSet set];
     for (id item in aItems) CollectStatusIDs(unwrapDataViewItem(item), aIDs, 0);
+    // The originals A has (whoever reposted them) and the people who brought
+    // A's tweets, i.e. people A follows.
+    NSMutableSet<NSNumber*>* aActed = [NSMutableSet set];
+    NSMutableSet<NSNumber*>* aBringers = [NSMutableSet set];
+    long long newestA = 0;
+    for (id item in aItems) {
+        id model = unwrapDataViewItem(item);
+        if (!IsStatusItem(model)) continue;
+        if (BoolGetter(model, @"isPromoted")) continue;
+        long long acted = ActedID(model);
+        if (acted > 0) [aActed addObject:@(acted)];
+        long long bringer = BringerID(model);
+        if (bringer > 0) [aBringers addObject:@(bringer)];
+        newestA = MAX(newestA, SortKey(model));
+    }
     NSArray<NSArray*>* blocks = Blocks(aItems);
     long long oldestA = LLONG_MAX;
     for (NSArray* block in blocks) {
@@ -455,7 +505,12 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
     for (id object in bObjects) {
         if (IsStatusItem(object) && SortKey(object) > 0) oldestB = MIN(oldestB, SortKey(object));
     }
-    NSUInteger dupes = 0, older = 0, promoted = 0;
+    // A reaches further back than B: B loads its next page (7.3.141; X's own
+    // load-more for the home tab does not go through loadBottomWithSource:).
+    if (oldestB != LLONG_MAX && oldestA != LLONG_MAX && oldestA < oldestB) {
+        LoadMoreB(gLastASource, @"A is older than B");
+    }
+    NSUInteger dupes = 0, older = 0, promoted = 0, followedByA = 0, newer = 0;
     for (id object in bObjects) {
         if (!IsStatusItem(object)) continue;
         if (BoolGetter(object, @"isPromoted")) {
@@ -464,7 +519,9 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         }
         long long statusID = NumberGetter(object, @"statusID");
         if (statusID <= 0) continue;
-        if ([aIDs containsObject:@(statusID)]) {
+        long long acted = ActedID(object);
+        if ([aIDs containsObject:@(statusID)] || (acted > 0 && [aActed containsObject:@(acted)])) {
+            // A has this tweet (maybe through someone else's repost): shown once, A's copy.
             dupes++;
             [both addObject:@(statusID)];
             continue;
@@ -473,8 +530,20 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
             older++;
             continue;
         }
+        if (newestA > 0 && SortKey(object) > newestA) {
+            // Newer than A's newest: A's next refresh (which refreshes B too) sorts it in.
+            newer++;
+            continue;
+        }
         [bItems addObject:object];
-        [bOnly addObject:@(statusID)];
+        long long bringer = BringerID(object);
+        if (bringer > 0 && [aBringers containsObject:@(bringer)]) {
+            // A follows whoever brought it: both have it, A just has not loaded it.
+            followedByA++;
+            [both addObject:@(statusID)];
+        } else {
+            [bOnly addObject:@(statusID)];
+        }
     }
     [bItems sortUsingComparator:^NSComparisonResult(id a, id b) {
         return [@(SortKey(b)) compare:@(SortKey(a))];
@@ -518,10 +587,12 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         [gRetiredIDs minusSet:aOnly];
     }
     gLastMerge = [NSString stringWithFormat:@"A items=%lu blocks=%lu statuses=%lu (raw %lu, wrapped %lu) | B inserted=%lu "
+                                            @"(followed by A %lu, newer than A %lu) "
                                             @"both=%lu olderThanA=%lu promoted=%lu leftOver=%lu | A outOfOrder=%lu",
                                             (unsigned long)aItems.count, (unsigned long)blocks.count,
                                             (unsigned long)best, (unsigned long)raw, (unsigned long)wrappedCount,
-                                            (unsigned long)next, (unsigned long)dupes, (unsigned long)older,
+                                            (unsigned long)next, (unsigned long)followedByA, (unsigned long)newer,
+                                            (unsigned long)dupes, (unsigned long)older,
                                             (unsigned long)promoted, (unsigned long)(bItems.count - next),
                                             (unsigned long)outOfOrder];
     NSMutableArray* result = [sections mutableCopy];
@@ -529,18 +600,27 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
     return result;
 }
 
+static NSMutableArray<NSString*>* gMergeHistory;
+
 static NSArray* SectionsForController(id controller, NSArray* sections) {
     if (!sections || !UnifiedActive() || !IsFollowingController(controller)) return sections;
     objc_setAssociatedObject(controller, kOriginalSectionsKey, sections, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (!gFollowingControllers) gFollowingControllers = [NSHashTable weakObjectsHashTable];
     [gFollowingControllers addObject:controller];
     if (!BTimeline()) return sections;
+    NSArray* result = sections;
     @try {
-        return MergedSections(controller, sections);
+        result = MergedSections(controller, sections);
     } @catch (NSException* exception) {
         gLastMerge = [NSString stringWithFormat:@"merge threw %@", exception.name];
-        return sections;
     }
+    // The last few merges, to see what happened when the tab suddenly changes.
+    if (!gMergeHistory) gMergeHistory = [NSMutableArray array];
+    NSDateFormatter* formatter = [NSDateFormatter new];
+    formatter.dateFormat = @"HH:mm:ss";
+    [gMergeHistory addObject:[NSString stringWithFormat:@"%@ %@", [formatter stringFromDate:[NSDate date]], gLastMerge]];
+    while (gMergeHistory.count > 6) [gMergeHistory removeObjectAtIndex:0];
+    return result;
 }
 
 static BOOL gReapplyQueued;
@@ -1028,6 +1108,26 @@ NSString* NFBUnifiedTimelineDebugText(void) {
     [out appendFormat:@"B timeline=%@ stream=%@ objects=%lu\n", gBTimeline ? @"made" : @"none", stream ? @"set" : @"nil",
                       (unsigned long)([objects respondsToSelector:@selector(count)] ? [objects count] : 0)];
     [out appendFormat:@"wrapper: %@ bLoadMore=%lu\n", gTemplateNote, (unsigned long)gBBottomLoads];
+    if (stream) {
+        NSMutableArray* chain = [NSMutableArray array];
+        NSMutableArray* loads = [NSMutableArray array];
+        for (Class cls = [stream class]; cls && cls != [NSObject class]; cls = class_getSuperclass(cls)) {
+            [chain addObject:NSStringFromClass(cls)];
+            unsigned int count = 0;
+            Method* methods = class_copyMethodList(cls, &count);
+            for (unsigned int i = 0; i < count; i++) {
+                NSString* name = NSStringFromSelector(method_getName(methods[i]));
+                if ([name rangeOfString:@"ottom"].location != NSNotFound || [name rangeOfString:@"lder"].location != NSNotFound ||
+                    [name rangeOfString:@"oadMore"].location != NSNotFound) {
+                    [loads addObject:[NSString stringWithFormat:@"%@.%@", NSStringFromClass(cls), name]];
+                }
+            }
+            free(methods);
+        }
+        [out appendFormat:@"B stream: %@\n  load methods: %@\n", [chain componentsJoinedByString:@" < "],
+                          loads.count ? [loads componentsJoinedByString:@" "] : @"(none)"];
+    }
+    [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
                       (unsigned long)gAOnlyIDs.count, (unsigned long)gBlocked, (unsigned long)gBLiked.count,
@@ -1205,6 +1305,24 @@ void NFBUnifiedDockChose(BOOL unified, id a) {
 
 %end
 
+static void LoadMoreB(long long source, NSString* why) {
+    id bStream = Getter(gBTimeline, @"stream");
+    if (!bStream || CFAbsoluteTimeGetCurrent() - gBLastBottom < 5) return;
+    gBLastBottom = CFAbsoluteTimeGetCurrent();
+    SEL selector = NSSelectorFromString(@"loadBottomWithSource:");
+    if (![bStream respondsToSelector:selector]) {
+        UnifiedLog(@"B stream has no loadBottomWithSource:");
+        return;
+    }
+    @try {
+        BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, selector, source);
+        gBBottomLoads++;
+        UnifiedLog([NSString stringWithFormat:@"B more (%@, source %lld) started=%d", why, source, started]);
+    } @catch (NSException* exception) {
+        UnifiedLog([NSString stringWithFormat:@"B load more threw %@", exception.name]);
+    }
+}
+
 // A's Following stream loaded more: load more of B's too (at most every 5s).
 static void FollowBottomLoad(id stream, long long source) {
     if (!UnifiedActive()) return;
@@ -1214,17 +1332,7 @@ static void FollowBottomLoad(id stream, long long source) {
     for (id timeline in [gFollowingTimelines allObjects]) {
         if (Getter(timeline, @"stream") == stream && Getter(timeline, @"account") == CurrentAccount()) following = YES;
     }
-    if (!following || CFAbsoluteTimeGetCurrent() - gBLastBottom < 5) return;
-    gBLastBottom = CFAbsoluteTimeGetCurrent();
-    SEL selector = NSSelectorFromString(@"loadBottomWithSource:");
-    if (![bStream respondsToSelector:selector]) return;
-    @try {
-        BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, selector, source);
-        gBBottomLoads++;
-        UnifiedLog([NSString stringWithFormat:@"A loaded more; B more (source %lld) started=%d", source, started]);
-    } @catch (NSException* exception) {
-        UnifiedLog([NSString stringWithFormat:@"B load more threw %@", exception.name]);
-    }
+    if (following) LoadMoreB(source, @"A loaded more");
 }
 
 // The home stream may override it without calling super, so both.

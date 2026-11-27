@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.135",
+      "subtitle": "NeoFreeBird version 7.3.136",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.136",
+          "buildVersion": "136",
+          "date": "2026-11-27T05:08:10Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.136/NeoFreeBird-Twitter-sideloaded_7.3.136_12.44.ipa",
+          "size": 273577174,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: B만 가진 트윗에 답글할 때 작성 화면 전체(프로필 사진 포함)를 B로 바꾸고, 보내기 직전에 모든 부분이 B인지 다시 확인합니다. 하나라도 다르면 보내지 않습니다. 계정 표시 아이콘은 닉네임 왼쪽으로 옮겼습니다."
+        },
         {
           "version": "7.3.135",
           "buildVersion": "135",

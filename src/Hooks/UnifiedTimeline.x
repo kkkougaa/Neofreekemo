@@ -54,6 +54,12 @@
 //  - 7.3.142, composer: under the avatar the other account (A or B) shows small
 //    and dim; tapping it switches the composer, and that account is then the one
 //    every send path checks for. X's own account picker sets it too.
+//  - 7.3.143: X lets nobody repost a protected account's tweet, but the toast
+//    said it went out; reposting one is stopped with a notice now, and the
+//    toasts say a request was sent, not that it worked. A's tweet screen cannot
+//    open a protected tweet only B can see; tapping one offers to switch to B.
+//    Bookmarks: B's own T1BookmarksManager (initWithAccount:) adds and removes
+//    them as B on tweets only B has; on tweets both have it asks.
 //  - 7.3.140: only B's tweets get the small account picture (A-only ones had
 //    A's). B loaded only its first page, so scrolling A down ran past B's
 //    tweets; when A's Following stream loads more (-[TFSTwitterStream
@@ -82,6 +88,10 @@ static id gBForYouAccount;
 static CFAbsoluteTime gBForYouLastRefresh;
 static NSMutableSet<NSNumber*>* gAFollowedBringers;  // people A's Following tab shows A follows
 static NSString* gLastForYouMerge = @"(no For You merge yet)";
+// Of B's own tweets: the reposts (the "reposted" line gets B's colour) and the
+// ones whose display name does (the author only B follows).
+static NSMutableSet<NSNumber*>* gBRepostLineIDs;
+static NSMutableSet<NSNumber*>* gBNameIDs;
 static id gBTimeline;
 static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
@@ -271,6 +281,15 @@ static void EnsurePair(void) {
     [gBLiked removeAllObjects];
     [gBUnliked removeAllObjects];
     [gAFollowedBringers removeAllObjects];
+    [gBRepostLineIDs removeAllObjects];
+    [gBNameIDs removeAllObjects];
+    // Who A follows, as learnt from A's own timelines earlier (kept per A).
+    NSString* aID = AccountUserID(CurrentAccount());
+    NSArray* known = aID ? [[NSUserDefaults standardUserDefaults] arrayForKey:[@"kemo_unified_a_follows_" stringByAppendingString:aID]] : nil;
+    if (!gAFollowedBringers) gAFollowedBringers = [NSMutableSet set];
+    for (id userID in known) {
+        if ([userID isKindOfClass:[NSNumber class]]) [gAFollowedBringers addObject:userID];
+    }
     [gBReposted removeAllObjects];
     if (changed) UnifiedLog([NSString stringWithFormat:@"account pair changed; %lu ids retired", (unsigned long)gRetiredIDs.count]);
 }
@@ -403,17 +422,24 @@ static id ActedStatusOf(id viewModel);
 // entry ID run together, which for a conversation module made a huge number,
 // put A out of order (163 of 171 blocks) and piled B's tweets up in one place.
 static long long SortKey(id item) {
-    long long statusID = NumberGetter(item, @"statusID");
-    if (statusID > 0) return statusID;
+    // 7.3.143: for a repost the item's statusID can be the original's, so a
+    // repost from an hour ago of yesterday's tweet sorted as yesterday and
+    // dropped B's tweets in early. The latest of the IDs the item carries (the
+    // repost's own, its entry ID's) is when it reached the timeline.
+    long long key = NumberGetter(item, @"statusID");
+    key = MAX(key, NumberGetter(Getter(item, @"status"), @"statusID"));
     id entryID = Getter(item, @"entryID");
     if ([entryID isKindOfClass:[NSString class]]) {
         // The first long run of digits only ("tweet-123", "home-conversation-123-...").
         for (NSString* part in [entryID componentsSeparatedByCharactersInSet:
                                             [[NSCharacterSet decimalDigitCharacterSet] invertedSet]]) {
-            if (part.length >= 10) return part.longLongValue;
+            if (part.length >= 10 && part.length <= 19) {
+                key = MAX(key, part.longLongValue);
+                break;
+            }
         }
     }
-    return 0;
+    return key;
 }
 
 // Who brought a tweet into a Following timeline: the reposter for a repost,
@@ -563,9 +589,47 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         if (bringer > 0) [aBringers addObject:@(bringer)];
         newestA = MAX(newestA, SortKey(model));
     }
+    // Authors A follows too (A's own follow state of the author it shows).
+    for (id item in aItems) {
+        id model = unwrapDataViewItem(item);
+        if (!IsStatusItem(model) || BoolGetter(model, @"isPromoted")) continue;
+        if (NumberGetter(model, @"representedFromUserFollowedByCurrentAccountState") == 1) {
+            long long author = NumberGetter(ActedStatusOf(model), @"fromUserID");
+            if (author > 0) [aBringers addObject:@(author)];
+        }
+    }
     if (!gAFollowedBringers) gAFollowedBringers = [NSMutableSet set];
+    NSUInteger before = gAFollowedBringers.count;
     [gAFollowedBringers unionSet:aBringers];
+    [aBringers unionSet:gAFollowedBringers];
+    NSString* aIDForSave = AccountUserID(CurrentAccount());
+    if (aIDForSave && gAFollowedBringers.count != before) {
+        NSArray* save = [gAFollowedBringers allObjects];
+        if (save.count > 8000) save = [save subarrayWithRange:NSMakeRange(0, 8000)];
+        [[NSUserDefaults standardUserDefaults] setObject:save forKey:[@"kemo_unified_a_follows_" stringByAppendingString:aIDForSave]];
+    }
     NSArray<NSArray*>* blocks = Blocks(aItems);
+    // Each block's place in time, never older than anything below it: one old
+    // key in the middle (an odd item) cannot pull B's tweets up early.
+    NSMutableArray<NSNumber*>* places = [NSMutableArray arrayWithCapacity:blocks.count];
+    for (NSUInteger i = 0; i < blocks.count; i++) [places addObject:@0];
+    // First the median of each block's neighbourhood (5 blocks), so a single
+    // odd key either way does not count; then never older than what is below.
+    NSMutableArray<NSNumber*>* keys = [NSMutableArray arrayWithCapacity:blocks.count];
+    for (NSArray* block in blocks) [keys addObject:@(BlockKey(block))];
+    long long below = 0;
+    for (NSInteger i = (NSInteger)blocks.count - 1; i >= 0; i--) {
+        long long key = keys[i].longLongValue;
+        if (key <= 0) continue;
+        NSMutableArray<NSNumber*>* window = [NSMutableArray array];
+        for (NSInteger j = MAX(0, i - 2); j <= MIN((NSInteger)blocks.count - 1, i + 2); j++) {
+            if (keys[j].longLongValue > 0) [window addObject:keys[j]];
+        }
+        [window sortUsingSelector:@selector(compare:)];
+        long long smooth = window.count ? window[window.count / 2].longLongValue : key;
+        below = MAX(below, smooth);
+        places[i] = @(below);
+    }
     long long oldestA = LLONG_MAX;
     for (NSArray* block in blocks) {
         long long key = BlockKey(block);
@@ -612,11 +676,29 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         [bItems addObject:object];
         long long bringer = BringerID(object);
         if (bringer > 0 && [aBringers containsObject:@(bringer)]) {
-            // A follows whoever brought it: both have it, A just has not loaded it.
+            // A follows whoever brought it (the reposter for a repost): both have it.
             followedByA++;
             [both addObject:@(statusID)];
         } else {
             [bOnly addObject:@(statusID)];
+            // Two separate things: who follows the reposter (why it is here) and
+            // who follows the author. A repost is here for its reposter, so its
+            // "reposted" line is B's; the name is B's only when B follows the
+            // author and A is not known to.
+            id status = Getter(object, @"status");
+            long long acted = ActedID(object);
+            BOOL repost = Getter(status, @"representedStatus") != nil || (acted > 0 && acted != statusID);
+            long long author = NumberGetter(ActedStatusOf(object), @"fromUserID");
+            BOOL bFollowsAuthor = NumberGetter(object, @"representedFromUserFollowedByCurrentAccountState") == 1;
+            if (!gBRepostLineIDs) gBRepostLineIDs = [NSMutableSet set];
+            if (!gBNameIDs) gBNameIDs = [NSMutableSet set];
+            if (!repost) {
+                [gBNameIDs addObject:@(statusID)];
+            } else {
+                [gBRepostLineIDs addObject:@(statusID)];
+                if (bFollowsAuthor && ![aBringers containsObject:@(author)]) [gBNameIDs addObject:@(statusID)];
+                else [gBNameIDs removeObject:@(statusID)];
+            }
         }
     }
     [bItems sortUsingComparator:^NSComparisonResult(id a, id b) {
@@ -625,13 +707,15 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
 
     NSMutableArray* merged = [NSMutableArray arrayWithCapacity:aItems.count + bItems.count];
     NSUInteger next = 0, outOfOrder = 0;
-    long long running = LLONG_MAX;
-    for (NSArray* block in blocks) {
+    long long previous = LLONG_MAX;
+    for (NSUInteger i = 0; i < blocks.count; i++) {
+        NSArray* block = blocks[i];
         long long key = BlockKey(block);
         if (key > 0) {
-            if (key > running) outOfOrder++;
-            running = MIN(running, key);
-            while (next < bItems.count && SortKey(bItems[next]) > running) {
+            if (key > previous) outOfOrder++;
+            previous = key;
+            long long place = places[i].longLongValue;
+            while (next < bItems.count && SortKey(bItems[next]) > place) {
                 [merged addObject:bItems[next++]];
             }
         }
@@ -745,9 +829,24 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     }
     // Only what was shown counts; the rest is not on screen yet.
     NSMutableSet<NSNumber*>* shownOnly = [NSMutableSet set];
+    if (!gBRepostLineIDs) gBRepostLineIDs = [NSMutableSet set];
+    if (!gBNameIDs) gBNameIDs = [NSMutableSet set];
     for (NSUInteger i = 0; i < next; i++) {
-        NSNumber* statusID = @(NumberGetter(bItems[i], @"statusID"));
-        if ([bOnly containsObject:statusID]) [shownOnly addObject:statusID];
+        id object = bItems[i];
+        NSNumber* statusID = @(NumberGetter(object, @"statusID"));
+        if (![bOnly containsObject:statusID]) continue;
+        [shownOnly addObject:statusID];
+        long long acted = ActedID(object);
+        BOOL repost = Getter(Getter(object, @"status"), @"representedStatus") != nil ||
+                      (acted > 0 && acted != statusID.longLongValue);
+        long long author = NumberGetter(ActedStatusOf(object), @"fromUserID");
+        if (!repost) {
+            [gBNameIDs addObject:statusID];
+        } else {
+            [gBRepostLineIDs addObject:statusID];
+            BOOL bFollowsAuthor = NumberGetter(object, @"representedFromUserFollowedByCurrentAccountState") == 1;
+            if (bFollowsAuthor && ![gAFollowedBringers containsObject:@(author)]) [gBNameIDs addObject:statusID];
+        }
     }
     @synchronized([NSObject class]) {
         if (!gBOnlyIDs) gBOnlyIDs = [NSMutableSet set];
@@ -939,20 +1038,80 @@ static void LikeAsB(id viewModel) {
         CallStatusMethod(gBAccount, @"unfavoriteStatusWithStatusID:responseBlock:", statusID);
         [gBLiked removeObject:@(statusID)];
         [gBUnliked addObject:@(statusID)];
-        ShowNotice([NSString stringWithFormat:@"%@의 마음에 들어요를 취소했어요", BName()]);
+        ShowNotice([NSString stringWithFormat:@"%@의 마음에 들어요 취소를 보냈어요", BName()]);
     } else {
         CallStatusMethod(gBAccount, @"favoriteStatusWithStatusID:responseBlock:", statusID);
         [gBLiked addObject:@(statusID)];
         [gBUnliked removeObject:@(statusID)];
-        ShowNotice([NSString stringWithFormat:@"♥ %@로 마음에 들어요 했어요", BName()]);
+        ShowNotice([NSString stringWithFormat:@"♥ %@로 마음에 들어요를 보냈어요", BName()]);
     }
     UnifiedLog([NSString stringWithFormat:@"%@ as B", liked ? @"unlike" : @"like"]);
+}
+
+static BOOL IsProtectedStatus(id status) {
+    return BoolGetter(Getter(status, @"fromUser"), @"protectedUser");
+}
+
+static NSMutableSet<NSNumber*>* gBBookmarked;
+static NSMutableSet<NSNumber*>* gBUnbookmarked;
+
+static void BookmarkAsB(id viewModel, UIView* sourceView) {
+    id status = ActedStatus(viewModel);
+    long long statusID = NumberGetter(status, @"statusID");
+    Class managerClass = objc_getClass("T1BookmarksManager");
+    if (statusID <= 0 || !gBAccount || !status) return;
+    if (!managerClass) {
+        ShowNotice(@"이 X 버전에서는 B로 북마크할 수 없어요.");
+        return;
+    }
+    if (!gBBookmarked) gBBookmarked = [NSMutableSet set];
+    if (!gBUnbookmarked) gBUnbookmarked = [NSMutableSet set];
+    BOOL marked = [gBBookmarked containsObject:@(statusID)] ||
+                  (![gBUnbookmarked containsObject:@(statusID)] && BoolGetter(status, @"bookmarkedByLoadingAccount"));
+    id manager = nil;
+    @try {
+        manager = ((id (*)(id, SEL, id))objc_msgSend)([managerClass alloc], NSSelectorFromString(@"initWithAccount:"), gBAccount);
+    } @catch (__unused NSException* exception) {
+    }
+    // The manager must be B's; anything else and nothing is sent.
+    if (!manager || Getter(manager, @"account") != gBAccount) {
+        UnifiedLog(@"bookmark as B stopped: manager is not B's");
+        ShowNotice(@"B 계정으로 확실히 보낼 수 없어서 북마크를 막았어요");
+        return;
+    }
+    void (^completion)(void) = ^{
+    };
+    @try {
+        if (marked) {
+            SEL remove = NSSelectorFromString(@"removeStatusFromBookmarks:withScribeContext:completion:");
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(manager, remove, status, nil, completion);
+            [gBBookmarked removeObject:@(statusID)];
+            [gBUnbookmarked addObject:@(statusID)];
+            ShowNotice([NSString stringWithFormat:@"%@의 북마크 해제를 보냈어요", BName()]);
+        } else {
+            SEL add = NSSelectorFromString(@"addStatusToBookmarks:sourceView:withScribeContext:completion:");
+            ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(manager, add, status, sourceView, nil, completion);
+            [gBBookmarked addObject:@(statusID)];
+            [gBUnbookmarked removeObject:@(statusID)];
+            ShowNotice([NSString stringWithFormat:@"🔖 %@로 북마크를 보냈어요", BName()]);
+        }
+        UnifiedLog(marked ? @"unbookmark as B" : @"bookmark as B");
+    } @catch (NSException* exception) {
+        UnifiedLog([NSString stringWithFormat:@"bookmark as B threw %@", exception.name]);
+        ShowNotice(@"B로 북마크하지 못했어요");
+    }
 }
 
 static void RepostAsB(id viewModel) {
     id status = ActedStatus(viewModel);
     long long statusID = NumberGetter(status, @"statusID");
     if (statusID <= 0 || !gBAccount) return;
+    if (IsProtectedStatus(status)) {
+        // X does not let anyone repost a protected account's tweet.
+        UnifiedLog(@"repost as B stopped: protected");
+        ShowNotice(@"비공개 계정의 게시물은 재게시할 수 없어요");
+        return;
+    }
     if (!gBReposted) gBReposted = [NSMutableSet set];
     BOOL reposted = [gBReposted containsObject:@(statusID)] || BoolGetter(status, @"seenAsRetweeted");
     if (reposted) {
@@ -962,7 +1121,7 @@ static void RepostAsB(id viewModel) {
     }
     CallStatusMethod(gBAccount, @"retweetWithStatusID:responseBlock:", statusID);
     [gBReposted addObject:@(statusID)];
-    ShowNotice([NSString stringWithFormat:@"🔁 %@로 재게시했어요", BName()]);
+    ShowNotice([NSString stringWithFormat:@"🔁 %@로 재게시를 보냈어요", BName()]);
     UnifiedLog(@"repost as B");
 }
 
@@ -1048,8 +1207,14 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     BOOL like = [buttonClass containsString:@"Favorite"];
     BOOL repost = [buttonClass containsString:@"Retweet"];
     BOOL reply = [buttonClass containsString:@"Reply"];
+    BOOL bookmark = [buttonClass containsString:@"Bookmark"];
+    UIView* sourceView = [button isKindOfClass:[UIView class]] ? button : nil;
 
     if (bOnly) {
+        if (bookmark) {
+            BookmarkAsB(viewModel, sourceView);
+            return YES;
+        }
         if (like) {
             LikeAsB(viewModel);
             return YES;
@@ -1084,6 +1249,12 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     if (repost) {
         ChooseAccount(@"어느 계정으로 재게시할까요?", message, orig, ^{
             RepostAsB(viewModel);
+        });
+        return YES;
+    }
+    if (bookmark) {
+        ChooseAccount(@"어느 계정으로 북마크할까요?", message, orig, ^{
+            BookmarkAsB(viewModel, sourceView);
         });
         return YES;
     }
@@ -1161,15 +1332,50 @@ static UIColor* BColor(void) {
 
 // A tweet only B has: the display name in B's colour and a folded top-left
 // corner. Anything else gets X's own colour back and no corner.
-static void ApplyBMark(UIView* authorView, UIView* statusView, BOOL bOnly) {
-    UIColor* color = bOnly ? BColor() : nil;
+static void ColorRepostLine(UIView* statusView, UIColor* color) {
+    UIView* context = nil;
+    for (UIView* view in statusView.subviews) {
+        if ([NSStringFromClass([view class]) isEqualToString:@"T1TimelinesItemSocialContextView"]) context = view;
+    }
+    if (!context) return;
+    EnumerateSubviewsRecursively(context, ^(UIView* view) {
+        if ([view isKindOfClass:[UILabel class]] && ((UILabel*)view).text.length) {
+            UILabel* label = (UILabel*)view;
+            UIColor* saved = objc_getAssociatedObject(label, kNameColorKey);
+            if (color) {
+                if (!saved) objc_setAssociatedObject(label, kNameColorKey, label.textColor ?: [UIColor secondaryLabelColor], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (![label.textColor isEqual:color]) label.textColor = color;
+            } else if (saved) {
+                label.textColor = saved;
+                objc_setAssociatedObject(label, kNameColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        } else if ([view isKindOfClass:[UIImageView class]]) {
+            UIImageView* icon = (UIImageView*)view;
+            UIColor* saved = objc_getAssociatedObject(icon, kNameColorKey);
+            if (color) {
+                if (!saved) objc_setAssociatedObject(icon, kNameColorKey, icon.tintColor ?: [UIColor secondaryLabelColor], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                icon.tintColor = color;
+            } else if (saved) {
+                icon.tintColor = saved;
+                objc_setAssociatedObject(icon, kNameColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+    });
+}
+
+static void ApplyBMark(UIView* authorView, UIView* statusView, long long statusID) {
+    BOOL bOnly = statusID > 0 && [gBOnlyIDs containsObject:@(statusID)];
+    BOOL nameB = bOnly && [gBNameIDs containsObject:@(statusID)];
+    BOOL lineB = bOnly && [gBRepostLineIDs containsObject:@(statusID)];
+    if (statusView) ColorRepostLine(statusView, lineB ? BColor() : nil);
+    UIColor* color = nameB ? BColor() : nil;
     for (UIView* view in authorView.subviews) {
         if (![view isKindOfClass:[UILabel class]] || ![view.accessibilityIdentifier isEqualToString:@"StatusFullname"]) {
             continue;
         }
         UILabel* name = (UILabel*)view;
         UIColor* saved = objc_getAssociatedObject(name, kNameColorKey);
-        if (bOnly) {
+        if (nameB) {
             if (!saved) {
                 objc_setAssociatedObject(name, kNameColorKey, name.textColor ?: [UIColor labelColor],
                                          OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -1207,7 +1413,7 @@ static void ApplyBMark(UIView* authorView, UIView* statusView, BOOL bOnly) {
         [corner.layer addSublayer:flap];
         [statusView addSubview:corner];
     }
-    ((CAShapeLayer*)corner.layer.sublayers.firstObject).fillColor = color.CGColor;
+    ((CAShapeLayer*)corner.layer.sublayers.firstObject).fillColor = BColor().CGColor;
     corner.frame = CGRectMake(0, 0, size, size);
     corner.hidden = NO;
     [statusView bringSubviewToFront:corner];
@@ -1221,7 +1427,7 @@ static void UpdateAccountBadge(UIView* authorView) {
         statusView = statusView.superview;
     }
     long long statusID = UnifiedActive() && statusView ? ViewModelStatusID(Getter(statusView, @"viewModel")) : 0;
-    ApplyBMark(authorView, statusView, statusID > 0 && [gBOnlyIDs containsObject:@(statusID)]);
+    ApplyBMark(authorView, statusView, statusID);
     id account = nil;
     NSString* letter = nil;
     UIColor* color = nil;
@@ -1566,7 +1772,40 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 %end
 
+// A tweet only B has from a protected account: A cannot open it.
+static BOOL StopProtectedOpen(id controller, id item) {
+    if (!UnifiedActive() || !(IsFollowingController(controller) || IsForYouController(controller))) return NO;
+    id model = unwrapDataViewItem(item);
+    if (!IsStatusItem(model)) return NO;
+    long long statusID = NumberGetter(model, @"statusID");
+    if (statusID <= 0 || ![gBOnlyIDs containsObject:@(statusID)] || !IsProtectedStatus(ActedStatus(model))) return NO;
+    id b = gBAccount;
+    UIAlertController* alert =
+        [UIAlertController alertControllerWithTitle:@"B만 볼 수 있는 게시물이에요"
+                                            message:[NSString stringWithFormat:@"비공개 계정이라 %@로는 열 수 없어요. %@로 전환해서 볼까요?",
+                                                                               AName(), BName()]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@로 전환", BName()]
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                id host = HostController();
+                                                SEL view = NSSelectorFromString(@"viewAccount:animated:");
+                                                if (b && [host respondsToSelector:view]) {
+                                                    ((void (*)(id, SEL, id, BOOL))objc_msgSend)(host, view, b, YES);
+                                                }
+                                            }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
+    [TopController() presentViewController:alert animated:YES completion:nil];
+    UnifiedLog(@"protected B tweet: open stopped");
+    return YES;
+}
+
 %hook TFNItemsDataViewController
+
+- (void)didSelectItem:(id)item atIndexPath:(id)indexPath {
+    if (StopProtectedOpen(self, item)) return;
+    %orig;
+}
 
 - (void)setSections:(NSArray*)sections restoreScrollPosition:(BOOL)restoreScrollPosition {
     %orig(SectionsForController(self, sections), restoreScrollPosition);

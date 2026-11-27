@@ -13,6 +13,7 @@
 #import <CommonCrypto/CommonDigest.h>
 
 extern BOOL NFBUnifiedProbeActive(void);
+extern void NFBUnifiedProbeNoteRequest(void);
 
 static NSMutableDictionary<NSString*, NSString*>* gProbeByOperation;
 static NSMutableArray<NSString*>* gProbeOrder;
@@ -205,6 +206,12 @@ static void RecordTimelineResponse(NSURLRequest* request, NSURLResponse* respons
                                                 encoding:NSUTF8StringEncoding] ?: @"(binary)"];
     }
 
+    BOOL duringProbe = NFBUnifiedProbeActive();
+    if (duringProbe) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NFBUnifiedProbeNoteRequest();
+        });
+    }
     static NSDateFormatter* formatter;
     @synchronized([NSObject class]) {
         if (!gProbeByOperation) {
@@ -217,7 +224,7 @@ static void RecordTimelineResponse(NSURLRequest* request, NSURLResponse* respons
         [gProbeLog addObject:[NSString stringWithFormat:@"%@ %@ %@ %ld %lu B auth#%@%@", [formatter stringFromDate:[NSDate date]],
                                                         request.HTTPMethod ?: @"GET", operation, (long)status,
                                                         (unsigned long)data.length, NFBAuthTag(request),
-                                                        NFBUnifiedProbeActive() ? @" [during probe]" : @""]];
+                                                        duringProbe ? @" [during probe]" : @""]];
         if (gProbeLog.count > 30) [gProbeLog removeObjectAtIndex:0];
         gProbeByOperation[operation] = out;
         [gProbeOrder removeObject:operation];

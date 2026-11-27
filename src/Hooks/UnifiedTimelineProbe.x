@@ -26,6 +26,12 @@
 //  auth tag (4 hex digits of a hash of its credentials, so two accounts differ),
 //  and the streams' objects are counted and one is described (getter names).
 //  Method lists of the timeline and stream are dropped, they are known now.
+//  7.3.132: in 7.3.131 the refresh sent nothing (that account was refreshed ~20 min
+//  before). Now if no request went out within 3s and the stream is empty, the
+//  stream's own loadTopWithSource:completion: is called (signature checked at run
+//  time). Requests are tagged for 12s, and each stream reports how many statuses
+//  it holds, how many are promoted, and the counts of each
+//  representedFromUserFollowedByCurrentAccountState value.
 //  No tweet text, user names or IDs are recorded. The GraphQL request itself
 //  shows in the dump's TIMELINE REQUESTS section (TimelineProbe.x).
 //
@@ -36,6 +42,7 @@ static NSMutableArray<NSString*>* gRefreshLog;
 static NSMutableArray<NSString*>* gProbeLines;
 static NSNumber* gXSource;
 static BOOL gProbeRefreshing;
+static NSUInteger gProbeRequests;
 static CFAbsoluteTime gLastKick;
 static id gOtherTimeline;  // kept so a fresh object is not freed mid-refresh
 
@@ -161,38 +168,27 @@ static NSString* DescribeStreamObjects(id stream) {
         return [NSString stringWithFormat:@"streamObjects=%@\n", CountOf(objects)];
     }
     NSMutableDictionary<NSString*, NSNumber*>* classes = [NSMutableDictionary dictionary];
-    id sample = nil;
     for (id object in objects) {
         NSString* name = NSStringFromClass([object class]);
         classes[name] = @(classes[name].integerValue + 1);
-        if (!sample && [name rangeOfString:@"tatus"].location != NSNotFound) sample = object;
     }
-    NSMutableString* out = [NSMutableString stringWithFormat:@"streamObjects=%lu account=%@ classes=%@\n",
+    // Follow state of each status's author from this stream's account, and promoted count.
+    NSMutableDictionary<NSNumber*, NSNumber*>* follow = [NSMutableDictionary dictionary];
+    NSUInteger promoted = 0, statuses = 0;
+    SEL followSel = NSSelectorFromString(@"representedFromUserFollowedByCurrentAccountState");
+    SEL promotedSel = NSSelectorFromString(@"isPromoted");
+    for (id object in objects) {
+        if (![object respondsToSelector:followSel]) continue;
+        statuses++;
+        long long state = ((long long (*)(id, SEL))objc_msgSend)(object, followSel);
+        follow[@(state)] = @(follow[@(state)].integerValue + 1);
+        if ([object respondsToSelector:promotedSel] && ((BOOL (*)(id, SEL))objc_msgSend)(object, promotedSel)) promoted++;
+    }
+    NSMutableString* out = [NSMutableString stringWithFormat:@"statuses=%lu promoted=%lu followState=%@\nstreamObjects=%lu account=%@ classes=%@\n",
+                                                             (unsigned long)statuses, (unsigned long)promoted,
+                                                             [follow description],
                                                              (unsigned long)[objects count],
                                                              WhoseAccount(CallGetter(stream, @"account")), classes];
-    if (!sample && [objects count] > 0) sample = [objects objectAtIndex:0];
-    if (sample) {
-        NSMutableOrderedSet* names = [NSMutableOrderedSet orderedSet];
-        NSArray* words = @[ @"ollow", @"uthor", @"ser", @"romot", @"ortIndex", @"ntryID", @"tatus", @"ccount" ];
-        for (Class cls = [sample class]; cls && cls != [NSObject class]; cls = class_getSuperclass(cls)) {
-            unsigned int count = 0;
-            Method* methods = class_copyMethodList(cls, &count);
-            for (unsigned int i = 0; i < count; i++) {
-                NSString* name = NSStringFromSelector(method_getName(methods[i]));
-                if ([name hasPrefix:@"."] || [name hasPrefix:@"_"] || [name hasPrefix:@"set"]) continue;
-                for (NSString* word in words) {
-                    if ([name rangeOfString:word].location != NSNotFound) {
-                        [names addObject:[NSString stringWithFormat:@"%@.%@", NSStringFromClass(cls), name]];
-                        break;
-                    }
-                }
-            }
-            free(methods);
-            if (names.count > 50) break;
-        }
-        [out appendFormat:@"  sample %@ methods: %@\n", NSStringFromClass([sample class]),
-                          [[names array] componentsJoinedByString:@" "]];
-    }
     return out;
 }
 
@@ -278,6 +274,24 @@ BOOL NFBUnifiedProbeActive(void) {
     return gProbeRefreshing;
 }
 
+// TimelineProbe.x reports each timeline request that arrives while the probe runs.
+void NFBUnifiedProbeNoteRequest(void) {
+    gProbeRequests++;
+}
+
+// Calls a (long long source, block completion) method only if its runtime type encoding says so.
+static BOOL CallSourceCompletion(id object, NSString* selectorName, long long source, id completion) {
+    SEL selector = NSSelectorFromString(selectorName);
+    Method method = class_getInstanceMethod([object class], selector);
+    if (!method || method_getNumberOfArguments(method) != 4) return NO;
+    char a2[16] = {0}, a3[16] = {0};
+    method_getArgumentType(method, 2, a2, sizeof(a2));
+    method_getArgumentType(method, 3, a3, sizeof(a3));
+    if (!(a2[0] == 'q' || a2[0] == 'Q' || a2[0] == 'l' || a2[0] == 'L' || a2[0] == 'i') || a3[0] != '@') return NO;
+    ((void (*)(id, SEL, long long, id))objc_msgSend)(object, selector, source, completion);
+    return YES;
+}
+
 static void RecordRefresh(id timeline, long long source, BOOL withTweet) {
     BOOL ours = gProbeRefreshing && timeline == gOtherTimeline;
     if (!ours && CallGetter(timeline, @"account") == CurrentAccount()) {
@@ -352,10 +366,34 @@ void NFBUnifiedProbeKick(void) {
     ProbeLine([NSString stringWithFormat:@"refreshing other with X's source %lld", source]);
     CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     gProbeRefreshing = YES;
+    gProbeRequests = 0;
+    // Requests are tagged for 12s; a response can arrive well after the refresh "completes".
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        gProbeRefreshing = NO;
+        ProbeLine([NSString stringWithFormat:@"probe window closed, %lu timeline requests seen", (unsigned long)gProbeRequests]);
+    });
+    // 7.3.131: the timeline's refresh sent nothing for an account refreshed ~20 min earlier.
+    // If nothing has gone out after 3s and the stream is still empty, ask the stream itself.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        id stream = CallGetter(otherTimeline, @"stream");
+        id objects = CallGetter(stream, @"streamObjects");
+        NSUInteger count = [objects respondsToSelector:@selector(count)] ? [objects count] : 0;
+        ProbeLine([NSString stringWithFormat:@"after 3s: requests=%lu streamObjects=%lu", (unsigned long)gProbeRequests,
+                                             (unsigned long)count]);
+        if (gProbeRequests > 0 || count > 0 || !stream) return;
+        BOOL called = NO;
+        @try {
+            called = CallSourceCompletion(stream, @"loadTopWithSource:completion:", source, ^{
+                ProbeLine([NSString stringWithFormat:@"stream loadTop completed after %.1fs",
+                                                     CFAbsoluteTimeGetCurrent() - started]);
+            });
+        } @catch (NSException* exception) {
+            ProbeLine([NSString stringWithFormat:@"loadTop threw %@", exception.name]);
+        }
+        ProbeLine(called ? @"fallback: stream loadTopWithSource:completion: called"
+                         : @"fallback: loadTopWithSource:completion: has an unexpected signature, not called");
+    });
     void (^completion)(void) = ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            gProbeRefreshing = NO;
-        });
         ProbeLine([NSString stringWithFormat:@"other refresh completed after %.1fs", CFAbsoluteTimeGetCurrent() - started]);
     };
     @try {

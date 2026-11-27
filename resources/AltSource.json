@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.136",
+      "subtitle": "NeoFreeBird version 7.3.137",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.137",
+          "buildVersion": "137",
+          "date": "2026-11-27T05:16:53Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.137/NeoFreeBird-Twitter-sideloaded_7.3.137_12.44.ipa",
+          "size": 273588508,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: 하단 계정 독에 \"A/B 통합\" 동그라미가 생겼습니다. 여기서 멈추면 통합 타임라인, 다른 계정에서 멈추면 그 계정만 보입니다. 하트 왼쪽에 하트를 누른 계정의 작은 아이콘이 뜹니다. 설정에 A 계정과 \"항상 계정 묻기\"를 추가했습니다. 계정 설정이 바뀐 뒤에는 이전 화면의 트윗 반응을 막습니다."
+        },
         {
           "version": "7.3.136",
           "buildVersion": "136",

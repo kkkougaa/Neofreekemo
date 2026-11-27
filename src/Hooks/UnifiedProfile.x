@@ -568,44 +568,31 @@ static void UPDoAsB(UPAction action, id userReference) {
     }
 }
 
+extern void NFBPresentAccountSheet(NSString* title, NSString* message, NSArray<NSDictionary*>* rows);
+
 // A, B or both. asA runs X's own path (as the account in use, A).
 static void UPAskWhich(UPAction action, void (^asA)(void), void (^asB)(void)) {
     NSString* title = [NSString stringWithFormat:@"어느 계정으로 %@할까요?", UPActionTitle(action)];
-    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:title
-                                                                   message:nil
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    NSString* aName = UPAName();
-    NSString* bName = UPBName();
-    // Answers hold only for the accounts in use when asked.
-    NSString* aAtAsk = UPAccountUserID(UPCurrentAccount());
-    BOOL (^same)(void) = ^BOOL {
-        if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
-        UPNotice(@"계정이 바뀌어서 보내지 않았어요");
-        return NO;
-    };
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A)", aName]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* a) {
-                                                if (same()) asA();
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (B)", bName]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* a) {
-                                                if (same()) asB();
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"둘 다"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* a) {
-                                                if (!same()) return;
-                                                asA();
-                                                asB();
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
-    UIViewController* top = UPTopController();
-    sheet.popoverPresentationController.sourceView = top.view;
-    sheet.popoverPresentationController.sourceRect =
-        CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMaxY(top.view.bounds) - 80, 1, 1);
-    [top presentViewController:sheet animated:YES completion:nil];
+    UIColor* purple = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
+    NFBPresentAccountSheet(title, nil, @[
+        @{ @"title" : [NSString stringWithFormat:@"%@ (A)", aName],
+           @"image" : UPAvatar(aAtAsk, @"A", purple),
+           @"action" : ^{
+               if (same()) asA();
+           } },
+        @{ @"title" : [NSString stringWithFormat:@"%@ (B)", bName],
+           @"image" : UPAvatar(UPBID(), @"B", UPBColor()),
+           @"action" : ^{
+               if (same()) asB();
+           } },
+        @{ @"title" : @"둘 다",
+           @"detail" : [NSString stringWithFormat:@"%@ + %@", aName, bName],
+           @"action" : ^{
+               if (!same()) return;
+               asA();
+               asB();
+           } },
+    ]);
 }
 
 static id UPContextUserReference(id context) {
@@ -698,7 +685,9 @@ static BOOL UPShouldAsk(id performer, long long userID) {
         %orig;
         return;
     }
-    UPAction action = isMuting ? UPActionMute : UPActionUnmute;
+    // 7.3.149: isMuting is whether the user is muted now (7.3.145 read it as
+    // the wish and asked "unmute?" when muting).
+    UPAction action = isMuting ? UPActionUnmute : UPActionMute;
     UPLog([NSString stringWithFormat:@"%@ %lld: asking which account", UPActionTitle(action), userID]);
     UPAskWhich(action, ^{
         %orig;
@@ -783,38 +772,37 @@ static BOOL UPShowFollowSheet(UIView* button, void (^asA)(void)) {
     UPFollow bFollow = bKnown ? (UPFollow)bKnown.integerValue : UPFollowUnknown;
     id reference = UPGetter(UPProfileUser(profile), @"userReference");
     NSString* aName = UPAName(), *bName = UPBName();
-    UIAlertController* sheet = [UIAlertController
-        alertControllerWithTitle:@"어느 계정으로 할까요?"
-                         message:[NSString stringWithFormat:@"%@ (A): %@\n%@ (B): %@", aName, UPFollowText(aFollow), bName,
-                                                            UPFollowText(bFollow)]
-                  preferredStyle:UIAlertControllerStyleActionSheet];
     NSString* aAtAsk = aID;
     BOOL (^same)(void) = ^BOOL {
         if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
         UPNotice(@"계정이 바뀌어서 보내지 않았어요");
         return NO;
     };
+    NSMutableArray* rows = [NSMutableArray array];
     // A: X's own button action, which follows or unfollows as A.
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A) %@", aName,
-                                                                                aFollow == UPFollowYes ? @"언팔로우" : @"팔로우"]
-                                              style:aFollow == UPFollowYes ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                if (same()) asA();
-                                            }]];
+    [rows addObject:@{
+        @"title" : [NSString stringWithFormat:@"%@ (A) %@", aName, aFollow == UPFollowYes ? @"언팔로우" : @"팔로우"],
+        @"detail" : [NSString stringWithFormat:@"지금: %@", UPFollowText(aFollow)],
+        @"image" : UPAvatar(aID, @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1]),
+        @"destructive" : @(aFollow == UPFollowYes),
+        @"action" : ^{
+            if (same()) asA();
+        }
+    }];
     if (bFollow != UPFollowUnknown) {
         BOOL bFollows = bFollow == UPFollowYes;
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (B) %@", bName, bFollows ? @"언팔로우" : @"팔로우"]
-                                                  style:bFollows ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction* action) {
-                                                    if (same()) UPFollowAsB(!bFollows, userID, reference);
-                                                    [profile.viewIfLoaded setNeedsLayout];
-                                                }]];
+        [rows addObject:@{
+            @"title" : [NSString stringWithFormat:@"%@ (B) %@", bName, bFollows ? @"언팔로우" : @"팔로우"],
+            @"detail" : [NSString stringWithFormat:@"지금: %@", UPFollowText(bFollow)],
+            @"image" : UPAvatar(UPBID(), @"B", UPBColor()),
+            @"destructive" : @(bFollows),
+            @"action" : ^{
+                if (same()) UPFollowAsB(!bFollows, userID, reference);
+                [profile.viewIfLoaded setNeedsLayout];
+            }
+        }];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
-    UIViewController* top = UPTopController();
-    sheet.popoverPresentationController.sourceView = button;
-    sheet.popoverPresentationController.sourceRect = button.bounds;
-    [top presentViewController:sheet animated:YES completion:nil];
+    NFBPresentAccountSheet(@"어느 계정으로 할까요?", nil, rows);
     UPLog([NSString stringWithFormat:@"follow sheet for %lld (A=%ld B=%ld)", userID, (long)aFollow, (long)bFollow]);
     return YES;
 }

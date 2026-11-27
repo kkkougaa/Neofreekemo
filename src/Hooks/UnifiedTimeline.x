@@ -66,6 +66,11 @@
 //    repost and bookmark are sent with B's account by this file (whatever X
 //    would pick), and a reply composer is switched to B with the send check on.
 //    The 7.3.143 "switch to B?" prompt for protected tweets is gone.
+//  - 7.3.149: every "which account?" question is a sheet from the bottom
+//    (UnifiedSheet.x). The composer shows A and B in fixed places with a
+//    Liquid Glass highlight on the one in use. A tweet screen for a tweet only
+//    B has opens as B through the app navigation too, matched by the item's or
+//    the original's ID, accounts compared by user ID.
 //  - 7.3.147: B's colour can be X's theme colour or any colour from a picker.
 //    B's For You marks (and B reactions) only where B follows whoever brought
 //    the tweet; a tweet B was only recommended is plain and reacts as A. The
@@ -103,6 +108,8 @@ static NSString* gLastForYouMerge = @"(no For You merge yet)";
 // ones whose display name does (the author only B follows).
 static NSMutableSet<NSNumber*>* gBRepostLineIDs;
 static NSMutableSet<NSNumber*>* gBNameIDs;
+// The originals of tweets only B has (a tweet screen may be opened by either ID).
+static NSMutableSet<NSNumber*>* gBOnlyActedIDs;
 // Who each account follows, from its own Following list (UnifiedFollowSync.x).
 static NSMutableDictionary<NSString*, NSSet<NSNumber*>*>* gKnownFollows;
 static void ReapplyMerge(void);
@@ -297,6 +304,7 @@ static void EnsurePair(void) {
     [gAFollowedBringers removeAllObjects];
     [gBRepostLineIDs removeAllObjects];
     [gBNameIDs removeAllObjects];
+    [gBOnlyActedIDs removeAllObjects];
     // Who A follows, as learnt from A's own timelines earlier (kept per A).
     NSString* aID = AccountUserID(CurrentAccount());
     NSArray* known = aID ? [[NSUserDefaults standardUserDefaults] arrayForKey:[@"kemo_unified_a_follows_" stringByAppendingString:aID]] : nil;
@@ -696,6 +704,8 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
             [both addObject:@(statusID)];
         } else {
             [bOnly addObject:@(statusID)];
+            if (!gBOnlyActedIDs) gBOnlyActedIDs = [NSMutableSet set];
+            if (ActedID(object) > 0) [gBOnlyActedIDs addObject:@(ActedID(object))];
             // Two separate things: who follows the reposter (why it is here) and
             // who follows the author. A repost is here for its reposter, so its
             // "reposted" line is B's; the name is B's only when B follows the
@@ -860,6 +870,8 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
         if (![bOnly containsObject:statusID]) continue;
         [shownOnly addObject:statusID];
         long long acted = ActedID(object);
+        if (!gBOnlyActedIDs) gBOnlyActedIDs = [NSMutableSet set];
+        if (acted > 0) [gBOnlyActedIDs addObject:@(acted)];
         BOOL repost = Getter(Getter(object, @"status"), @"representedStatus") != nil ||
                       (acted > 0 && acted != statusID.longLongValue);
         long long author = NumberGetter(ActedStatusOf(object), @"fromUserID");
@@ -1183,6 +1195,10 @@ static void RepostAsB(id viewModel) {
 static CFAbsoluteTime gComposeAsBUntil;
 static NSSet<NSNumber*>* gComposeTargets;
 
+extern void NFBPresentAccountSheet(NSString* title, NSString* message, NSArray<NSDictionary*>* rows);
+static UIImage* AccountAvatar(id account, NSString* letter, UIColor* color);
+static UIColor* BColor(void);
+
 static void ChooseAccount(NSString* title, NSString* message, void (^asAOrig)(void), void (^asBOrig)(void)) {
     // What was asked holds only for the accounts in use when it was asked.
     NSString* pairAtAsk = gPairKey;
@@ -1199,25 +1215,16 @@ static void ChooseAccount(NSString* title, NSString* message, void (^asAOrig)(vo
     void (^asB)(void) = ^{
         if (stillSame()) asBOrig();
     };
-    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:title
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A) ✓", AName()]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                asA();
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (B)", BName()]
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction* action) {
-                                                asB();
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
-    UIViewController* top = TopController();
-    sheet.popoverPresentationController.sourceView = top.view;
-    sheet.popoverPresentationController.sourceRect =
-        CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMaxY(top.view.bounds) - 80, 1, 1);
-    [top presentViewController:sheet animated:YES completion:nil];
+    // 7.3.149: a sheet from the bottom (an action sheet is a popover on iOS 26).
+    NFBPresentAccountSheet(title, message, @[
+        @{ @"title" : [NSString stringWithFormat:@"%@ (A)", AName()],
+           @"detail" : @"기본",
+           @"image" : AccountAvatar(CurrentAccount(), @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1]),
+           @"action" : asA },
+        @{ @"title" : [NSString stringWithFormat:@"%@ (B)", BName()],
+           @"image" : AccountAvatar(gBAccount, @"B", BColor()),
+           @"action" : asB },
+    ]);
 }
 
 static void RelayoutSoon(UIView* view);
@@ -1232,8 +1239,11 @@ static void MarkReplyAsB(id viewModel, long long statusID) {
 // `orig` runs X's own handling, which acts as A.
 // A tweet screen opened as B (see the T1ConversationContainerViewController hook).
 static BOOL IsBScreen(UIViewController* controller) {
-    return gBAccount && Getter(controller, @"account") == gBAccount && CurrentAccount() != gBAccount &&
-           [NSStringFromClass([controller class]) isEqualToString:@"T1ConversationContainerViewController"];
+    if (!gBAccount || ![NSStringFromClass([controller class]) isEqualToString:@"T1ConversationContainerViewController"]) return NO;
+    // Its account is an ivar that may have no getter; compare by user ID.
+    id account = Getter(controller, @"account") ?: objectIvar(controller, "account");
+    NSString* accountID = AccountUserID(account);
+    return accountID && [accountID isEqualToString:BID()] && ![accountID isEqualToString:AccountUserID(CurrentAccount())];
 }
 
 static BOOL IsInBScreen(UIView* view) {
@@ -2113,8 +2123,13 @@ static void MaybeSwitchReply(UIViewController* composer, BOOL last) {
 
 // MARK: - The other account under the composer's avatar
 
-static const NSInteger kOtherAvatarTag = 0x4E464F;  // "NFO"
+static const NSInteger kOtherAvatarTag = 0x4E464F;  // "NFO", the slots' holder
 
+// 7.3.149: A and B in fixed places under each other (A on top, where X's own
+// picture is); the account in use is the big one with a Liquid Glass
+// highlight behind it, the other small and dim. Tapping the other moves the
+// highlight to it and swaps the sizes; nothing changes place. X's own picture
+// is hidden while the slots show.
 @interface NFBComposerSwitchTarget : NSObject
 + (instancetype)shared;
 - (void)tapped:(UIButton*)button;
@@ -2136,46 +2151,86 @@ static UIViewController* ComposerOf(UIView* view) {
     return nil;
 }
 
-static id OtherAccount(id account) {
-    id a = CurrentAccount();
-    if (!gBAccount || !account) return nil;
-    if (account == gBAccount) return a;
-    if (account == a) return gBAccount;
+static UIView* ComposerAvatar(UIView* singleView) {
+    for (UIView* view in singleView.subviews) {
+        if ([NSStringFromClass([view class]) isEqualToString:@"TCRComposeAccountAvatarImageView"]) return view;
+    }
     return nil;
 }
 
-static void UpdateOtherAvatar(UIView* singleView) {
-    UIButton* button = [singleView viewWithTag:kOtherAvatarTag];
-    UIView* avatar = nil;
-    for (UIView* view in singleView.subviews) {
-        if ([NSStringFromClass([view class]) isEqualToString:@"TCRComposeAccountAvatarImageView"]) avatar = view;
+static UIVisualEffect* GlassEffect(void) {
+    Class glassClass = NSClassFromString(@"UIGlassEffect");
+    if (glassClass) {
+        id effect = [[glassClass alloc] init];
+        SEL interactive = NSSelectorFromString(@"setInteractive:");
+        if ([effect respondsToSelector:interactive]) ((void (*)(id, SEL, BOOL))objc_msgSend)(effect, interactive, YES);
+        if ([effect isKindOfClass:[UIVisualEffect class]]) return effect;
     }
+    return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
+}
+
+static void UpdateOtherAvatar(UIView* singleView) {
+    UIView* holder = [singleView viewWithTag:kOtherAvatarTag];
+    UIView* avatar = ComposerAvatar(singleView);
     id shown = Getter(avatar, @"account");
-    id other = UnifiedActive() && avatar && !avatar.hidden && BTimeline() ? OtherAccount(shown) : nil;
-    if (!other) {
-        button.hidden = YES;
+    id a = CurrentAccount();
+    BOOL show = UnifiedActive() && avatar && BTimeline() && gBAccount && (shown == a || shown == gBAccount);
+    if (!show) {
+        holder.hidden = YES;
+        if (avatar && avatar.alpha == 0) avatar.alpha = 1;
         return;
     }
-    if (!button) {
-        button = [UIButton buttonWithType:UIButtonTypeCustom];
-        button.tag = kOtherAvatarTag;
-        button.clipsToBounds = YES;
-        button.imageView.contentMode = UIViewContentModeScaleAspectFill;
-        [button addTarget:[NFBComposerSwitchTarget shared] action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
-        [singleView addSubview:button];
-    }
-    const CGFloat size = 22;
     CGRect frame = avatar.frame;
-    button.frame = CGRectMake(CGRectGetMidX(frame) - size / 2, CGRectGetMaxY(frame) + 6, size, size);
-    button.layer.cornerRadius = size / 2;
-    BOOL isB = other == gBAccount;
-    [button setImage:AccountAvatar(other, isB ? @"B" : @"A",
-                                   isB ? BColor() : [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1])
-            forState:UIControlStateNormal];
-    button.alpha = 0.4;
-    button.hidden = NO;
-    button.accessibilityLabel = [NSString stringWithFormat:@"%@로 바꾸기", isB ? BName() : AName()];
-    [singleView bringSubviewToFront:button];
+    CGFloat big = CGRectGetWidth(frame), small = 22, pad = 5;
+    CGPoint top = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    CGPoint bottom = CGPointMake(top.x, top.y + big / 2 + pad * 2 + big / 2);
+    if (!holder) {
+        holder = [[UIView alloc] initWithFrame:singleView.bounds];
+        holder.tag = kOtherAvatarTag;
+        holder.clipsToBounds = NO;
+        UIVisualEffectView* glass = [[UIVisualEffectView alloc] initWithEffect:GlassEffect()];
+        glass.tag = 1;
+        glass.userInteractionEnabled = NO;
+        glass.clipsToBounds = YES;
+        [holder addSubview:glass];
+        for (NSInteger i = 0; i < 2; i++) {
+            UIButton* slot = [UIButton buttonWithType:UIButtonTypeCustom];
+            slot.tag = 10 + i;
+            slot.clipsToBounds = YES;
+            slot.imageView.contentMode = UIViewContentModeScaleAspectFill;
+            slot.adjustsImageWhenHighlighted = NO;
+            [slot addTarget:[NFBComposerSwitchTarget shared] action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
+            [holder addSubview:slot];
+        }
+        [singleView addSubview:holder];
+    }
+    holder.frame = singleView.bounds;
+    holder.hidden = NO;
+    avatar.alpha = 0;  // the slots show the accounts instead
+    BOOL aActive = shown == a;
+    UIVisualEffectView* glass = [holder viewWithTag:1];
+    CGFloat ring = big + pad * 2;
+    glass.bounds = CGRectMake(0, 0, ring, ring);
+    glass.center = aActive ? top : bottom;
+    glass.layer.cornerRadius = ring / 2;
+    NSArray* accounts = @[ a, gBAccount ];
+    NSArray* centers = @[ [NSValue valueWithCGPoint:top], [NSValue valueWithCGPoint:bottom] ];
+    for (NSInteger i = 0; i < 2; i++) {
+        UIButton* slot = [holder viewWithTag:10 + i];
+        BOOL active = (i == 0) == aActive;
+        CGFloat size = active ? big : small;
+        slot.bounds = CGRectMake(0, 0, size, size);
+        slot.center = [centers[i] CGPointValue];
+        slot.layer.cornerRadius = size / 2;
+        slot.alpha = active ? 1.0 : 0.45;
+        BOOL isB = i == 1;
+        [slot setImage:AccountAvatar(accounts[i], isB ? @"B" : @"A",
+                                     isB ? BColor() : [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1])
+              forState:UIControlStateNormal];
+        slot.accessibilityLabel = [NSString stringWithFormat:@"%@%@", isB ? BName() : AName(), active ? @", 지금 계정" : @"로 바꾸기"];
+    }
+    [holder bringSubviewToFront:glass];
+    [holder sendSubviewToBack:glass];
 }
 
 @implementation NFBComposerSwitchTarget
@@ -2190,74 +2245,26 @@ static void UpdateOtherAvatar(UIView* singleView) {
 }
 
 - (void)tapped:(UIButton*)button {
+    UIView* singleView = button.superview.superview;
     UIViewController* composer = ComposerOf(button);
-    UIView* avatar = nil;
-    for (UIView* view in button.superview.subviews) {
-        if ([NSStringFromClass([view class]) isEqualToString:@"TCRComposeAccountAvatarImageView"]) avatar = view;
-    }
-    id other = OtherAccount(Getter(avatar, @"account"));
-    if (!composer || !other) return;
+    UIView* avatar = ComposerAvatar(singleView);
+    id shown = Getter(avatar, @"account");
+    id target = button.tag == 10 ? CurrentAccount() : gBAccount;
+    if (!composer || !target || shown == target) return;
     // Chosen here, so this is the account it must go out as.
-    SetIntended(composer, other);
-    SwitchComposerTo(composer, other, NO);
-    UIView* holder = button.superview;
-    if (!avatar || !holder) {
-        [holder setNeedsLayout];
-        return;
-    }
-    // 7.3.147: a liquid ring springs from the small picture to the big one,
-    // the big one gives a little bounce, the small one fades to the other.
-    UIColor* tint = other == gBAccount ? BColor() : [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
-    UIView* ring = [[UIView alloc] initWithFrame:CGRectInset(button.frame, -3, -3)];
-    ring.userInteractionEnabled = NO;
-    ring.layer.cornerRadius = CGRectGetWidth(ring.bounds) / 2;
-    ring.layer.borderWidth = 2.5;
-    ring.layer.borderColor = tint.CGColor;
-    ring.backgroundColor = [tint colorWithAlphaComponent:0.12];
-    ring.layer.shadowColor = tint.CGColor;
-    ring.layer.shadowOpacity = 0.5;
-    ring.layer.shadowRadius = 6;
-    ring.layer.shadowOffset = CGSizeZero;
-    [holder addSubview:ring];
-    CGRect target = CGRectInset(avatar.frame, -3, -3);
+    SetIntended(composer, target);
+    SwitchComposerTo(composer, target, NO);
     [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurred];
-    [UIView animateWithDuration:0.5
-        delay:0
-        usingSpringWithDamping:0.62
-        initialSpringVelocity:0.9
-        options:UIViewAnimationOptionBeginFromCurrentState
-        animations:^{
-            ring.frame = target;
-            ring.layer.cornerRadius = CGRectGetWidth(target) / 2;
-        }
-        completion:^(BOOL finished) {
-            [UIView animateWithDuration:0.25
-                animations:^{
-                    ring.alpha = 0;
-                    ring.transform = CGAffineTransformMakeScale(1.15, 1.15);
-                }
-                completion:^(BOOL done) {
-                    [ring removeFromSuperview];
-                }];
-        }];
-    avatar.transform = CGAffineTransformMakeScale(0.82, 0.82);
+    // The highlight glides to the chosen one and the sizes swap, in place.
     [UIView animateWithDuration:0.55
-                          delay:0.12
-         usingSpringWithDamping:0.45
-          initialSpringVelocity:1.2
-                        options:UIViewAnimationOptionAllowUserInteraction
+                          delay:0
+         usingSpringWithDamping:0.68
+          initialSpringVelocity:0.6
+                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
                      animations:^{
-                         avatar.transform = CGAffineTransformIdentity;
+                         UpdateOtherAvatar(singleView);
                      }
                      completion:nil];
-    [UIView transitionWithView:button
-                      duration:0.3
-                       options:UIViewAnimationOptionTransitionCrossDissolve
-                    animations:^{
-                        [holder setNeedsLayout];
-                        [holder layoutIfNeeded];
-                    }
-                    completion:nil];
 }
 
 @end
@@ -2342,12 +2349,25 @@ static void UpdateOtherAvatar(UIView* singleView) {
 
 // MARK: - Tweet screen as B
 
-static id AccountForOpening(id account, long long statusID) {
-    if (!UnifiedActive() || !gBAccount || account != CurrentAccount() || statusID <= 0) return account;
+// 7.3.149: 7.3.144 compared the account object and only the item's own ID; X
+// can pass another instance of A's account, or the original's ID, so the
+// screen still opened as A. Accounts are compared by user ID now, and the
+// ID by both the item's and the original's.
+static id AccountForOpening(id account, long long statusID, id viewModel, NSString* where) {
+    if (!UnifiedActive() || !gBAccount) return account;
+    NSString* accountID = AccountUserID(account);
+    if (accountID && ![accountID isEqualToString:AccountUserID(CurrentAccount())]) return account;
     EnsurePair();
-    if (![gBOnlyIDs containsObject:@(statusID)]) return account;
-    UnifiedLog(@"tweet screen opens as B");
-    return gBAccount;
+    long long modelID = ViewModelStatusID(viewModel);
+    long long acted = NumberGetter(ActedStatus(viewModel), @"statusID");
+    BOOL bOnly = NO;
+    for (NSNumber* candidate in @[ @(statusID), @(modelID), @(acted) ]) {
+        if (candidate.longLongValue <= 0) continue;
+        if ([gBOnlyIDs containsObject:candidate] || [gBOnlyActedIDs containsObject:candidate]) bOnly = YES;
+    }
+    UnifiedLog([NSString stringWithFormat:@"tweet screen via %@: id %lld model %lld original %lld -> %@", where, statusID,
+                                          modelID, acted, bOnly ? @"B" : @"as is"]);
+    return bOnly ? gBAccount : account;
 }
 
 static const NSInteger kBScreenAvatarTag = 0x4E4653;  // "NFS"
@@ -2392,7 +2412,7 @@ static void ShowBOnScreen(UIViewController* controller) {
  shouldIncludeReferrerParams:(BOOL)referrer
 shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
            excludedStatusIDs:(id)excluded {
-    return %orig(AccountForOpening(account, statusID), statusID, navigationContext, scribeContext, sourceMetadata,
+    return %orig(AccountForOpening(account, statusID, nil, @"container id"), statusID, navigationContext, scribeContext, sourceMetadata,
                  overrideMetadata, referrer, quickPromote, excluded);
 }
 
@@ -2406,13 +2426,76 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 shouldNotifyDisplayLatestEdit:(BOOL)notifyEdit
 shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
             excludedStatusIDs:(id)excluded {
-    return %orig(AccountForOpening(account, ViewModelStatusID(viewModel)), viewModel, navigationContext, scribeContext,
+    return %orig(AccountForOpening(account, ViewModelStatusID(viewModel), viewModel, @"container model"), viewModel, navigationContext, scribeContext,
                  sourceMetadata, overrideMetadata, referrer, notifyEdit, quickPromote, excluded);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
     ShowBOnScreen((UIViewController*)self);
+}
+
+%end
+
+// The app's navigation builds the tweet screen with an account too.
+%hook T1TabbedAppNavigation
+
+- (id)conversationViewControllerForViewModel:(id)viewModel
+                                    statusID:(long long)statusID
+                                     account:(id)account
+                     statusNavigationContext:(id)navigationContext
+                               scribeContext:(id)scribeContext
+                    sourceNavigationMetadata:(id)sourceMetadata
+                  overrideNavigationMetadata:(id)overrideMetadata
+               shouldNotifyDisplayLatestEdit:(BOOL)notifyEdit
+               shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
+                           excludedStatusIDs:(id)excluded
+                                     content:(id)content {
+    return %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"navigation"), navigationContext,
+                 scribeContext, sourceMetadata, overrideMetadata, notifyEdit, quickPromote, excluded, content);
+}
+
+- (void)showConversationViewControllerForViewModel:(id)viewModel
+                                          statusID:(long long)statusID
+                                           account:(id)account
+                           statusNavigationContext:(id)navigationContext
+                                     scribeContext:(id)scribeContext
+                          sourceNavigationMetadata:(id)sourceMetadata
+                                fromViewController:(id)fromController
+                                          animated:(BOOL)animated {
+    %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"navigation show"), navigationContext,
+          scribeContext, sourceMetadata, fromController, animated);
+}
+
+%end
+
+%hook _TtC14T1TwitterSwift20XTabbedAppNavigation
+
+- (id)conversationViewControllerForViewModel:(id)viewModel
+                                    statusID:(long long)statusID
+                                     account:(id)account
+                     statusNavigationContext:(id)navigationContext
+                               scribeContext:(id)scribeContext
+                    sourceNavigationMetadata:(id)sourceMetadata
+                  overrideNavigationMetadata:(id)overrideMetadata
+               shouldNotifyDisplayLatestEdit:(BOOL)notifyEdit
+               shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
+                           excludedStatusIDs:(id)excluded
+                                     content:(id)content {
+    return %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"x navigation"), navigationContext,
+                 scribeContext, sourceMetadata, overrideMetadata, notifyEdit, quickPromote, excluded, content);
+}
+
+- (void)showConversationViewControllerForViewModel:(id)viewModel
+                                          statusID:(long long)statusID
+                                           account:(id)account
+                           statusNavigationContext:(id)navigationContext
+                                     scribeContext:(id)scribeContext
+                          sourceNavigationMetadata:(id)sourceMetadata
+                                fromViewController:(id)fromController
+                                          animated:(BOOL)animated {
+    %orig(viewModel, statusID, AccountForOpening(account, statusID, viewModel, @"x navigation show"), navigationContext,
+          scribeContext, sourceMetadata, fromController, animated);
 }
 
 %end

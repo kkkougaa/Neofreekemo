@@ -2110,12 +2110,28 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 // 7.3.152: the notifications tab tapped again while it is already showing.
 // X 12.44 (T1Twitter dump): -[T1TabNavigationController
 // handleTabSelectionIfAlreadySelected] v16@0:8. On the notifications tab's own
-// navigation controller, at its root, with the A | B switch up, the tap does
-// what a tap on the avatar pair does: the list goes over to the other account
-// (X's own scroll to the top is not run for that tap). Anywhere else, and with
-// unified off, X's own.
+// navigation controller, at its root, with the A | B switch up: when the list
+// on screen is at its top, the tap does what a tap on the avatar pair does (the
+// list goes over to the other account); when it is scrolled down, the tap
+// scrolls it to the top as X does (A's list by X's own code, B's embedded
+// list here, since X's code only knows A's). Anywhere else, and with unified
+// off, X's own.
 static NSUInteger gTabRetapToggles;
 static NSString* gTabRetapNote = @"never called";
+
+// The list inside B's embedded screen (UNListScrollView skips that screen).
+static UIScrollView* UNScrollInside(UIView* view, int depth) {
+    if (!view || depth > 12 || view.hidden) return nil;
+    if (([view isKindOfClass:[UITableView class]] || [view isKindOfClass:[UICollectionView class]]) && view.window &&
+        CGRectGetHeight(view.bounds) > 200) {
+        return (UIScrollView*)view;
+    }
+    for (UIView* sub in view.subviews) {
+        UIScrollView* found = UNScrollInside(sub, depth + 1);
+        if (found) return found;
+    }
+    return nil;
+}
 
 static BOOL UNTabRetapToggles(UINavigationController* navigation) {
     if (![NSThread isMainThread] || ![navigation isKindOfClass:[UINavigationController class]]) return NO;
@@ -2130,8 +2146,22 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
         gTabRetapNote = @"notifications tab, no switch up: X's own";
         return NO;
     }
+    BOOL onB = UNFilterIsB() && gBLiveHost && UNLiveValid();
+    UIScrollView* list = onB ? UNScrollInside(gBLiveHost, 0) : UNListScrollView(a.view, 0);
+    if (list) {
+        CGFloat top = -list.adjustedContentInset.top;
+        if (list.contentOffset.y > top + 8) {
+            if (!onB) {
+                gTabRetapNote = @"A's list scrolled down: X's own (to the top)";
+                return NO;
+            }
+            [list setContentOffset:CGPointMake(list.contentOffset.x, top) animated:YES];
+            gTabRetapNote = @"B's list scrolled down: to the top";
+            return YES;
+        }
+    }
     gTabRetapToggles++;
-    gTabRetapNote = @"toggled";
+    gTabRetapNote = list ? @"at the top: toggled" : @"list not found: toggled";
     UNSwitchTo(!UNFilterIsB(), @"notifications tab again");
     return YES;
 }

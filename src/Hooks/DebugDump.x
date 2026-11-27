@@ -22,6 +22,8 @@ extern NSString* NFBTimelineFilterDebugText(void);
 extern NSString* NFBChatDebugText(void);
 extern NSString* NFBStringProbeText(void);
 extern NSString* NFBTimelineProbeText(void);
+extern NSString* NFBUnifiedProbeText(void);
+extern void NFBUnifiedProbeKick(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
@@ -867,6 +869,7 @@ static void PerformDump(UIWindow* window) {
     [out appendFormat:@"== CHAT ==%c%@%c", 10, NFBChatDebugText(), 10];
     [out appendFormat:@"== TIME STRINGS ==%c%@%c", 10, NFBStringProbeText(), 10];
     [out appendFormat:@"== WEB ACCOUNTS ==%c%@%c", 10, NFBWebAccountsDebugText(), 10];
+    [out appendFormat:@"== UNIFIED TIMELINE PROBE ==%c%@%c", 10, NFBUnifiedProbeText(), 10];
     [out appendFormat:@"== TIMELINE REQUESTS ==%c%@%c", 10, NFBTimelineProbeText(), 10];
     [out appendFormat:@"== LAST CRASH ==%c%@%c", 10, NFBLastCrashText(), 10];
 
@@ -1007,6 +1010,8 @@ static void DumpFromVolumeButton(void) {
     if (!window || ![BHTSettings boolForKey:@"kemo_shake_dump"]) {
         return;
     }
+    // Starts the other account's timeline refresh; the second dump below shows the result.
+    NFBUnifiedProbeKick();
     PerformDump(window);
 
     // Menus and sheets can't be open while the first dump is made, so a second one follows

@@ -47,6 +47,13 @@
 //  - 7.3.138: a tweet only B has also gets its display name in B's colour
 //    (kemo_unified_b_color, orange unless picked) and a small folded corner of
 //    that colour at the top left of its row. A-only tweets stay as they are.
+//  - 7.3.142, For You: B's For You (-[T1TimelineFactory homeTimelineForAccount:])
+//    is loaded with A's For You and mixed in half and half: one of B's after each
+//    of A's (their accounts follow mostly the same people). Same marks and
+//    reactions as the Following tab; B's ads are left out.
+//  - 7.3.142, composer: under the avatar the other account (A or B) shows small
+//    and dim; tapping it switches the composer, and that account is then the one
+//    every send path checks for. X's own account picker sets it too.
 //  - 7.3.140: only B's tweets get the small account picture (A-only ones had
 //    A's). B loaded only its first page, so scrolling A down ran past B's
 //    tweets; when A's Following stream loads more (-[TFSTwitterStream
@@ -69,6 +76,12 @@ static NSString* const kUnifiedAlwaysAsk = @"kemo_unified_always_ask";
 static NSHashTable* gFollowingTimelines;  // A's Following-tab timelines, from X's factory
 static NSHashTable* gFollowingControllers;
 static BOOL gMakingB;
+static NSHashTable* gForYouTimelines;   // A's For You timelines, from X's factory
+static id gBForYouTimeline;
+static id gBForYouAccount;
+static CFAbsoluteTime gBForYouLastRefresh;
+static NSMutableSet<NSNumber*>* gAFollowedBringers;  // people A's Following tab shows A follows
+static NSString* gLastForYouMerge = @"(no For You merge yet)";
 static id gBTimeline;
 static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
@@ -257,6 +270,7 @@ static void EnsurePair(void) {
     }
     [gBLiked removeAllObjects];
     [gBUnliked removeAllObjects];
+    [gAFollowedBringers removeAllObjects];
     [gBReposted removeAllObjects];
     if (changed) UnifiedLog([NSString stringWithFormat:@"account pair changed; %lu ids retired", (unsigned long)gRetiredIDs.count]);
 }
@@ -314,6 +328,64 @@ static void RefreshB(long long source, NSString* why) {
     } @catch (NSException* exception) {
         UnifiedLog([NSString stringWithFormat:@"refresh B threw %@", exception.name]);
     }
+}
+
+// B's For You, made like B's Following timeline.
+static id BForYouTimeline(void) {
+    if (!BTimeline() || !gBAccount) return nil;
+    if (gBForYouTimeline && gBForYouAccount == gBAccount) return gBForYouTimeline;
+    Class factoryClass = objc_getClass("T1TimelineFactory");
+    if (!factoryClass || ![factoryClass respondsToSelector:@selector(sharedTimelineFactory)]) return nil;
+    id factory = ((id (*)(id, SEL))objc_msgSend)(factoryClass, @selector(sharedTimelineFactory));
+    SEL selector = NSSelectorFromString(@"homeTimelineForAccount:");
+    if (![factory respondsToSelector:selector]) return nil;
+    id timeline = nil;
+    gMakingB = YES;
+    @try {
+        timeline = ((id (*)(id, SEL, id))objc_msgSend)(factory, selector, gBAccount);
+    } @catch (__unused NSException* exception) {
+    }
+    gMakingB = NO;
+    if (!timeline) return nil;
+    if (!Getter(timeline, @"stream")) {
+        id stream = Getter(timeline, @"deserializeStream");
+        SEL setStream = NSSelectorFromString(@"setStream:");
+        if (stream && !Getter(timeline, @"stream") && [timeline respondsToSelector:setStream]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(timeline, setStream, stream);
+        }
+    }
+    gBForYouTimeline = timeline;
+    gBForYouAccount = gBAccount;
+    gBForYouLastRefresh = 0;
+    UnifiedLog([NSString stringWithFormat:@"B For You made, stream %@", Getter(timeline, @"stream") ? @"set" : @"nil"]);
+    return timeline;
+}
+
+static void RefreshBForYou(long long source) {
+    id timeline = BForYouTimeline();
+    SEL refresh = NSSelectorFromString(@"refreshWithSource:completion:");
+    if (!timeline || ![timeline respondsToSelector:refresh]) return;
+    if (CFAbsoluteTimeGetCurrent() - gBForYouLastRefresh < 3) return;
+    gBForYouLastRefresh = CFAbsoluteTimeGetCurrent();
+    UnifiedLog([NSString stringWithFormat:@"refresh B For You (source %lld)", source]);
+    void (^completion)(void) = ^{
+    };
+    @try {
+        ((void (*)(id, SEL, long long, id))objc_msgSend)(timeline, refresh, source, completion);
+    } @catch (NSException* exception) {
+        UnifiedLog([NSString stringWithFormat:@"refresh B For You threw %@", exception.name]);
+    }
+}
+
+static id ControllerTimeline(id controller) {
+    if (![NSStringFromClass([controller class]) isEqualToString:@"THFHomeTimelineItemsViewController"]) return nil;
+    Ivar ivar = class_getInstanceVariable([controller class], "_timeline");
+    return ivar ? object_getIvar(controller, ivar) : nil;
+}
+
+static BOOL IsForYouController(id controller) {
+    id timeline = ControllerTimeline(controller);
+    return timeline && [gForYouTimelines containsObject:timeline] && ![gFollowingTimelines containsObject:timeline];
 }
 
 static BOOL IsFollowingController(id controller) {
@@ -491,6 +563,8 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         if (bringer > 0) [aBringers addObject:@(bringer)];
         newestA = MAX(newestA, SortKey(model));
     }
+    if (!gAFollowedBringers) gAFollowedBringers = [NSMutableSet set];
+    [gAFollowedBringers unionSet:aBringers];
     NSArray<NSArray*>* blocks = Blocks(aItems);
     long long oldestA = LLONG_MAX;
     for (NSArray* block in blocks) {
@@ -600,10 +674,131 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
     return result;
 }
 
+// A's For You with B's mixed in half and half: after each of A's blocks that
+// holds a tweet, one of B's (in B's own order). B's ads and tweets A already
+// has are left out; what is left over waits for A to load more.
+static NSArray* MergedForYou(id controller, NSArray* sections) {
+    EnsurePair();
+    id bObjects = Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects");
+    if (![bObjects isKindOfClass:[NSArray class]] || [bObjects count] == 0) {
+        gLastForYouMerge = @"B For You empty";
+        return sections;
+    }
+    NSUInteger target = NSNotFound, best = 0;
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        if (![sections[i] isKindOfClass:[NSArray class]]) continue;
+        NSUInteger count = 0;
+        for (id item in sections[i]) {
+            if (IsStatusItem(unwrapDataViewItem(item))) count++;
+        }
+        if (count > best) {
+            best = count;
+            target = i;
+        }
+    }
+    if (target == NSNotFound || best < 5) {
+        gLastForYouMerge = [NSString stringWithFormat:@"A For You has %lu statuses; not merging", (unsigned long)best];
+        return sections;
+    }
+    NSArray* aItems = sections[target];
+    NSMutableSet<NSNumber*>* aIDs = [NSMutableSet set];
+    NSMutableSet<NSNumber*>* aActed = [NSMutableSet set];
+    for (id item in aItems) {
+        id model = unwrapDataViewItem(item);
+        CollectStatusIDs(model, aIDs, 0);
+        long long acted = IsStatusItem(model) ? ActedID(model) : 0;
+        if (acted > 0) [aActed addObject:@(acted)];
+    }
+    NSMutableArray* bItems = [NSMutableArray array];
+    NSMutableSet<NSNumber*>* bOnly = [NSMutableSet set];
+    NSMutableSet<NSNumber*>* both = [NSMutableSet set];
+    NSUInteger dupes = 0, ads = 0, followedByA = 0;
+    for (id object in bObjects) {
+        if (!IsStatusItem(object)) continue;
+        if (BoolGetter(object, @"isPromoted")) {
+            ads++;
+            continue;
+        }
+        long long statusID = NumberGetter(object, @"statusID");
+        if (statusID <= 0) continue;
+        long long acted = ActedID(object);
+        if ([aIDs containsObject:@(statusID)] || (acted > 0 && [aActed containsObject:@(acted)])) {
+            dupes++;
+            [both addObject:@(statusID)];
+            continue;
+        }
+        [bItems addObject:object];
+        long long bringer = BringerID(object);
+        if (bringer > 0 && [gAFollowedBringers containsObject:@(bringer)]) {
+            followedByA++;
+            [both addObject:@(statusID)];
+        } else {
+            [bOnly addObject:@(statusID)];
+        }
+    }
+    NSArray<NSArray*>* blocks = Blocks(aItems);
+    NSMutableArray* merged = [NSMutableArray arrayWithCapacity:aItems.count + bItems.count];
+    NSUInteger next = 0;
+    for (NSArray* block in blocks) {
+        [merged addObjectsFromArray:block];
+        if (BlockKey(block) > 0 && next < bItems.count) [merged addObject:bItems[next++]];
+    }
+    // Only what was shown counts; the rest is not on screen yet.
+    NSMutableSet<NSNumber*>* shownOnly = [NSMutableSet set];
+    for (NSUInteger i = 0; i < next; i++) {
+        NSNumber* statusID = @(NumberGetter(bItems[i], @"statusID"));
+        if ([bOnly containsObject:statusID]) [shownOnly addObject:statusID];
+    }
+    @synchronized([NSObject class]) {
+        if (!gBOnlyIDs) gBOnlyIDs = [NSMutableSet set];
+        if (!gBothIDs) gBothIDs = [NSMutableSet set];
+        [gBOnlyIDs unionSet:shownOnly];
+        [gBothIDs unionSet:both];
+        [gBOnlyIDs minusSet:both];
+        [gRetiredIDs minusSet:shownOnly];
+        [gRetiredIDs minusSet:both];
+    }
+    gLastForYouMerge = [NSString stringWithFormat:@"A statuses=%lu blocks=%lu | B inserted=%lu of %lu (followed by A %lu) "
+                                                 @"same as A=%lu ads=%lu",
+                                                 (unsigned long)best, (unsigned long)blocks.count, (unsigned long)next,
+                                                 (unsigned long)bItems.count, (unsigned long)followedByA,
+                                                 (unsigned long)dupes, (unsigned long)ads];
+    if (next >= bItems.count && blocks.count > bItems.count) {
+        // B ran out before A did: B's next page.
+        id bStream = Getter(gBForYouTimeline, @"stream");
+        SEL more = NSSelectorFromString(@"loadBottomWithSource:");
+        static CFAbsoluteTime last;
+        if (bStream && [bStream respondsToSelector:more] && CFAbsoluteTimeGetCurrent() - last > 5) {
+            last = CFAbsoluteTimeGetCurrent();
+            @try {
+                BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, more, gLastASource);
+                UnifiedLog([NSString stringWithFormat:@"B For You more started=%d", started]);
+            } @catch (__unused NSException* exception) {
+            }
+        }
+    }
+    NSMutableArray* result = [sections mutableCopy];
+    result[target] = merged;
+    return result;
+}
+
 static NSMutableArray<NSString*>* gMergeHistory;
 
 static NSArray* SectionsForController(id controller, NSArray* sections) {
-    if (!sections || !UnifiedActive() || !IsFollowingController(controller)) return sections;
+    if (!sections || !UnifiedActive()) return sections;
+    if (IsForYouController(controller)) {
+        objc_setAssociatedObject(controller, kOriginalSectionsKey, sections, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!gFollowingControllers) gFollowingControllers = [NSHashTable weakObjectsHashTable];
+        [gFollowingControllers addObject:controller];
+        if (!BForYouTimeline()) return sections;
+        @try {
+            return MergedForYou(controller, sections);
+        } @catch (NSException* exception) {
+            gLastForYouMerge = [NSString stringWithFormat:@"For You merge threw %@", exception.name];
+            return sections;
+        }
+    }
+    if (!IsFollowingController(controller)) return sections;
     objc_setAssociatedObject(controller, kOriginalSectionsKey, sections, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (!gFollowingControllers) gFollowingControllers = [NSHashTable weakObjectsHashTable];
     [gFollowingControllers addObject:controller];
@@ -1127,6 +1322,11 @@ NSString* NFBUnifiedTimelineDebugText(void) {
         [out appendFormat:@"B stream: %@\n  load methods: %@\n", [chain componentsJoinedByString:@" < "],
                           loads.count ? [loads componentsJoinedByString:@" "] : @"(none)"];
     }
+    [out appendFormat:@"For You: A timelines=%lu B=%@ objects=%lu | %@\n", (unsigned long)gForYouTimelines.count,
+                      gBForYouTimeline ? @"made" : @"none",
+                      (unsigned long)([Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects") isKindOfClass:[NSArray class]]
+                                          ? [Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects") count] : 0),
+                      gLastForYouMerge];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
@@ -1257,6 +1457,15 @@ void NFBUnifiedDockChose(BOOL unified, id a) {
 
 %hook T1TimelineFactory
 
+- (id)homeTimelineForAccount:(id)account {
+    id timeline = %orig;
+    if (timeline && !gMakingB) {
+        if (!gForYouTimelines) gForYouTimelines = [NSHashTable weakObjectsHashTable];
+        [gForYouTimelines addObject:timeline];
+    }
+    return timeline;
+}
+
 - (id)homeLatestTimelineForAccount:(id)account {
     id timeline = %orig;
     if (timeline && !gMakingB) {
@@ -1277,28 +1486,33 @@ void NFBUnifiedDockChose(BOOL unified, id a) {
 
 %end
 
+// A's timeline refreshed: B's matching timeline (Following or For You) too.
+static void FollowARefresh(id timeline, long long source) {
+    if (timeline == gBTimeline || timeline == gBForYouTimeline || !UnifiedActive()) return;
+    if (Getter(timeline, @"account") != CurrentAccount()) return;
+    if ([gFollowingTimelines containsObject:timeline]) {
+        RefreshB(source, @"A refreshed");
+    } else if ([gForYouTimelines containsObject:timeline]) {
+        RefreshBForYou(source);
+    }
+}
+
 %hook TFNTwitterHomeTimeline
 
 - (void)refreshWithSource:(long long)source completion:(id)completion {
     %orig;
-    if (self != gBTimeline && UnifiedActive() && [gFollowingTimelines containsObject:self] &&
-        Getter(self, @"account") == CurrentAccount()) {
-        RefreshB(source, @"A refreshed");
-    }
+    FollowARefresh(self, source);
 }
 
 - (void)refreshWithSource:(long long)source pushToHomeTweetId:(id)tweetID completion:(id)completion {
     %orig;
-    if (self != gBTimeline && UnifiedActive() && [gFollowingTimelines containsObject:self] &&
-        Getter(self, @"account") == CurrentAccount()) {
-        RefreshB(source, @"A refreshed");
-    }
+    FollowARefresh(self, source);
 }
 
 - (void)streamDidUpdate:(id)stream {
     %orig;
-    if (self == gBTimeline && UnifiedActive()) {
-        UnifiedLog(@"B stream updated");
+    if ((self == gBTimeline || self == gBForYouTimeline) && UnifiedActive()) {
+        UnifiedLog(self == gBTimeline ? @"B stream updated" : @"B For You updated");
         ReapplyMerge();
     }
 }
@@ -1428,68 +1642,10 @@ static void CollectControllers(UIViewController* controller, NSString* className
     for (UIViewController* child in controller.childViewControllers) CollectControllers(child, className, found);
 }
 
-// 7.3.136: in 7.3.135 setAccount: on the composer took (the "private reply"
-// notice came from B) but the avatar stayed A, because the account picker's own
-// path goes through the single-tweet controller: -[T1TweetComposeSingleTweetViewController
+// 7.3.136: setAccount: on the composer alone left the avatar on A; the account
+// picker's own path goes through the single-tweet controller: -[T1TweetComposeSingleTweetViewController
 // setAccount:] then -[T1TweetComposeTableViewController singleTweetViewController:
-// didSwitchToAccount:]. Do the same, then check every piece shows B.
-static void SwitchComposerToB(UIViewController* composer) {
-    SEL setAccount = NSSelectorFromString(@"setAccount:");
-    NSMutableArray* singles = [NSMutableArray array];
-    NSMutableArray* tables = [NSMutableArray array];
-    CollectControllers(composer, @"T1TweetComposeSingleTweetViewController", singles);
-    CollectControllers(composer, @"T1TweetComposeTableViewController", tables);
-    SEL didSwitch = NSSelectorFromString(@"singleTweetViewController:didSwitchToAccount:");
-    for (id single in singles) {
-        if ([single respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(single, setAccount, gBAccount);
-        id avatar = Getter(single, @"avatarImageView");
-        if ([avatar respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(avatar, setAccount, gBAccount);
-        for (id table in tables) {
-            if ([table respondsToSelector:didSwitch]) {
-                ((void (*)(id, SEL, id, id))objc_msgSend)(table, didSwitch, single, gBAccount);
-            }
-        }
-    }
-    for (id table in tables) {
-        if (Getter(table, @"account") != gBAccount && [table respondsToSelector:setAccount]) {
-            ((void (*)(id, SEL, id))objc_msgSend)(table, setAccount, gBAccount);
-        }
-    }
-    if (Getter(composer, @"account") != gBAccount && [composer respondsToSelector:setAccount]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(composer, setAccount, gBAccount);
-    }
-    BOOL composerB = Getter(composer, @"account") == gBAccount;
-    NSUInteger singlesB = 0, tablesB = 0, avatarsB = 0;
-    for (id single in singles) {
-        if (Getter(single, @"account") == gBAccount) singlesB++;
-        if (Getter(Getter(single, @"avatarImageView"), @"account") == gBAccount) avatarsB++;
-    }
-    for (id table in tables) {
-        if (Getter(table, @"account") == gBAccount) tablesB++;
-    }
-    BOOL all = composerB && singles.count && singlesB == singles.count && tablesB == tables.count &&
-               avatarsB == singles.count;
-    UnifiedLog([NSString stringWithFormat:@"composer to B: composer=%d single=%lu/%lu table=%lu/%lu avatar=%lu/%lu",
-                                          composerB, (unsigned long)singlesB, (unsigned long)singles.count,
-                                          (unsigned long)tablesB, (unsigned long)tables.count, (unsigned long)avatarsB,
-                                          (unsigned long)singles.count]);
-    ShowNotice(all ? [NSString stringWithFormat:@"%@로 답글을 써요. 왼쪽 위 프로필이 %@인지 확인해주세요", BName(), BName()]
-                   : @"B로 다 바꾸지 못했어요. 왼쪽 위 프로필을 눌러 직접 바꿔주세요");
-}
-
-static const void* kIntendedBKey = &kIntendedBKey;
-
-// The tweet a reply composer answers, from its reply-context controller.
-static long long ReplyTargetID(UIViewController* composer) {
-    NSMutableArray* contexts = [NSMutableArray array];
-    CollectControllers(composer, @"T1TweetComposeReplyContextViewController", contexts);
-    for (id context in contexts) {
-        long long statusID = NumberGetter(Getter(context, @"status"), @"statusID");
-        if (statusID > 0) return statusID;
-    }
-    return 0;
-}
-
+// didSwitchToAccount:]. Do the same, then check every piece shows the account.
 // Every account the composer carries, and whether they are all `account`.
 static BOOL ComposerIsAll(UIViewController* composer, id account, NSString** detail) {
     NSMutableArray* singles = [NSMutableArray array];
@@ -1510,50 +1666,251 @@ static BOOL ComposerIsAll(UIViewController* composer, id account, NSString** det
     return wrong.count == 0;
 }
 
-static void StopSend(UIViewController* composer, NSString* why) {
+static void SwitchComposerTo(UIViewController* composer, id account, BOOL quiet) {
+    if (!account) return;
+    SEL setAccount = NSSelectorFromString(@"setAccount:");
+    NSMutableArray* singles = [NSMutableArray array];
+    NSMutableArray* tables = [NSMutableArray array];
+    CollectControllers(composer, @"T1TweetComposeSingleTweetViewController", singles);
+    CollectControllers(composer, @"T1TweetComposeTableViewController", tables);
+    SEL didSwitch = NSSelectorFromString(@"singleTweetViewController:didSwitchToAccount:");
+    for (id single in singles) {
+        if ([single respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(single, setAccount, account);
+        id avatar = Getter(single, @"avatarImageView");
+        if ([avatar respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(avatar, setAccount, account);
+        for (id table in tables) {
+            if ([table respondsToSelector:didSwitch]) {
+                ((void (*)(id, SEL, id, id))objc_msgSend)(table, didSwitch, single, account);
+            }
+        }
+    }
+    for (id table in tables) {
+        if (Getter(table, @"account") != account && [table respondsToSelector:setAccount]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(table, setAccount, account);
+        }
+    }
+    if (Getter(composer, @"account") != account && [composer respondsToSelector:setAccount]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(composer, setAccount, account);
+    }
+    NSString* detail = nil;
+    BOOL all = ComposerIsAll(composer, account, &detail);
+    NSString* name = account == gBAccount ? BName() : AName();
+    UnifiedLog([NSString stringWithFormat:@"composer to %@: %@", account == gBAccount ? @"B" : @"A", detail]);
+    if (!quiet || !all) {
+        ShowNotice(all ? [NSString stringWithFormat:@"%@로 써요. 왼쪽 위 프로필이 %@인지 확인해주세요", name, name]
+                       : [NSString stringWithFormat:@"%@로 다 바꾸지 못했어요. 왼쪽 위 프로필을 눌러 직접 바꿔주세요", name]);
+    }
+}
+
+// The account a composer must send as, once it is known (user ID). A composer
+// with one is checked at every send path: every piece must be that account.
+static const void* kIntendedKey = &kIntendedKey;
+static const void* kPendingBKey = &kPendingBKey;
+
+static void SetIntended(UIViewController* composer, id account) {
+    objc_setAssociatedObject(composer, kIntendedKey, AccountUserID(account), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// The tweet a reply composer answers, from its reply-context controller.
+static long long ReplyTargetID(UIViewController* composer) {
+    NSMutableArray* contexts = [NSMutableArray array];
+    CollectControllers(composer, @"T1TweetComposeReplyContextViewController", contexts);
+    for (id context in contexts) {
+        long long statusID = NumberGetter(Getter(context, @"status"), @"statusID");
+        if (statusID > 0) return statusID;
+    }
+    return 0;
+}
+
+static void StopSend(UIViewController* composer, NSString* name, NSString* why) {
     UnifiedLog([NSString stringWithFormat:@"send stopped: %@", why]);
     UIAlertController* alert =
         [UIAlertController alertControllerWithTitle:@"보내지 않았어요"
-                                            message:[NSString stringWithFormat:@"이 답글은 %@로 보내야 하는데 작성 화면 일부가 다른 계정이에요. "
-                                                                               @"글은 그대로 있어요. 왼쪽 위 프로필을 눌러 %@를 직접 골라주세요.",
-                                                                               BName(), BName()]
+                                            message:[NSString stringWithFormat:@"이 글은 %@로 보내야 하는데 작성 화면 일부가 다른 계정이에요. "
+                                                                               @"글은 그대로 있어요. 왼쪽 위 프로필을 눌러 계정을 다시 골라주세요.",
+                                                                               name]
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"확인" style:UIAlertActionStyleDefault handler:nil]];
     [composer presentViewController:alert animated:YES completion:nil];
 }
 
-// Last check before anything leaves a composer meant for B: every piece must be B.
+// Last check before anything leaves a composer whose account is decided.
 static BOOL SendAllowed(UIViewController* composer) {
-    if (![objc_getAssociatedObject(composer, kIntendedBKey) boolValue]) return YES;
+    NSString* intended = objc_getAssociatedObject(composer, kIntendedKey);
+    if (intended.length == 0) return YES;
+    id account = AccountForID(intended);
+    NSString* name = [intended isEqualToString:BID()] ? BName() : AName();
     NSString* detail = nil;
-    if (gBAccount && ComposerIsAll(composer, gBAccount, &detail)) {
-        UnifiedLog(@"send as B: all pieces B");
+    if (account && ComposerIsAll(composer, account, &detail)) {
+        UnifiedLog([NSString stringWithFormat:@"send as %@: all pieces match", [intended isEqualToString:BID()] ? @"B" : @"A"]);
         return YES;
     }
-    StopSend(composer, detail ?: @"no B account");
+    StopSend(composer, name, account ? detail : @"account not found");
     return NO;
 }
 
+// A reply to a tweet only B has: switch to B as early as the composer can say
+// which tweet it answers. 7.3.142: when it cannot say (once in 7.3.140), it is
+// still switched, since the reply was asked for as B a moment ago; the send
+// check stops anything that is not all B, and the other avatar switches back.
+static void MaybeSwitchReply(UIViewController* composer, BOOL last) {
+    if (CFAbsoluteTimeGetCurrent() > gComposeAsBUntil || !gBAccount) return;
+    long long target = ReplyTargetID(composer);
+    if (target <= 0 && !last) {
+        objc_setAssociatedObject(composer, kPendingBKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    NSSet* targets = gComposeTargets;
+    gComposeAsBUntil = 0;
+    gComposeTargets = nil;
+    objc_setAssociatedObject(composer, kPendingBKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (target > 0 && ![targets containsObject:@(target)]) {
+        UnifiedLog(@"composer not switched: it answers another tweet");
+        return;
+    }
+    if (target <= 0) UnifiedLog(@"reply target unknown; switching to B anyway, the send check stays on");
+    SetIntended(composer, gBAccount);
+    SwitchComposerTo(composer, gBAccount, NO);
+}
+
+// MARK: - The other account under the composer's avatar
+
+static const NSInteger kOtherAvatarTag = 0x4E464F;  // "NFO"
+
+@interface NFBComposerSwitchTarget : NSObject
++ (instancetype)shared;
+- (void)tapped:(UIButton*)button;
+@end
+
+static UIViewController* ComposerOf(UIView* view) {
+    UIResponder* responder = view;
+    while (responder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            UIViewController* controller = (UIViewController*)responder;
+            while (controller) {
+                if ([NSStringFromClass([controller class]) isEqualToString:@"T1TweetComposeViewController"]) return controller;
+                controller = controller.parentViewController;
+            }
+            return nil;
+        }
+        responder = responder.nextResponder;
+    }
+    return nil;
+}
+
+static id OtherAccount(id account) {
+    id a = CurrentAccount();
+    if (!gBAccount || !account) return nil;
+    if (account == gBAccount) return a;
+    if (account == a) return gBAccount;
+    return nil;
+}
+
+static void UpdateOtherAvatar(UIView* singleView) {
+    UIButton* button = [singleView viewWithTag:kOtherAvatarTag];
+    UIView* avatar = nil;
+    for (UIView* view in singleView.subviews) {
+        if ([NSStringFromClass([view class]) isEqualToString:@"TCRComposeAccountAvatarImageView"]) avatar = view;
+    }
+    id shown = Getter(avatar, @"account");
+    id other = UnifiedActive() && avatar && !avatar.hidden && BTimeline() ? OtherAccount(shown) : nil;
+    if (!other) {
+        button.hidden = YES;
+        return;
+    }
+    if (!button) {
+        button = [UIButton buttonWithType:UIButtonTypeCustom];
+        button.tag = kOtherAvatarTag;
+        button.clipsToBounds = YES;
+        button.imageView.contentMode = UIViewContentModeScaleAspectFill;
+        [button addTarget:[NFBComposerSwitchTarget shared] action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
+        [singleView addSubview:button];
+    }
+    const CGFloat size = 22;
+    CGRect frame = avatar.frame;
+    button.frame = CGRectMake(CGRectGetMidX(frame) - size / 2, CGRectGetMaxY(frame) + 6, size, size);
+    button.layer.cornerRadius = size / 2;
+    BOOL isB = other == gBAccount;
+    [button setImage:AccountAvatar(other, isB ? @"B" : @"A",
+                                   isB ? BColor() : [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1])
+            forState:UIControlStateNormal];
+    button.alpha = 0.4;
+    button.hidden = NO;
+    button.accessibilityLabel = [NSString stringWithFormat:@"%@로 바꾸기", isB ? BName() : AName()];
+    [singleView bringSubviewToFront:button];
+}
+
+@implementation NFBComposerSwitchTarget
+
++ (instancetype)shared {
+    static NFBComposerSwitchTarget* target;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        target = [NFBComposerSwitchTarget new];
+    });
+    return target;
+}
+
+- (void)tapped:(UIButton*)button {
+    UIViewController* composer = ComposerOf(button);
+    UIView* avatar = nil;
+    for (UIView* view in button.superview.subviews) {
+        if ([NSStringFromClass([view class]) isEqualToString:@"TCRComposeAccountAvatarImageView"]) avatar = view;
+    }
+    id other = OtherAccount(Getter(avatar, @"account"));
+    if (!composer || !other) return;
+    // Chosen here, so this is the account it must go out as.
+    SetIntended(composer, other);
+    SwitchComposerTo(composer, other, NO);
+    [button.superview setNeedsLayout];
+}
+
+@end
+
+%hook T1TweetComposeSingleTweetView
+
+- (void)layoutSubviews {
+    %orig;
+    UIView* view = (UIView*)self;
+    if (UnifiedActive() || [view viewWithTag:kOtherAvatarTag]) UpdateOtherAvatar(view);
+}
+
+%end
+
+%hook T1TweetComposeTableViewController
+
+// X's own account picker: the account picked there is the one meant.
+- (void)singleTweetViewController:(id)single didSwitchToAccount:(id)account {
+    %orig;
+    UIViewController* composer = ComposerOf(((UIViewController*)self).viewIfLoaded);
+    if (!composer) {
+        for (UIViewController* parent = ((UIViewController*)self).parentViewController; parent; parent = parent.parentViewController) {
+            if ([NSStringFromClass([parent class]) isEqualToString:@"T1TweetComposeViewController"]) composer = parent;
+        }
+    }
+    if (composer && objc_getAssociatedObject(composer, kIntendedKey) && account) SetIntended(composer, account);
+}
+
+%end
+
 %hook T1TweetComposeViewController
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    MaybeSwitchReply((UIViewController*)self, NO);
+}
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     UIViewController* composer = (UIViewController*)self;
-    if (CFAbsoluteTimeGetCurrent() > gComposeAsBUntil || !gBAccount) return;
-    gComposeAsBUntil = 0;
-    NSSet* targets = gComposeTargets;
-    gComposeTargets = nil;
-    // Only the reply to the tapped tweet; any other composer stays as it is.
-    long long target = ReplyTargetID(composer);
-    if (target <= 0 || ![targets containsObject:@(target)]) {
-        UnifiedLog([NSString stringWithFormat:@"composer not switched: reply target %@", target > 0 ? @"differs" : @"unknown"]);
-        if (target > 0 || targets.count) {
-            ShowNotice(@"B로 바꾸지 않았어요. 이 답글은 지금 계정으로 열렸어요");
-        }
-        return;
-    }
-    objc_setAssociatedObject(composer, kIntendedBKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    SwitchComposerToB(composer);
+    if (![objc_getAssociatedObject(composer, kPendingBKey) boolValue] && CFAbsoluteTimeGetCurrent() > gComposeAsBUntil) return;
+    MaybeSwitchReply(composer, NO);
+    if (![objc_getAssociatedObject(composer, kPendingBKey) boolValue]) return;
+    // Still no reply target: give the reply context a moment, then decide.
+    __weak UIViewController* weakComposer = composer;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weakComposer) MaybeSwitchReply(weakComposer, YES);
+    });
 }
 
 - (void)_t1_checkForValidTweetsAndSend {
@@ -1591,6 +1948,9 @@ static BOOL SendAllowed(UIViewController* composer) {
 %ctor {
     // The first B load happens once the Following tab has been set up.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (UnifiedActive()) RefreshB(101, @"launch");
+        if (UnifiedActive()) {
+            RefreshB(101, @"launch");
+            RefreshBForYou(101);
+        }
     });
 }

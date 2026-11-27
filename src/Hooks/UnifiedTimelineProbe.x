@@ -320,6 +320,20 @@ static NSString* DescribeNotifications(void) {
         for (UIViewController* list in lists) {
             [out appendFormat:@"  T1URTViewController %p onScreen=%d\n    ivars: %@\n", list,
                               list.viewIfLoaded.window != nil, ObjectIvars(list)];
+            // Swift ivars have no type encoding, so list every ivar by name, and
+            // the methods that may lead to the timeline.
+            NSMutableArray* names = [NSMutableArray array];
+            for (Class cls = [list class]; cls && cls != [UIViewController class]; cls = class_getSuperclass(cls)) {
+                unsigned int count = 0;
+                Ivar* ivars = class_copyIvarList(cls, &count);
+                for (unsigned int i = 0; i < count; i++) {
+                    const char* type = ivar_getTypeEncoding(ivars[i]);
+                    [names addObject:[NSString stringWithFormat:@"%s(%s)", ivar_getName(ivars[i]) ?: "?", type && type[0] ? type : "-"]];
+                }
+                free(ivars);
+            }
+            [out appendFormat:@"    all ivars: %@\n    methods: %@\n", [names componentsJoinedByString:@" "],
+                              InterestingMethods(list)];
             for (NSString* getter in @[ @"timeline", @"urtTimeline", @"dataSource", @"timelineSource" ]) {
                 id timeline = CallGetter(list, getter);
                 if (!timeline) continue;

@@ -26,6 +26,13 @@
 //    setAccount:, and the other buttons (bookmark) stay stopped. On a tweet both
 //    have, like and repost ask which account, A first. This covers every
 //    TTAStatusInlineActionsView, the tweet detail screen included.
+//  - 7.3.136: the composer is switched the way its account picker does it, only
+//    when it is the reply to the tapped tweet. A composer meant for B is checked
+//    at every send path (button, header, toolbar, key command, and X's own
+//    _t1_checkForValidTweetsAndSend / _t1_sendCompositions:): unless the composer,
+//    its single-tweet and table controllers and the avatar all hold B, nothing is
+//    sent. A tweet meant for B never falls through to A when B is missing.
+//    The badge moved before the display name.
 //  - A small avatar of the only account that has a tweet sits after its time
 //    (TTAStatusAuthorView); none when both have it. "A only" means A has it and it
 //    is newer than the oldest tweet B has loaded.
@@ -603,8 +610,10 @@ static void RepostAsB(id viewModel) {
     UnifiedLog(@"repost as B");
 }
 
-// A composer opened within a few seconds of this is switched to B.
+// A reply composer opened within a few seconds of this, for one of these
+// tweets, is switched to B.
 static CFAbsoluteTime gComposeAsBUntil;
+static NSSet<NSNumber*>* gComposeTargets;
 
 static void ChooseAccount(NSString* title, void (^asA)(void), void (^asB)(void)) {
     UIAlertController* sheet = [UIAlertController alertControllerWithTitle:title
@@ -640,7 +649,12 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     BOOL bOnly = [gBOnlyIDs containsObject:@(statusID)];
     BOOL both = [gBothIDs containsObject:@(statusID)];
     if (!bOnly && !both) return NO;
-    if (!BTimeline() || !gBAccount) return NO;
+    if (!BTimeline() || !gBAccount) {
+        // Never let a tweet meant for B fall through to A.
+        if (!bOnly) return NO;
+        ShowNotice(@"B 계정을 찾지 못해서 막았어요");
+        return YES;
+    }
 
     BOOL like = [buttonClass containsString:@"Favorite"];
     BOOL repost = [buttonClass containsString:@"Retweet"];
@@ -657,6 +671,7 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
         }
         if (reply) {
             gComposeAsBUntil = CFAbsoluteTimeGetCurrent() + 6;
+            gComposeTargets = [NSSet setWithObjects:@(statusID), @(NumberGetter(ActedStatus(viewModel), @"statusID")), nil];
             UnifiedLog(@"reply: composer will switch to B");
             return NO;
         }
@@ -755,16 +770,13 @@ static void UpdateAccountBadge(UIView* authorView) {
         badge.hidden = YES;
         return;
     }
-    UIView* anchor = nil;
+    // 7.3.136: before the display name. The name line moves right to make room;
+    // when it would then run into the menu button, the name gives up the width.
+    UIView* name = nil;
     for (UIView* view in authorView.subviews) {
-        if ([view.accessibilityIdentifier isEqualToString:@"StatusTimeStamp"]) anchor = view;
+        if ([view.accessibilityIdentifier isEqualToString:@"StatusFullname"]) name = view;
     }
-    if (!anchor) {
-        for (UIView* view in authorView.subviews) {
-            if ([view.accessibilityIdentifier isEqualToString:@"StatusUsername"]) anchor = view;
-        }
-    }
-    if (!anchor || anchor.hidden || anchor.frame.size.width <= 0) {
+    if (!name || name.hidden || name.frame.size.width <= 0) {
         badge.hidden = YES;
         return;
     }
@@ -777,9 +789,35 @@ static void UpdateAccountBadge(UIView* authorView) {
         badge.userInteractionEnabled = NO;
         [authorView addSubview:badge];
     }
+    const CGFloat shift = 18;
+    CGFloat width = authorView.bounds.size.width;
+    CGFloat nameX = name.frame.origin.x;
+    CGFloat nameEnd = CGRectGetMaxX(name.frame);
+    // The line's own pieces start left of the right-hand buttons (menu, follow).
+    NSMutableArray<UIView*>* line = [NSMutableArray array];
+    CGFloat lineEnd = 0;
+    for (UIView* view in authorView.subviews) {
+        if (view == badge || view.hidden || view.frame.size.width <= 0) continue;
+        if (view.frame.origin.x >= width - 40) continue;
+        [line addObject:view];
+        lineEnd = MAX(lineEnd, CGRectGetMaxX(view.frame));
+    }
+    CGFloat limit = width - 24;
+    CGFloat overflow = MAX(0, lineEnd + shift - limit);
+    overflow = MIN(overflow, MAX(0, name.frame.size.width - 30));
+    for (UIView* view in line) {
+        CGRect frame = view.frame;
+        frame.origin.x += shift;
+        if (view == name) {
+            frame.size.width -= overflow;
+        } else if (view.frame.origin.x >= nameEnd - 0.5) {
+            frame.origin.x -= overflow;
+        }
+        view.frame = frame;
+    }
     badge.image = AccountAvatar(account, letter, color);
     badge.hidden = NO;
-    badge.frame = CGRectMake(CGRectGetMaxX(anchor.frame) + 4, CGRectGetMidY(anchor.frame) - 7, 14, 14);
+    badge.frame = CGRectMake(nameX, CGRectGetMidY(name.frame) - 7, 14, 14);
 }
 
 NSString* NFBUnifiedTimelineDebugText(void) {
@@ -922,25 +960,168 @@ NSString* NFBUnifiedTimelineDebugText(void) {
 
 // A reply to a tweet only B has opens X's composer as A; switch it to B the way
 // the composer's own account picker would (setAccount:).
+static void CollectControllers(UIViewController* controller, NSString* className, NSMutableArray* found) {
+    if (!controller) return;
+    if ([NSStringFromClass([controller class]) isEqualToString:className]) [found addObject:controller];
+    for (UIViewController* child in controller.childViewControllers) CollectControllers(child, className, found);
+}
+
+// 7.3.136: in 7.3.135 setAccount: on the composer took (the "private reply"
+// notice came from B) but the avatar stayed A, because the account picker's own
+// path goes through the single-tweet controller: -[T1TweetComposeSingleTweetViewController
+// setAccount:] then -[T1TweetComposeTableViewController singleTweetViewController:
+// didSwitchToAccount:]. Do the same, then check every piece shows B.
+static void SwitchComposerToB(UIViewController* composer) {
+    SEL setAccount = NSSelectorFromString(@"setAccount:");
+    NSMutableArray* singles = [NSMutableArray array];
+    NSMutableArray* tables = [NSMutableArray array];
+    CollectControllers(composer, @"T1TweetComposeSingleTweetViewController", singles);
+    CollectControllers(composer, @"T1TweetComposeTableViewController", tables);
+    SEL didSwitch = NSSelectorFromString(@"singleTweetViewController:didSwitchToAccount:");
+    for (id single in singles) {
+        if ([single respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(single, setAccount, gBAccount);
+        id avatar = Getter(single, @"avatarImageView");
+        if ([avatar respondsToSelector:setAccount]) ((void (*)(id, SEL, id))objc_msgSend)(avatar, setAccount, gBAccount);
+        for (id table in tables) {
+            if ([table respondsToSelector:didSwitch]) {
+                ((void (*)(id, SEL, id, id))objc_msgSend)(table, didSwitch, single, gBAccount);
+            }
+        }
+    }
+    for (id table in tables) {
+        if (Getter(table, @"account") != gBAccount && [table respondsToSelector:setAccount]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(table, setAccount, gBAccount);
+        }
+    }
+    if (Getter(composer, @"account") != gBAccount && [composer respondsToSelector:setAccount]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(composer, setAccount, gBAccount);
+    }
+    BOOL composerB = Getter(composer, @"account") == gBAccount;
+    NSUInteger singlesB = 0, tablesB = 0, avatarsB = 0;
+    for (id single in singles) {
+        if (Getter(single, @"account") == gBAccount) singlesB++;
+        if (Getter(Getter(single, @"avatarImageView"), @"account") == gBAccount) avatarsB++;
+    }
+    for (id table in tables) {
+        if (Getter(table, @"account") == gBAccount) tablesB++;
+    }
+    BOOL all = composerB && singles.count && singlesB == singles.count && tablesB == tables.count &&
+               avatarsB == singles.count;
+    UnifiedLog([NSString stringWithFormat:@"composer to B: composer=%d single=%lu/%lu table=%lu/%lu avatar=%lu/%lu",
+                                          composerB, (unsigned long)singlesB, (unsigned long)singles.count,
+                                          (unsigned long)tablesB, (unsigned long)tables.count, (unsigned long)avatarsB,
+                                          (unsigned long)singles.count]);
+    ShowNotice(all ? [NSString stringWithFormat:@"%@로 답글을 써요. 왼쪽 위 프로필이 %@인지 확인해주세요", BName(), BName()]
+                   : @"B로 다 바꾸지 못했어요. 왼쪽 위 프로필을 눌러 직접 바꿔주세요");
+}
+
+static const void* kIntendedBKey = &kIntendedBKey;
+
+// The tweet a reply composer answers, from its reply-context controller.
+static long long ReplyTargetID(UIViewController* composer) {
+    NSMutableArray* contexts = [NSMutableArray array];
+    CollectControllers(composer, @"T1TweetComposeReplyContextViewController", contexts);
+    for (id context in contexts) {
+        long long statusID = NumberGetter(Getter(context, @"status"), @"statusID");
+        if (statusID > 0) return statusID;
+    }
+    return 0;
+}
+
+// Every account the composer carries, and whether they are all `account`.
+static BOOL ComposerIsAll(UIViewController* composer, id account, NSString** detail) {
+    NSMutableArray* singles = [NSMutableArray array];
+    NSMutableArray* tables = [NSMutableArray array];
+    CollectControllers(composer, @"T1TweetComposeSingleTweetViewController", singles);
+    CollectControllers(composer, @"T1TweetComposeTableViewController", tables);
+    NSMutableArray* wrong = [NSMutableArray array];
+    if (Getter(composer, @"account") != account) [wrong addObject:@"composer"];
+    if (singles.count == 0) [wrong addObject:@"no single"];
+    for (id single in singles) {
+        if (Getter(single, @"account") != account) [wrong addObject:@"single"];
+        if (Getter(Getter(single, @"avatarImageView"), @"account") != account) [wrong addObject:@"avatar"];
+    }
+    for (id table in tables) {
+        if (Getter(table, @"account") != account) [wrong addObject:@"table"];
+    }
+    if (detail) *detail = wrong.count ? [wrong componentsJoinedByString:@","] : @"all";
+    return wrong.count == 0;
+}
+
+static void StopSend(UIViewController* composer, NSString* why) {
+    UnifiedLog([NSString stringWithFormat:@"send stopped: %@", why]);
+    UIAlertController* alert =
+        [UIAlertController alertControllerWithTitle:@"보내지 않았어요"
+                                            message:[NSString stringWithFormat:@"이 답글은 %@로 보내야 하는데 작성 화면 일부가 다른 계정이에요. "
+                                                                               @"글은 그대로 있어요. 왼쪽 위 프로필을 눌러 %@를 직접 골라주세요.",
+                                                                               BName(), BName()]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"확인" style:UIAlertActionStyleDefault handler:nil]];
+    [composer presentViewController:alert animated:YES completion:nil];
+}
+
+// Last check before anything leaves a composer meant for B: every piece must be B.
+static BOOL SendAllowed(UIViewController* composer) {
+    if (![objc_getAssociatedObject(composer, kIntendedBKey) boolValue]) return YES;
+    NSString* detail = nil;
+    if (gBAccount && ComposerIsAll(composer, gBAccount, &detail)) {
+        UnifiedLog(@"send as B: all pieces B");
+        return YES;
+    }
+    StopSend(composer, detail ?: @"no B account");
+    return NO;
+}
+
 %hook T1TweetComposeViewController
 
-- (void)viewWillAppear:(BOOL)animated {
+- (void)viewDidAppear:(BOOL)animated {
     %orig;
+    UIViewController* composer = (UIViewController*)self;
     if (CFAbsoluteTimeGetCurrent() > gComposeAsBUntil || !gBAccount) return;
     gComposeAsBUntil = 0;
-    id composer = (id)self;
-    SEL setAccount = NSSelectorFromString(@"setAccount:");
-    if (![composer respondsToSelector:setAccount]) {
-        UnifiedLog(@"composer has no setAccount:");
+    NSSet* targets = gComposeTargets;
+    gComposeTargets = nil;
+    // Only the reply to the tapped tweet; any other composer stays as it is.
+    long long target = ReplyTargetID(composer);
+    if (target <= 0 || ![targets containsObject:@(target)]) {
+        UnifiedLog([NSString stringWithFormat:@"composer not switched: reply target %@", target > 0 ? @"differs" : @"unknown"]);
+        if (target > 0 || targets.count) {
+            ShowNotice(@"B로 바꾸지 않았어요. 이 답글은 지금 계정으로 열렸어요");
+        }
         return;
     }
-    ((void (*)(id, SEL, id))objc_msgSend)(composer, setAccount, gBAccount);
-    SEL didUpdate = NSSelectorFromString(@"accountDidUpdate:");
-    if ([composer respondsToSelector:didUpdate]) ((void (*)(id, SEL, id))objc_msgSend)(composer, didUpdate, gBAccount);
-    BOOL switched = Getter(composer, @"account") == gBAccount;
-    UnifiedLog([NSString stringWithFormat:@"composer switched to B: %@", switched ? @"yes" : @"no"]);
-    ShowNotice(switched ? [NSString stringWithFormat:@"%@로 답글을 써요. 보내기 전에 왼쪽 위 프로필을 확인해주세요", BName()]
-                        : @"B로 바꾸지 못했어요. 왼쪽 위 프로필을 눌러 직접 바꿔주세요");
+    objc_setAssociatedObject(composer, kIntendedBKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    SwitchComposerToB(composer);
+}
+
+- (void)_t1_checkForValidTweetsAndSend {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
+}
+
+- (void)_t1_sendCompositions:(id)compositions {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
+}
+
+- (void)_t1_didTapSendButton:(id)sender {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
+}
+
+- (void)composerGlassHeaderDidTapPost:(id)header {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
+}
+
+- (void)composerToolbarDidTapPost:(id)toolbar {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
+}
+
+- (void)handleSendTweetKeyCommand {
+    if (!SendAllowed((UIViewController*)self)) return;
+    %orig;
 }
 
 %end

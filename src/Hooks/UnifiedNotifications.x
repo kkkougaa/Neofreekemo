@@ -88,6 +88,7 @@ static NSString* gFilterPlace = @"not installed";
 static NSUInteger gTabRetapToggles;
 static NSString* gTabRetapNote = @"never called";
 static NSString* gTabRetapSeen = @"-";
+static NSUInteger gTabXNavCalls;
 static NSString* gTabRetapClass = @"-";
 static BOOL gTabRetapInside;
 static __weak UIView* gFilterView;
@@ -1971,8 +1972,8 @@ NSString* NFBUnifiedNotificationsDebugText(void) {
                       (unsigned long)gBSeenBatches, gBSeenSignature ?: @"-",
                       seen ? [NSString stringWithFormat:@"on for %@ (dock number then %@)", seen[@"id"], seen[@"base"]] : @"off",
                       (unsigned long)gSilentViewedStopped];
-    [out appendFormat:@"tab again: %@ (toggles %lu) on %@, list: %@%c", gTabRetapNote, (unsigned long)gTabRetapToggles, gTabRetapClass,
-                      gTabRetapSeen, 10];
+    [out appendFormat:@"tab again: %@ (toggles %lu) on %@, list: %@ | xnav scroll-to-top calls %lu%c", gTabRetapNote,
+                      (unsigned long)gTabRetapToggles, gTabRetapClass, gTabRetapSeen, (unsigned long)gTabXNavCalls, 10];
     UIView* glassContainer = UNAvatarContainer();
     [out appendFormat:@"avatar pair: A rect %@ in button %@, B item %@%c", NSStringFromCGRect(UNAvatarRectIn(glassContainer)),
                       NSStringFromCGRect(glassContainer.bounds), NSStringFromCGRect(gBBarItem.customView.bounds), 10];
@@ -2199,8 +2200,12 @@ static UIScrollView* UNScrollInside(UIView* view, int depth) {
     return nil;
 }
 
+static CFAbsoluteTime gTabRetapAt;
+
 static BOOL UNTabRetapToggles(UINavigationController* navigation) {
     if (![NSThread isMainThread] || ![navigation isKindOfClass:[UINavigationController class]]) return NO;
+    // One tap is answered once, whichever way it was noticed.
+    if (CFAbsoluteTimeGetCurrent() - gTabRetapAt < 0.6) return NO;
     UIViewController* a = gANotifController;
     UIViewController* root = navigation.viewControllers.firstObject;
     if (!a || !root || !UNIsInside(a, root)) return NO;  // another tab
@@ -2234,11 +2239,13 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
                 gTabRetapNote = @"A's list scrolled down: X's own (to the top)";
                 return NO;
             }
+            gTabRetapAt = CFAbsoluteTimeGetCurrent();
             [list setContentOffset:CGPointMake(list.contentOffset.x, top) animated:YES];
             gTabRetapNote = @"B's list scrolled down: to the top";
             return YES;
         }
     }
+    gTabRetapAt = CFAbsoluteTimeGetCurrent();
     gTabRetapToggles++;
     gTabRetapNote = list ? @"at the top: toggled" : @"list not found: toggled";
     UNSwitchTo(!UNFilterIsB(), @"notifications tab again");
@@ -2328,28 +2335,91 @@ static BOOL UNTabRetapAnswer(id navigation) {
 // next to pushViewController:animated:completion:). X's own call always runs;
 // when the finger came down on the tab bar and the list was already at its
 // top, the list then goes over to the other account.
-extern BOOL NFBTouchCameFromTabBar(void);
 
 %group UnifiedNotifTabRetapXNav
 
 %hook UINavigationController
 
 - (BOOL)xnav_scrollToTopAnimated:(BOOL)animated completion:(id)completion {
-    BOOL fromTabBar = NO;
-    @try {
-        fromTabBar = [NSThread isMainThread] && !gTabRetapInside && NFBTouchCameFromTabBar();
-    } @catch (__unused NSException* exception) {
+    // 7.3.158: only counted (the tap itself is read from the touch, below).
+    gTabXNavCalls++;
+    return %orig;
+}
+
+%end
+
+%end
+
+// 7.3.158 (device dumps of 7.3.155 and 7.3.157: "tab again: never called",
+// with every hook above installed). None of X's own methods tried is called
+// for a tap on the tab already showing, so the tap is read from the touch
+// itself. A finger that comes down inside the tab bar's selection pill
+// (XNavigation.TabBarView > XNavigation.TabBarPill, both in the device's view
+// tree; the pill sits on the selected tab), while A's notifications screen is
+// the one showing, and lifts within half a second without moving, is a tap on
+// the notifications tab again. It is answered before X gets the touch's end:
+// at the top the list goes over to the other account, scrolled down nothing
+// is done here and X scrolls it up. Looked at only while the switch is up.
+static __weak UITouch* gTabTouch;
+static CGPoint gTabTouchStart;
+static NSTimeInterval gTabTouchAt;
+
+static UIView* UNPillIn(UIView* view, int depth) {
+    if (!view || depth > 4) return nil;
+    for (UIView* sub in view.subviews) {
+        if ([NSStringFromClass([sub class]) hasSuffix:@"TabBarPill"]) return sub;
+        UIView* found = UNPillIn(sub, depth + 1);
+        if (found) return found;
     }
-    if (!fromTabBar) return %orig;
-    // Asked before X scrolls (afterwards the list is at the top either way).
-    gTabRetapInside = YES;
-    @try {
-        UNTabRetapAnswer(self);
-    } @catch (__unused NSException* exception) {
+    return nil;
+}
+
+static void UNTabTouches(UIEvent* event) {
+    for (UITouch* touch in event.allTouches) {
+        if (touch.phase == UITouchPhaseBegan) {
+            gTabTouch = nil;
+            if (event.allTouches.count != 1) continue;
+            UIView* bar = touch.view;
+            while (bar && ![NSStringFromClass([bar class]) hasSuffix:@"XNavigation.TabBarView"] &&
+                   ![NSStringFromClass([bar class]) hasSuffix:@"10TabBarView"]) {
+                bar = bar.superview;
+            }
+            UIView* pill = UNPillIn(bar, 0);
+            if (!pill || pill.hidden) continue;
+            if (!CGRectContainsPoint(pill.bounds, [touch locationInView:pill])) continue;
+            gTabTouch = touch;
+            gTabTouchStart = [touch locationInView:nil];
+            gTabTouchAt = touch.timestamp;
+        } else if (touch == gTabTouch && touch.phase == UITouchPhaseEnded) {
+            gTabTouch = nil;
+            CGPoint end = [touch locationInView:nil];
+            if (hypot(end.x - gTabTouchStart.x, end.y - gTabTouchStart.y) > 12 || touch.timestamp - gTabTouchAt > 0.5) continue;
+            UIViewController* a = gANotifController;
+            UINavigationController* navigation = a.navigationController;
+            if (!gAVisible || !navigation) continue;
+            gTabRetapClass = @"touch on the selection pill";
+            @try {
+                UNTabRetapToggles(navigation);
+            } @catch (__unused NSException* exception) {
+            }
+        } else if (touch == gTabTouch && touch.phase == UITouchPhaseCancelled) {
+            gTabTouch = nil;
+        }
     }
-    BOOL result = %orig;
-    gTabRetapInside = NO;
-    return result;
+}
+
+%group UnifiedNotifTabTouch
+
+%hook UIWindow
+
+- (void)sendEvent:(UIEvent*)event {
+    if (event.type == UIEventTypeTouches && gAVisible && (gBBarItem || gFilterView)) {
+        @try {
+            UNTabTouches(event);
+        } @catch (__unused NSException* exception) {
+        }
+    }
+    %orig;
 }
 
 %end
@@ -2386,6 +2456,7 @@ extern BOOL NFBTouchCameFromTabBar(void);
     } else {
         gTabRetapNote = @"not hooked (no such method)";
     }
+    %init(UnifiedNotifTabTouch);
     Method xnavTop = class_getInstanceMethod([UINavigationController class], NSSelectorFromString(@"xnav_scrollToTopAnimated:completion:"));
     const char* xnavTypes = xnavTop ? method_getTypeEncoding(xnavTop) : NULL;
     if (xnavTypes && strcmp(xnavTypes, "B28@0:8B16@?20") == 0) {

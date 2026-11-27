@@ -66,6 +66,11 @@
 //    repost and bookmark are sent with B's account by this file (whatever X
 //    would pick), and a reply composer is switched to B with the send check on.
 //    The 7.3.143 "switch to B?" prompt for protected tweets is gone.
+//  - 7.3.147: B's colour can be X's theme colour or any colour from a picker.
+//    B's For You marks (and B reactions) only where B follows whoever brought
+//    the tweet; a tweet B was only recommended is plain and reacts as A. The
+//    composer's account switch springs a liquid ring between the pictures.
+//    Bookmarks as B: the manager's account is an ivar without a getter.
 //  - 7.3.140: only B's tweets get the small account picture (A-only ones had
 //    A's). B loaded only its first page, so scrolling A down ran past B's
 //    tweets; when A's Following stream loads more (-[TFSTwitterStream
@@ -823,11 +828,18 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
             continue;
         }
         [bItems addObject:object];
+        // 7.3.147: B's For You is recommendations; marks and B reactions only
+        // when B follows whoever brought it and A does not. A tweet B was only
+        // recommended is shown plain and reacted to like any of A's.
         long long bringer = BringerID(object);
+        BOOL repost = Getter(Getter(object, @"status"), @"representedStatus") != nil ||
+                      (acted > 0 && acted != statusID);
+        BOOL bFollows = (bringer > 0 && BID() && [gKnownFollows[BID()] containsObject:@(bringer)]) ||
+                        (!repost && NumberGetter(object, @"representedFromUserFollowedByCurrentAccountState") == 1);
         if (bringer > 0 && [gAFollowedBringers containsObject:@(bringer)]) {
             followedByA++;
             [both addObject:@(statusID)];
-        } else {
+        } else if (bFollows) {
             [bOnly addObject:@(statusID)];
         }
     }
@@ -1084,12 +1096,16 @@ static void BookmarkAsB(id viewModel, UIView* sourceView) {
         manager = ((id (*)(id, SEL, id))objc_msgSend)([managerClass alloc], NSSelectorFromString(@"initWithAccount:"), gBAccount);
     } @catch (__unused NSException* exception) {
     }
-    // The manager must be B's; anything else and nothing is sent.
-    if (!manager || Getter(manager, @"account") != gBAccount) {
+    // The manager must be B's; anything else and nothing is sent. 7.3.147:
+    // its account is a plain ivar with no getter (7.3.143 read nil and stopped
+    // every bookmark), so read the ivar.
+    id managerAccount = Getter(manager, @"account") ?: objectIvar(manager, "account");
+    if (!manager || (managerAccount && ![AccountUserID(managerAccount) isEqualToString:AccountUserID(gBAccount)])) {
         UnifiedLog(@"bookmark as B stopped: manager is not B's");
         ShowNotice(@"B 계정으로 확실히 보낼 수 없어서 북마크를 막았어요");
         return;
     }
+    if (!managerAccount) UnifiedLog(@"bookmark manager account unreadable; it was made with B's account");
     void (^completion)(void) = ^{
     };
     @try {
@@ -1407,12 +1423,26 @@ static const void* kNameColorKey = &kNameColorKey;
 
 static UIColor* BColor(void) {
     NSString* hex = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_color"] ?: @"FF7A00";
+    if ([hex isEqualToString:@"theme"]) {
+        // X's own accent: the windows' tint.
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* window in ((UIWindowScene*)scene).windows) {
+                if (window.isKeyWindow && window.tintColor) return window.tintColor;
+            }
+        }
+        return [UIColor colorWithRed:0.11 green:0.61 blue:0.94 alpha:1];
+    }
     unsigned int value = 0;
     if (hex.length != 6 || ![[NSScanner scannerWithString:hex] scanHexInt:&value]) value = 0xFF7A00;
     return [UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0
                            green:((value >> 8) & 0xFF) / 255.0
                             blue:(value & 0xFF) / 255.0
                            alpha:1];
+}
+
+UIColor* NFBUnifiedBColor(void) {
+    return BColor();
 }
 
 // A tweet only B has: the display name in B's colour and a folded top-left
@@ -2170,7 +2200,64 @@ static void UpdateOtherAvatar(UIView* singleView) {
     // Chosen here, so this is the account it must go out as.
     SetIntended(composer, other);
     SwitchComposerTo(composer, other, NO);
-    [button.superview setNeedsLayout];
+    UIView* holder = button.superview;
+    if (!avatar || !holder) {
+        [holder setNeedsLayout];
+        return;
+    }
+    // 7.3.147: a liquid ring springs from the small picture to the big one,
+    // the big one gives a little bounce, the small one fades to the other.
+    UIColor* tint = other == gBAccount ? BColor() : [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
+    UIView* ring = [[UIView alloc] initWithFrame:CGRectInset(button.frame, -3, -3)];
+    ring.userInteractionEnabled = NO;
+    ring.layer.cornerRadius = CGRectGetWidth(ring.bounds) / 2;
+    ring.layer.borderWidth = 2.5;
+    ring.layer.borderColor = tint.CGColor;
+    ring.backgroundColor = [tint colorWithAlphaComponent:0.12];
+    ring.layer.shadowColor = tint.CGColor;
+    ring.layer.shadowOpacity = 0.5;
+    ring.layer.shadowRadius = 6;
+    ring.layer.shadowOffset = CGSizeZero;
+    [holder addSubview:ring];
+    CGRect target = CGRectInset(avatar.frame, -3, -3);
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleSoft] impactOccurred];
+    [UIView animateWithDuration:0.5
+        delay:0
+        usingSpringWithDamping:0.62
+        initialSpringVelocity:0.9
+        options:UIViewAnimationOptionBeginFromCurrentState
+        animations:^{
+            ring.frame = target;
+            ring.layer.cornerRadius = CGRectGetWidth(target) / 2;
+        }
+        completion:^(BOOL finished) {
+            [UIView animateWithDuration:0.25
+                animations:^{
+                    ring.alpha = 0;
+                    ring.transform = CGAffineTransformMakeScale(1.15, 1.15);
+                }
+                completion:^(BOOL done) {
+                    [ring removeFromSuperview];
+                }];
+        }];
+    avatar.transform = CGAffineTransformMakeScale(0.82, 0.82);
+    [UIView animateWithDuration:0.55
+                          delay:0.12
+         usingSpringWithDamping:0.45
+          initialSpringVelocity:1.2
+                        options:UIViewAnimationOptionAllowUserInteraction
+                     animations:^{
+                         avatar.transform = CGAffineTransformIdentity;
+                     }
+                     completion:nil];
+    [UIView transitionWithView:button
+                      duration:0.3
+                       options:UIViewAnimationOptionTransitionCrossDissolve
+                    animations:^{
+                        [holder setNeedsLayout];
+                        [holder layoutIfNeeded];
+                    }
+                    completion:nil];
 }
 
 @end

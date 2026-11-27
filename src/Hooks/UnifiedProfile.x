@@ -246,14 +246,10 @@ static UIImage* UPAvatar(NSString* userID, NSString* letter, UIColor* color) {
     }];
 }
 
+extern UIColor* NFBUnifiedBColor(void);
+
 static UIColor* UPBColor(void) {
-    NSString* hex = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_color"] ?: @"FF7A00";
-    unsigned int value = 0;
-    if (hex.length != 6 || ![[NSScanner scannerWithString:hex] scanHexInt:&value]) value = 0xFF7A00;
-    return [UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0
-                           green:((value >> 8) & 0xFF) / 255.0
-                            blue:(value & 0xFF) / 255.0
-                           alpha:1];
+    return NFBUnifiedBColor();
 }
 
 // MARK: - Follow state

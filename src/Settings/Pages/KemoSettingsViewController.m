@@ -234,6 +234,19 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
                                                     [self.tableView reloadData];
                                                 }]];
     }
+    NSString* themeName = [self localized:@"KEMO_UNIFIED_COLOR_THEME"];
+    [sheet addAction:[UIAlertAction actionWithTitle:[current isEqualToString:@"theme"] ? [themeName stringByAppendingString:@" ✓"] : themeName
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                [defaults setObject:@"theme" forKey:@"kemo_unified_b_color"];
+                                                [defaults setObject:themeName forKey:@"kemo_unified_b_color_name"];
+                                                [self.tableView reloadData];
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"KEMO_UNIFIED_COLOR_PICK"]
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                [self showUnifiedColorPicker];
+                                            }]];
     [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
@@ -241,6 +254,44 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
     sheet.popoverPresentationController.sourceRect =
         CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// Any colour for B's tweets, kept as RRGGBB like the presets.
+- (void)showUnifiedColorPicker {
+    UIColorPickerViewController* picker = [UIColorPickerViewController new];
+    picker.supportsAlpha = NO;
+    picker.title = [self localized:@"KEMO_UNIFIED_B_COLOR_TITLE"];
+    NSString* hex = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_color"];
+    unsigned int value = 0;
+    if (hex.length == 6 && [[NSScanner scannerWithString:hex] scanHexInt:&value]) {
+        picker.selectedColor = [UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0
+                                               green:((value >> 8) & 0xFF) / 255.0
+                                                blue:(value & 0xFF) / 255.0
+                                               alpha:1];
+    }
+    picker.delegate = (id<UIColorPickerViewControllerDelegate>)self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)saveUnifiedColor:(UIColor*)color {
+    CGFloat red = 0, green = 0, blue = 0, alpha = 0;
+    if (![color getRed:&red green:&green blue:&blue alpha:&alpha]) return;
+    int r = (int)lround(MAX(0, MIN(1, red)) * 255), g = (int)lround(MAX(0, MIN(1, green)) * 255),
+        b = (int)lround(MAX(0, MIN(1, blue)) * 255);
+    NSString* hex = [NSString stringWithFormat:@"%02X%02X%02X", r, g, b];
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:hex forKey:@"kemo_unified_b_color"];
+    [defaults setObject:[NSString stringWithFormat:@"%@ #%@", [self localized:@"KEMO_UNIFIED_COLOR_CUSTOM"], hex]
+                 forKey:@"kemo_unified_b_color_name"];
+    [self.tableView reloadData];
+}
+
+- (void)colorPickerViewController:(UIColorPickerViewController*)picker didSelectColor:(UIColor*)color continuously:(BOOL)continuously {
+    if (!continuously) [self saveUnifiedColor:color];
+}
+
+- (void)colorPickerViewControllerDidFinish:(UIColorPickerViewController*)picker {
+    [self saveUnifiedColor:picker.selectedColor];
 }
 
 - (void)openAliasEditor:(NSDictionary*)sender {

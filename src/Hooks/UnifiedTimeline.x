@@ -72,6 +72,8 @@ static BOOL gMakingB;
 static id gBTimeline;
 static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
+static NSUInteger gBBottomLoads;
+static CFAbsoluteTime gBLastBottom;
 static NSMutableSet<NSNumber*>* gBOnlyIDs;
 static NSMutableSet<NSNumber*>* gBothIDs;
 static NSMutableSet<NSNumber*>* gAOnlyIDs;
@@ -1202,9 +1204,6 @@ void NFBUnifiedDockChose(BOOL unified, id a) {
 }
 
 %end
-
-static NSUInteger gBBottomLoads;
-static CFAbsoluteTime gBLastBottom;
 
 // A's Following stream loaded more: load more of B's too (at most every 5s).
 static void FollowBottomLoad(id stream, long long source) {

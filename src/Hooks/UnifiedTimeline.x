@@ -20,8 +20,15 @@
 //    (conversation) children are TFNDataViewItem-wrapped while standalone
 //    statuses are not. The section is now read as blocks (a standalone status,
 //    or a whole module) and B's statuses go between blocks, never into a module.
-//  - Reacting is not routed yet: on a tweet only B has, the inline like, repost,
-//    reply and bookmark buttons are stopped with a short notice.
+//  - 7.3.135, reacting as B: on a tweet only B has, like and repost are sent with
+//    B's own TFNTwitterAccount (favoriteStatusWithStatusID:, unfavorite…,
+//    retweetWithStatusID:), reply opens X's composer and switches it to B with its
+//    setAccount:, and the other buttons (bookmark) stay stopped. On a tweet both
+//    have, like and repost ask which account, A first. This covers every
+//    TTAStatusInlineActionsView, the tweet detail screen included.
+//  - A small avatar of the only account that has a tweet sits after its time
+//    (TTAStatusAuthorView); none when both have it. "A only" means A has it and it
+//    is newer than the oldest tweet B has loaded.
 //
 
 #import "HookHelpers.h"
@@ -37,6 +44,8 @@ static id gBTimeline;
 static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
 static NSMutableSet<NSNumber*>* gBOnlyIDs;
+static NSMutableSet<NSNumber*>* gBothIDs;
+static NSMutableSet<NSNumber*>* gAOnlyIDs;
 static NSMutableArray<NSString*>* gUnifiedLog;
 static NSString* gLastMerge = @"(no merge yet)";
 static const void* kOriginalSectionsKey = &kOriginalSectionsKey;
@@ -355,6 +364,11 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
 
     NSMutableArray* bItems = [NSMutableArray array];
     NSMutableSet<NSNumber*>* bOnly = [NSMutableSet set];
+    NSMutableSet<NSNumber*>* both = [NSMutableSet set];
+    long long oldestB = LLONG_MAX;
+    for (id object in bObjects) {
+        if (IsStatusItem(object) && SortKey(object) > 0) oldestB = MIN(oldestB, SortKey(object));
+    }
     NSUInteger dupes = 0, older = 0, promoted = 0;
     for (id object in bObjects) {
         if (!IsStatusItem(object)) continue;
@@ -366,6 +380,7 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         if (statusID <= 0) continue;
         if ([aIDs containsObject:@(statusID)]) {
             dupes++;
+            [both addObject:@(statusID)];
             continue;
         }
         if (SortKey(object) <= oldestA) {
@@ -394,9 +409,23 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         [merged addObjectsFromArray:block];
     }
 
+    // A's standalone statuses newer than B's oldest: B would have them if it
+    // followed their source, so they count as A-only.
+    NSMutableSet<NSNumber*>* aOnly = [NSMutableSet set];
+    for (id item in aItems) {
+        if (!IsStatusItem(item)) continue;
+        long long statusID = NumberGetter(item, @"statusID");
+        if (statusID > 0 && ![both containsObject:@(statusID)] && SortKey(item) > oldestB) [aOnly addObject:@(statusID)];
+    }
     @synchronized([NSObject class]) {
         if (!gBOnlyIDs) gBOnlyIDs = [NSMutableSet set];
+        if (!gBothIDs) gBothIDs = [NSMutableSet set];
+        if (!gAOnlyIDs) gAOnlyIDs = [NSMutableSet set];
         [gBOnlyIDs unionSet:bOnly];
+        [gBothIDs unionSet:both];
+        [gBOnlyIDs minusSet:both];
+        [gAOnlyIDs unionSet:aOnly];
+        [gAOnlyIDs minusSet:both];
     }
     gLastMerge = [NSString stringWithFormat:@"A items=%lu blocks=%lu statuses=%lu (raw %lu, wrapped %lu) | B inserted=%lu "
                                             @"both=%lu olderThanA=%lu promoted=%lu leftOver=%lu | A outOfOrder=%lu",
@@ -481,22 +510,276 @@ static void ShowNotice(NSString* text) {
 
 static NSUInteger gBlocked;
 
-// YES when the button's tweet is one only B has and the button would act as A.
-static BOOL ShouldBlockInlineAction(id actionsView, id button) {
-    if (!UnifiedActive() || gBOnlyIDs.count == 0) return NO;
-    NSString* buttonClass = NSStringFromClass([button class]);
-    if ([buttonClass containsString:@"Share"] || [buttonClass containsString:@"Analytics"]) return NO;
-    id viewModel = Getter(actionsView, @"viewModel");
+static long long ViewModelStatusID(id viewModel) {
     long long statusID = NumberGetter(viewModel, @"statusID");
     if (statusID <= 0) statusID = NumberGetter(Getter(viewModel, @"status"), @"statusID");
     if (statusID <= 0) statusID = NumberGetter(Getter(viewModel, @"representedStatus"), @"statusID");
-    BOOL block = statusID > 0 && [gBOnlyIDs containsObject:@(statusID)];
-    if (block) {
+    return statusID;
+}
+
+// The tweet a like or repost acts on: the retweeted original for a retweet.
+static id ActedStatus(id viewModel) {
+    id status = Getter(viewModel, @"representedStatus") ?: Getter(viewModel, @"status");
+    id represented = Getter(status, @"representedStatus");
+    return represented ?: status;
+}
+
+static UIViewController* TopController(void) {
+    UIWindow* window = nil;
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
+            if (candidate.isKeyWindow) window = candidate;
+        }
+    }
+    UIViewController* top = window.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    return top;
+}
+
+static NSString* BName(void) {
+    return [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedBName] ?: @"B";
+}
+
+static NSString* AName(void) {
+    NSString* name = AccountUsername(CurrentAccount());
+    return name ? ([name hasPrefix:@"@"] ? name : [@"@" stringByAppendingString:name]) : @"A";
+}
+
+// Likes and reposts made as B in this session, so a second tap undoes them.
+static NSMutableSet<NSNumber*>* gBLiked;
+static NSMutableSet<NSNumber*>* gBUnliked;
+static NSMutableSet<NSNumber*>* gBReposted;
+
+static void CallStatusMethod(id account, NSString* selectorName, long long statusID) {
+    SEL selector = NSSelectorFromString(selectorName);
+    if (![account respondsToSelector:selector]) {
+        UnifiedLog([NSString stringWithFormat:@"B account has no %@", selectorName]);
+        ShowNotice(@"이 X 버전에서는 B로 보낼 수 없어요.");
+        return;
+    }
+    void (^response)(void) = ^{
+    };
+    ((void (*)(id, SEL, long long, id))objc_msgSend)(account, selector, statusID, response);
+}
+
+static void LikeAsB(id viewModel) {
+    id status = ActedStatus(viewModel);
+    long long statusID = NumberGetter(status, @"statusID");
+    if (statusID <= 0 || !gBAccount) return;
+    if (!gBLiked) gBLiked = [NSMutableSet set];
+    if (!gBUnliked) gBUnliked = [NSMutableSet set];
+    BOOL liked = [gBLiked containsObject:@(statusID)] ||
+                 (![gBUnliked containsObject:@(statusID)] &&
+                  (BoolGetter(status, @"favoritedByLoadingAccount") || BoolGetter(status, @"seenAsFavorited")));
+    if (liked) {
+        CallStatusMethod(gBAccount, @"unfavoriteStatusWithStatusID:responseBlock:", statusID);
+        [gBLiked removeObject:@(statusID)];
+        [gBUnliked addObject:@(statusID)];
+        ShowNotice([NSString stringWithFormat:@"%@의 마음에 들어요를 취소했어요", BName()]);
+    } else {
+        CallStatusMethod(gBAccount, @"favoriteStatusWithStatusID:responseBlock:", statusID);
+        [gBLiked addObject:@(statusID)];
+        [gBUnliked removeObject:@(statusID)];
+        ShowNotice([NSString stringWithFormat:@"♥ %@로 마음에 들어요 했어요", BName()]);
+    }
+    UnifiedLog([NSString stringWithFormat:@"%@ as B", liked ? @"unlike" : @"like"]);
+}
+
+static void RepostAsB(id viewModel) {
+    id status = ActedStatus(viewModel);
+    long long statusID = NumberGetter(status, @"statusID");
+    if (statusID <= 0 || !gBAccount) return;
+    if (!gBReposted) gBReposted = [NSMutableSet set];
+    BOOL reposted = [gBReposted containsObject:@(statusID)] || BoolGetter(status, @"seenAsRetweeted");
+    if (reposted) {
+        // Undoing needs the repost's own ID, which only X's own state has.
+        ShowNotice([NSString stringWithFormat:@"%@의 재게시 취소는 아직 %@로 전환해서 해주세요", BName(), BName()]);
+        return;
+    }
+    CallStatusMethod(gBAccount, @"retweetWithStatusID:responseBlock:", statusID);
+    [gBReposted addObject:@(statusID)];
+    ShowNotice([NSString stringWithFormat:@"🔁 %@로 재게시했어요", BName()]);
+    UnifiedLog(@"repost as B");
+}
+
+// A composer opened within a few seconds of this is switched to B.
+static CFAbsoluteTime gComposeAsBUntil;
+
+static void ChooseAccount(NSString* title, void (^asA)(void), void (^asB)(void)) {
+    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:title
+                                                                   message:@"두 계정 모두 이 게시물을 보고 있어요."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A) ✓", AName()]
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                asA();
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (B)", BName()]
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction* action) {
+                                                asB();
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"취소" style:UIAlertActionStyleCancel handler:nil]];
+    UIViewController* top = TopController();
+    sheet.popoverPresentationController.sourceView = top.view;
+    sheet.popoverPresentationController.sourceRect =
+        CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMaxY(top.view.bounds) - 80, 1, 1);
+    [top presentViewController:sheet animated:YES completion:nil];
+}
+
+// YES when the tap was handled here (sent as B, a sheet shown, or stopped).
+// `orig` runs X's own handling, which acts as A.
+static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
+    if (!UnifiedActive()) return NO;
+    NSString* buttonClass = NSStringFromClass([button class]);
+    if ([buttonClass containsString:@"Share"] || [buttonClass containsString:@"Analytics"]) return NO;
+    id viewModel = Getter(actionsView, @"viewModel");
+    long long statusID = ViewModelStatusID(viewModel);
+    if (statusID <= 0) return NO;
+    BOOL bOnly = [gBOnlyIDs containsObject:@(statusID)];
+    BOOL both = [gBothIDs containsObject:@(statusID)];
+    if (!bOnly && !both) return NO;
+    if (!BTimeline() || !gBAccount) return NO;
+
+    BOOL like = [buttonClass containsString:@"Favorite"];
+    BOOL repost = [buttonClass containsString:@"Retweet"];
+    BOOL reply = [buttonClass containsString:@"Reply"];
+
+    if (bOnly) {
+        if (like) {
+            LikeAsB(viewModel);
+            return YES;
+        }
+        if (repost) {
+            RepostAsB(viewModel);
+            return YES;
+        }
+        if (reply) {
+            gComposeAsBUntil = CFAbsoluteTimeGetCurrent() + 6;
+            UnifiedLog(@"reply: composer will switch to B");
+            return NO;
+        }
         gBlocked++;
         UnifiedLog([NSString stringWithFormat:@"blocked %@ on a B-only tweet", buttonClass]);
-        ShowNotice(@"B 계정 트윗이에요. 반응은 아직 실험 중이라 막아뒀어요.");
+        ShowNotice(@"B 계정 트윗이에요. 이 버튼은 아직 B로 보낼 수 없어서 막아뒀어요.");
+        return YES;
     }
-    return block;
+
+    // Both accounts have it: like and repost ask, A first.
+    if (like) {
+        ChooseAccount(@"어느 계정으로 마음에 들어요할까요?", orig, ^{
+            LikeAsB(viewModel);
+        });
+        return YES;
+    }
+    if (repost) {
+        ChooseAccount(@"어느 계정으로 재게시할까요?", orig, ^{
+            RepostAsB(viewModel);
+        });
+        return YES;
+    }
+    return NO;
+}
+
+// MARK: - Which account has it (badge next to the time)
+
+static UIImage* AccountAvatar(id account, NSString* letter, UIColor* color) {
+    static NSCache<NSString*, UIImage*>* cache;
+    if (!cache) cache = [NSCache new];
+    NSString* userID = AccountUserID(account) ?: letter;
+    UIImage* image = [cache objectForKey:userID];
+    if (image) return image;
+    // AccountBubbles.x keeps the accounts' pictures here.
+    NSURL* base = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                         inDomains:NSUserDomainMask].firstObject;
+    NSString* path = [[base URLByAppendingPathComponent:@"NFBAccountAvatars"] URLByAppendingPathComponent:
+                                                                                 [userID stringByAppendingString:@".img"]].path;
+    NSData* data = [NSData dataWithContentsOfFile:path];
+    __block UIImage* found = data.length ? [UIImage imageWithData:data] : nil;
+    if (!found) {
+        // On-screen avatar of that account (the drawer shows them).
+        NSString* wanted = [@"TUIAvatarImageView." stringByAppendingString:userID];
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* window in ((UIWindowScene*)scene).windows) {
+                EnumerateSubviewsRecursively(window, ^(UIView* view) {
+                    if (!found && [view.accessibilityIdentifier isEqualToString:wanted] &&
+                        [view isKindOfClass:[UIImageView class]] && ((UIImageView*)view).image) {
+                        found = ((UIImageView*)view).image;
+                    }
+                });
+            }
+        }
+    }
+    if (found) {
+        [cache setObject:found forKey:userID];
+        return found;
+    }
+    // A letter in a circle until a picture is found.
+    UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(28, 28)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext* context) {
+        [color setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(0, 0, 28, 28)] fill];
+        NSDictionary* attributes = @{
+            NSFontAttributeName : [UIFont systemFontOfSize:15 weight:UIFontWeightHeavy],
+            NSForegroundColorAttributeName : UIColor.whiteColor
+        };
+        CGSize size = [letter sizeWithAttributes:attributes];
+        [letter drawAtPoint:CGPointMake((28 - size.width) / 2, (28 - size.height) / 2) withAttributes:attributes];
+    }];
+}
+
+static const NSInteger kBadgeTag = 0x4E4642;  // "NFB"
+
+static void UpdateAccountBadge(UIView* authorView) {
+    UIImageView* badge = [authorView viewWithTag:kBadgeTag];
+    UIView* statusView = authorView.superview;
+    while (statusView && ![NSStringFromClass([statusView class]) isEqualToString:@"T1StandardStatusView"]) {
+        statusView = statusView.superview;
+    }
+    long long statusID = UnifiedActive() && statusView ? ViewModelStatusID(Getter(statusView, @"viewModel")) : 0;
+    id account = nil;
+    NSString* letter = nil;
+    UIColor* color = nil;
+    if (statusID > 0 && [gBOnlyIDs containsObject:@(statusID)]) {
+        account = gBAccount;
+        letter = @"B";
+        color = [UIColor colorWithRed:1 green:0.48 blue:0 alpha:1];
+    } else if (statusID > 0 && [gAOnlyIDs containsObject:@(statusID)]) {
+        account = CurrentAccount();
+        letter = @"A";
+        color = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
+    }
+    if (!letter) {
+        badge.hidden = YES;
+        return;
+    }
+    UIView* anchor = nil;
+    for (UIView* view in authorView.subviews) {
+        if ([view.accessibilityIdentifier isEqualToString:@"StatusTimeStamp"]) anchor = view;
+    }
+    if (!anchor) {
+        for (UIView* view in authorView.subviews) {
+            if ([view.accessibilityIdentifier isEqualToString:@"StatusUsername"]) anchor = view;
+        }
+    }
+    if (!anchor || anchor.hidden || anchor.frame.size.width <= 0) {
+        badge.hidden = YES;
+        return;
+    }
+    if (!badge) {
+        badge = [UIImageView new];
+        badge.tag = kBadgeTag;
+        badge.contentMode = UIViewContentModeScaleAspectFill;
+        badge.clipsToBounds = YES;
+        badge.layer.cornerRadius = 7;
+        badge.userInteractionEnabled = NO;
+        [authorView addSubview:badge];
+    }
+    badge.image = AccountAvatar(account, letter, color);
+    badge.hidden = NO;
+    badge.frame = CGRectMake(CGRectGetMaxX(anchor.frame) + 4, CGRectGetMidY(anchor.frame) - 7, 14, 14);
 }
 
 NSString* NFBUnifiedTimelineDebugText(void) {
@@ -514,8 +797,10 @@ NSString* NFBUnifiedTimelineDebugText(void) {
     [out appendFormat:@"B timeline=%@ stream=%@ objects=%lu\n", gBTimeline ? @"made" : @"none", stream ? @"set" : @"nil",
                       (unsigned long)([objects respondsToSelector:@selector(count)] ? [objects count] : 0)];
     [out appendFormat:@"wrapper: %@\n", gTemplateNote];
-    [out appendFormat:@"last merge: %@\nB-only ids=%lu blocked=%lu\n", gLastMerge, (unsigned long)gBOnlyIDs.count,
-                      (unsigned long)gBlocked];
+    [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
+                      gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
+                      (unsigned long)gAOnlyIDs.count, (unsigned long)gBlocked, (unsigned long)gBLiked.count,
+                      (unsigned long)gBReposted.count];
     @synchronized([NSObject class]) {
         [out appendFormat:@"%@\n", gUnifiedLog.count ? [gUnifiedLog componentsJoinedByString:@"\n"] : @"(no events)"];
     }
@@ -592,23 +877,70 @@ NSString* NFBUnifiedTimelineDebugText(void) {
 %hook TTAStatusInlineActionsView
 
 - (void)didTapInlineActionButton:(id)button {
-    if (ShouldBlockInlineAction(self, button)) return;
+    if (HandleInlineAction(self, button, ^{
+            %orig;
+        }))
+        return;
     %orig;
 }
 
 - (void)didTapInlineActionButton:(id)button withPrompt:(id)prompt menuItem:(long long)menuItem {
-    if (ShouldBlockInlineAction(self, button)) return;
+    if (HandleInlineAction(self, button, ^{
+            %orig;
+        }))
+        return;
     %orig;
 }
 
 - (void)inlineActionButtonDidRecognizeLongPressBegan:(id)button {
-    if (ShouldBlockInlineAction(self, button)) return;
+    if (HandleInlineAction(self, button, ^{
+            %orig;
+        }))
+        return;
     %orig;
 }
 
 - (void)didTriggerAlternateActionInInlineActionButton:(id)button {
-    if (ShouldBlockInlineAction(self, button)) return;
+    if (HandleInlineAction(self, button, ^{
+            %orig;
+        }))
+        return;
     %orig;
+}
+
+%end
+
+%hook TTAStatusAuthorView
+
+- (void)layoutSubviews {
+    %orig;
+    UIView* view = (UIView*)self;
+    if (UnifiedActive() || [view viewWithTag:kBadgeTag]) UpdateAccountBadge(view);
+}
+
+%end
+
+// A reply to a tweet only B has opens X's composer as A; switch it to B the way
+// the composer's own account picker would (setAccount:).
+%hook T1TweetComposeViewController
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    if (CFAbsoluteTimeGetCurrent() > gComposeAsBUntil || !gBAccount) return;
+    gComposeAsBUntil = 0;
+    id composer = (id)self;
+    SEL setAccount = NSSelectorFromString(@"setAccount:");
+    if (![composer respondsToSelector:setAccount]) {
+        UnifiedLog(@"composer has no setAccount:");
+        return;
+    }
+    ((void (*)(id, SEL, id))objc_msgSend)(composer, setAccount, gBAccount);
+    SEL didUpdate = NSSelectorFromString(@"accountDidUpdate:");
+    if ([composer respondsToSelector:didUpdate]) ((void (*)(id, SEL, id))objc_msgSend)(composer, didUpdate, gBAccount);
+    BOOL switched = Getter(composer, @"account") == gBAccount;
+    UnifiedLog([NSString stringWithFormat:@"composer switched to B: %@", switched ? @"yes" : @"no"]);
+    ShowNotice(switched ? [NSString stringWithFormat:@"%@로 답글을 써요. 보내기 전에 왼쪽 위 프로필을 확인해주세요", BName()]
+                        : @"B로 바꾸지 못했어요. 왼쪽 위 프로필을 눌러 직접 바꿔주세요");
 }
 
 %end

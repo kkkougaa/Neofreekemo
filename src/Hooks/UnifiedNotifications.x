@@ -2186,15 +2186,26 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 // list here, since X's code only knows A's). Anywhere else, and with unified
 // off, X's own.
 
-// The list inside B's embedded screen (UNListScrollView skips that screen).
-static UIScrollView* UNScrollInside(UIView* view, int depth) {
-    if (!view || depth > 12 || view.hidden) return nil;
+// The list being looked at inside `view`. 7.3.159: the first big table or
+// collection view found was the screen's sideways pager (모두 / 우선 알림 / 멘션,
+// a collection view that never scrolls down), so every tap read "at the top"
+// and switched. The pager is passed through, and of its pages the one on
+// screen is taken. `skip`: a subtree not to look in (B's embedded screen).
+static UIScrollView* UNVerticalList(UIView* view, UIView* skip, int depth) {
+    if (!view || depth > 14 || view == skip || view.hidden) return nil;
     if (([view isKindOfClass:[UITableView class]] || [view isKindOfClass:[UICollectionView class]]) && view.window &&
         CGRectGetHeight(view.bounds) > 200) {
-        return (UIScrollView*)view;
+        UIScrollView* scroll = (UIScrollView*)view;
+        BOOL sideways = scroll.contentSize.width > CGRectGetWidth(scroll.bounds) + 1 || scroll.pagingEnabled;
+        if (!sideways) {
+            CGRect inWindow = [scroll convertRect:scroll.bounds toView:nil];
+            CGRect seen = CGRectIntersection(inWindow, scroll.window.bounds);
+            if (!CGRectIsNull(seen) && CGRectGetWidth(seen) >= CGRectGetWidth(inWindow) / 2) return scroll;
+            return nil;  // a page off to the side
+        }
     }
     for (UIView* sub in view.subviews) {
-        UIScrollView* found = UNScrollInside(sub, depth + 1);
+        UIScrollView* found = UNVerticalList(sub, skip, depth + 1);
         if (found) return found;
     }
     return nil;
@@ -2218,7 +2229,7 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
         return NO;
     }
     BOOL onB = UNFilterIsB() && gBLiveHost && UNLiveValid();
-    UIScrollView* list = onB ? UNScrollInside(gBLiveHost, 0) : UNListScrollView(a.view, 0);
+    UIScrollView* list = onB ? UNVerticalList(gBLiveHost, nil, 0) : UNVerticalList(a.view, gBLiveHost, 0);
     if (list) {
         CGFloat top = -list.adjustedContentInset.top;
         // 7.3.155: X's own word for "at the top" when the list has it
@@ -2232,8 +2243,10 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
                 scrolled = !((BOOL (*)(id, SEL))objc_msgSend)(list, atTop);
             }
         }
-        gTabRetapSeen = [NSString stringWithFormat:@"offset %.1f, inset top %.1f, X says top=%d", list.contentOffset.y, -top,
-                                                   [list respondsToSelector:atTop] ? !scrolled : -1];
+        // Scrolled by offset counts too, whatever X's own word is.
+        if (list.contentOffset.y > top + 8) scrolled = YES;
+        gTabRetapSeen = [NSString stringWithFormat:@"%@ offset %.1f, inset top %.1f, scrolled=%d", NSStringFromClass([list class]),
+                                                   list.contentOffset.y, -top, scrolled];
         if (scrolled) {
             if (!onB) {
                 gTabRetapNote = @"A's list scrolled down: X's own (to the top)";

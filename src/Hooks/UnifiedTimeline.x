@@ -47,6 +47,10 @@
 //  - 7.3.138: a tweet only B has also gets its display name in B's colour
 //    (kemo_unified_b_color, orange unless picked) and a small folded corner of
 //    that colour at the top left of its row. A-only tweets stay as they are.
+//  - 7.3.140: only B's tweets get the small account picture (A-only ones had
+//    A's). B loaded only its first page, so scrolling A down ran past B's
+//    tweets; when A's Following stream loads more (-[TFSTwitterStream
+//    loadBottomWithSource:]), B's loads more too.
 //  - A small avatar of the only account that has a tweet sits after its time
 //    (TTAStatusAuthorView); none when both have it. "A only" means A has it and it
 //    is newer than the oldest tweet B has loaded.
@@ -947,10 +951,6 @@ static void UpdateAccountBadge(UIView* authorView) {
         account = gBAccount;
         letter = @"B";
         color = [UIColor colorWithRed:1 green:0.48 blue:0 alpha:1];
-    } else if (statusID > 0 && [gAOnlyIDs containsObject:@(statusID)]) {
-        account = CurrentAccount();
-        letter = @"A";
-        color = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
     }
     if (!letter) {
         badge.hidden = YES;
@@ -1024,7 +1024,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
     id objects = Getter(stream, @"streamObjects");
     [out appendFormat:@"B timeline=%@ stream=%@ objects=%lu\n", gBTimeline ? @"made" : @"none", stream ? @"set" : @"nil",
                       (unsigned long)([objects respondsToSelector:@selector(count)] ? [objects count] : 0)];
-    [out appendFormat:@"wrapper: %@\n", gTemplateNote];
+    [out appendFormat:@"wrapper: %@ bLoadMore=%lu\n", gTemplateNote, (unsigned long)gBBottomLoads];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
                       (unsigned long)gAOnlyIDs.count, (unsigned long)gBlocked, (unsigned long)gBLiked.count,
@@ -1200,6 +1200,48 @@ void NFBUnifiedDockChose(BOOL unified, id a) {
     }
 }
 
+%end
+
+static NSUInteger gBBottomLoads;
+static CFAbsoluteTime gBLastBottom;
+
+// A's Following stream loaded more: load more of B's too (at most every 5s).
+static void FollowBottomLoad(id stream, long long source) {
+    if (!UnifiedActive()) return;
+    id bStream = Getter(gBTimeline, @"stream");
+    if (!bStream || stream == bStream) return;
+    BOOL following = NO;
+    for (id timeline in [gFollowingTimelines allObjects]) {
+        if (Getter(timeline, @"stream") == stream && Getter(timeline, @"account") == CurrentAccount()) following = YES;
+    }
+    if (!following || CFAbsoluteTimeGetCurrent() - gBLastBottom < 5) return;
+    gBLastBottom = CFAbsoluteTimeGetCurrent();
+    SEL selector = NSSelectorFromString(@"loadBottomWithSource:");
+    if (![bStream respondsToSelector:selector]) return;
+    @try {
+        BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, selector, source);
+        gBBottomLoads++;
+        UnifiedLog([NSString stringWithFormat:@"A loaded more; B more (source %lld) started=%d", source, started]);
+    } @catch (NSException* exception) {
+        UnifiedLog([NSString stringWithFormat:@"B load more threw %@", exception.name]);
+    }
+}
+
+// The home stream may override it without calling super, so both.
+%hook TFSTwitterStream
+- (BOOL)loadBottomWithSource:(long long)source {
+    BOOL result = %orig;
+    FollowBottomLoad(self, source);
+    return result;
+}
+%end
+
+%hook THFURTHomeTimelineStream
+- (BOOL)loadBottomWithSource:(long long)source {
+    BOOL result = %orig;
+    FollowBottomLoad(self, source);
+    return result;
+}
 %end
 
 %hook TFNItemsDataViewController

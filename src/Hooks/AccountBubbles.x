@@ -2422,7 +2422,7 @@ static id UnifiedMarker(void) {
                 PutProfileLookOnBubble(bubble);
             }
             if (unified) {
-                CGFloat sub = round(size * 0.36);
+                CGFloat sub = round(size * 0.47);
                 UIImageView* small = [[UIImageView alloc]
                     initWithFrame:CGRectMake(size - sub + 2.0, size - sub + 2.0, sub, sub)];
                 small.contentMode = UIViewContentModeScaleAspectFill;
@@ -2444,7 +2444,7 @@ static id UnifiedMarker(void) {
                 }
                 UILabel* name = [[UILabel alloc]
                     initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + size + 6.0, size + kDockGap, 15.0)];
-                name.text = unified ? @"A/B 통합" : AccountTitle(account);
+                name.text = unified ? @"통합 계정" : AccountTitle(account);
                 name.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
                 name.textColor = ink;
                 name.textAlignment = NSTextAlignmentCenter;
@@ -2465,7 +2465,7 @@ static id UnifiedMarker(void) {
                         weakBubble.subAvatar.image = image;
                     });
                     count += SameAccount(unifiedB, current) ? CurrentBadgeCount(unifiedB, window) : BadgeCountFor(unifiedB);
-                    bubble.accessibilityLabel = [NSString stringWithFormat:@"A/B 통합, %@, %@", AccountTitle(account),
+                    bubble.accessibilityLabel = [NSString stringWithFormat:@"통합 계정, %@, %@", AccountTitle(account),
                                                                            AccountTitle(unifiedB)];
                 }
                 [bubble setCount:count];

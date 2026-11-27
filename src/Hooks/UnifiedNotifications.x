@@ -838,7 +838,7 @@ static const CGFloat kFilterWidth = 104;
 // same size; it was also shrunk to 0.9 before).
 static const CGFloat kUnselectedScale = 1.0;
 static const CGFloat kUnselectedAlpha = 0.6;
-// At the avatar button: the glass circle is this much bigger than the picture, every side.
+// At the avatar button our item is at least this much bigger than the picture, every side.
 static const CGFloat kAvatarGlassPad = 4.0;
 static const CGFloat kFilterHeight = 44;
 
@@ -1207,32 +1207,6 @@ static CGRect UNAvatarRectIn(UIView* container) {
     return rect;
 }
 
-// 7.3.152: the bar's own glass circle round each of the two items is switched
-// off while the pair is shown (UIBarButtonItem.hidesSharedBackground, iOS 26),
-// so the only glass is ours: a circle a little bigger than each picture. X's
-// item gets its own value back when the pair goes.
-static const void* kUNHidBackgroundKey = &kUNHidBackgroundKey;
-
-static BOOL UNHideSharedBackground(UIBarButtonItem* item) {
-    SEL get = NSSelectorFromString(@"hidesSharedBackground");
-    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
-    if (!item || ![item respondsToSelector:get] || ![item respondsToSelector:set]) return NO;
-    BOOL now = ((BOOL (*)(id, SEL))objc_msgSend)(item, get);
-    if (!objc_getAssociatedObject(item, kUNHidBackgroundKey)) {
-        objc_setAssociatedObject(item, kUNHidBackgroundKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (!now) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, YES);
-    return YES;
-}
-
-static void UNRestoreSharedBackground(UIBarButtonItem* item) {
-    NSNumber* was = item ? objc_getAssociatedObject(item, kUNHidBackgroundKey) : nil;
-    if (!was) return;
-    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
-    if ([item respondsToSelector:set]) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, was.boolValue);
-    objc_setAssociatedObject(item, kUNHidBackgroundKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
 // X's avatar button view of the notifications tab, only if it is that class.
 static UIView* UNAvatarContainer(void) {
     UIBarButtonItem* item = gAAvatarItem;
@@ -1258,9 +1232,11 @@ static CGFloat gBPictureSize = 28;
 static NSLayoutConstraint* gBSideWidth;
 static NSLayoutConstraint* gBSideHeight;
 
-// B's picture takes the size X's own A picture has in that bar (28 until it
-// can be read), and each picture gets a glass circle kAvatarGlassPad bigger
-// all round: B's is its whole item, A's sits behind X's avatar.
+// 7.3.152: B's picture takes exactly the size X's own A picture is drawn at
+// in that bar (28 until it can be read), and our item takes the size of X's
+// avatar button, so X's bar (XNavigation's LiquidNavigationBarItemGroupView,
+// one glass platter per item) gives both the same glass circle, a little
+// bigger than the pictures. No glass of ours is put there any more.
 static void UNSizeBPicture(void) {
     UIBarButtonItem* ours = gBBarItem;
     UIView* side = ours.customView;
@@ -1271,45 +1247,21 @@ static void UNSizeBPicture(void) {
     CGFloat size = CGRectIsNull(aRect) ? 28 : round(MIN(CGRectGetWidth(aRect), CGRectGetHeight(aRect)) * 2) / 2;
     gBPictureSize = size;
     CGFloat box = size + 2 * kAvatarGlassPad;
-    if (gBSideWidth.constant != box) gBSideWidth.constant = box;
-    if (gBSideHeight.constant != box) gBSideHeight.constant = box;
-    if (!side.superview) side.frame = CGRectMake(0, 0, box, box);
+    CGFloat boxWidth = MIN(MAX(box, CGRectGetWidth(container.bounds)), 64);
+    CGFloat boxHeight = MIN(MAX(box, CGRectGetHeight(container.bounds)), 64);
+    if (gBSideWidth.constant != boxWidth) gBSideWidth.constant = boxWidth;
+    if (gBSideHeight.constant != boxHeight) gBSideHeight.constant = boxHeight;
+    if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);
     if (CGRectGetWidth(picture.bounds) != size) picture.bounds = CGRectMake(0, 0, size, size);
     CGPoint middle = CGPointMake(CGRectGetMidX(side.bounds), CGRectGetMidY(side.bounds));
     if (!CGPointEqualToPoint(picture.center, middle)) picture.center = middle;
     if (picture.layer.cornerRadius != size / 2) picture.layer.cornerRadius = size / 2;
-    UIView* bGlass = [side viewWithTag:1];
-    CGRect bFrame = CGRectMake(middle.x - box / 2, middle.y - box / 2, box, box);
-    if (!CGRectEqualToRect(bGlass.frame, bFrame)) bGlass.frame = bFrame;
-    if (bGlass.layer.cornerRadius != box / 2) bGlass.layer.cornerRadius = box / 2;
-    UIView* aGlass = nil;
-    for (UIView* sub in container.subviews) {
-        if (sub.tag == kAvatarHighlightTag) aGlass = sub;
-    }
-    if (aGlass) {
-        CGRect aFrame = container.bounds;
-        if (!CGRectIsNull(aRect)) {
-            // Never past the button's edge when the button cuts its content there.
-            CGFloat pad = kAvatarGlassPad;
-            if (container.clipsToBounds) {
-                CGRect bounds = container.bounds;
-                pad = MAX(0, MIN(pad, MIN(MIN(CGRectGetMinX(aRect) - CGRectGetMinX(bounds), CGRectGetMaxX(bounds) - CGRectGetMaxX(aRect)),
-                                          MIN(CGRectGetMinY(aRect) - CGRectGetMinY(bounds), CGRectGetMaxY(bounds) - CGRectGetMaxY(aRect)))));
-            }
-            aFrame = CGRectInset(aRect, -pad, -pad);
-        }
-        if (!CGRectEqualToRect(aGlass.frame, aFrame)) aGlass.frame = aFrame;
-        CGFloat radius = MIN(CGRectGetWidth(aFrame), CGRectGetHeight(aFrame)) / 2;
-        if (aGlass.layer.cornerRadius != radius) aGlass.layer.cornerRadius = radius;
-    }
 }
 
 static void UNRemoveAvatarSwitch(void) {
     UIBarButtonItem* ours = gBBarItem;
     UIViewController* holder = gAvatarHolder;
     UIView* container = UNAvatarContainer();
-    // The bar's own glass round X's avatar comes back.
-    UNRestoreSharedBackground(gAAvatarItem);
     gBSideWidth = nil;
     gBSideHeight = nil;
     if (ours && holder) {
@@ -1387,14 +1339,6 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
         gBSideHeight = [side.heightAnchor constraintEqualToConstant:36];
         gBSideWidth.active = YES;
         gBSideHeight.active = YES;
-        UIVisualEffectView* highlight = [[UIVisualEffectView alloc] initWithEffect:UNHighlightEffect()];
-        highlight.tag = 1;
-        highlight.frame = side.bounds;
-        highlight.layer.cornerRadius = 18;
-        highlight.clipsToBounds = YES;
-        highlight.userInteractionEnabled = NO;
-        if ([highlight.effect isKindOfClass:[UIBlurEffect class]]) highlight.contentView.backgroundColor = [UIColor tertiarySystemFillColor];
-        [side addSubview:highlight];
         UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(4, 4, 28, 28)];
         picture.tag = 2;
         picture.contentMode = UIViewContentModeScaleAspectFill;
@@ -1404,7 +1348,6 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
         picture.userInteractionEnabled = NO;
         picture.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
                                    UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
-        highlight.autoresizingMask = picture.autoresizingMask;
         [side addSubview:picture];
         UIView* badge = UNMakeBadge();
         [side addSubview:badge];
@@ -1427,21 +1370,6 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
     }
     gAAvatarItem = avatarItem;
     gAvatarHolder = holder;
-    // A's highlight: behind X's avatar, inside X's own button, taking no touch.
-    UIView* container = UNAvatarContainer();
-    BOOL has = NO;
-    for (UIView* sub in container.subviews) {
-        if (sub.tag == kAvatarHighlightTag) has = YES;
-    }
-    if (container && !has) {
-        UIVisualEffectView* highlight = [[UIVisualEffectView alloc] initWithEffect:UNHighlightEffect()];
-        highlight.tag = kAvatarHighlightTag;
-        highlight.frame = container.bounds;
-        highlight.clipsToBounds = YES;
-        highlight.userInteractionEnabled = NO;
-        if ([highlight.effect isKindOfClass:[UIBlurEffect class]]) highlight.contentView.backgroundColor = [UIColor tertiarySystemFillColor];
-        [container insertSubview:highlight atIndex:0];
-    }
     UIView* side = ours.customView;
     UIImageView* picture = (UIImageView*)[side viewWithTag:2];
     id b = UNBAccount();
@@ -1449,9 +1377,6 @@ static BOOL UNInstallAvatarSwitch(UIViewController* parent) {
     picture.image = UNAccountPicture(b, @"B", bColor);
     picture.layer.borderColor = bColor.CGColor;
     side.accessibilityLabel = [NSString stringWithFormat:@"%@ 알림", UNHandle(b) ?: @"B"];
-    // The glass circles are ours, not the bar's.
-    UNHideSharedBackground(ours);
-    UNHideSharedBackground(avatarItem);
     UNSizeBPicture();
     UNApplyAvatarState();
     return YES;
@@ -1979,13 +1904,10 @@ NSString* NFBUnifiedNotificationsDebugText(void) {
                       (unsigned long)gBSeenBatches, gBSeenSignature ?: @"-",
                       seen ? [NSString stringWithFormat:@"on for %@ (dock number then %@)", seen[@"id"], seen[@"base"]] : @"off",
                       (unsigned long)gSilentViewedStopped];
+    [out appendFormat:@"tab again: %@ (toggles %lu)%c", gTabRetapNote, (unsigned long)gTabRetapToggles, 10];
     UIView* glassContainer = UNAvatarContainer();
-    UIBarButtonItem* glassItem = gAAvatarItem;
-    [out appendFormat:@"avatar pair: A rect %@ in button %@ clips=%d, B item %@, bar glass hidden: X's item %@ (its own value %@)%c",
-                      NSStringFromCGRect(UNAvatarRectIn(glassContainer)), NSStringFromCGRect(glassContainer.bounds),
-                      glassContainer.clipsToBounds, NSStringFromCGRect(gBBarItem.customView.bounds),
-                      glassItem && objc_getAssociatedObject(glassItem, kUNHidBackgroundKey) ? @"yes" : @"no",
-                      glassItem ? (objc_getAssociatedObject(glassItem, kUNHidBackgroundKey) ?: @"-") : @"-", 10];
+    [out appendFormat:@"avatar pair: A rect %@ in button %@, B item %@%c", NSStringFromCGRect(UNAvatarRectIn(glassContainer)),
+                      NSStringFromCGRect(glassContainer.bounds), NSStringFromCGRect(gBBarItem.customView.bounds), 10];
     [out appendFormat:@"B picture size=%.0f (X's avatar) | badge style: %@ (colour source when not measured: %@) | ", gBPictureSize, gBadgeStylePath, gBadgeColorSource];
     [out appendFormat:@"picture badges: A=%ld (%@) B=%ld (%@) | X's own badge on the avatar: %@ (made invisible while ours shows)\n",
                       (long)gBadgeA, gBadgeASource, (long)gBadgeB, gBadgeBSource, gXBadgeNote];
@@ -2185,6 +2107,54 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 
 %end
 
+// 7.3.152: the notifications tab tapped again while it is already showing.
+// X 12.44 (T1Twitter dump): -[T1TabNavigationController
+// handleTabSelectionIfAlreadySelected] v16@0:8. On the notifications tab's own
+// navigation controller, at its root, with the A | B switch up, the tap does
+// what a tap on the avatar pair does: the list goes over to the other account
+// (X's own scroll to the top is not run for that tap). Anywhere else, and with
+// unified off, X's own.
+static NSUInteger gTabRetapToggles;
+static NSString* gTabRetapNote = @"never called";
+
+static BOOL UNTabRetapToggles(UINavigationController* navigation) {
+    if (![NSThread isMainThread] || ![navigation isKindOfClass:[UINavigationController class]]) return NO;
+    UIViewController* a = gANotifController;
+    UIViewController* root = navigation.viewControllers.firstObject;
+    if (!a || !root || !UNIsInside(a, root)) return NO;  // another tab
+    if (!gAVisible || navigation.viewControllers.count != 1 || navigation.presentedViewController) {
+        gTabRetapNote = @"notifications tab, not at its root: X's own";
+        return NO;
+    }
+    if (!UNActive() || (!gBBarItem && !gFilterView)) {
+        gTabRetapNote = @"notifications tab, no switch up: X's own";
+        return NO;
+    }
+    gTabRetapToggles++;
+    gTabRetapNote = @"toggled";
+    UNSwitchTo(!UNFilterIsB(), @"notifications tab again");
+    return YES;
+}
+
+%group UnifiedNotifTabRetap
+
+%hook T1TabNavigationController
+
+- (void)handleTabSelectionIfAlreadySelected {
+    BOOL toggled = NO;
+    @try {
+        toggled = UNTabRetapToggles((UINavigationController*)self);
+    } @catch (__unused NSException* exception) {
+        toggled = NO;
+    }
+    if (toggled) return;
+    %orig;
+}
+
+%end
+
+%end
+
 %group UnifiedNotifAvatarButton
 
 // The tab roots' avatar bar button (private Swift class of TwitterDash, 12.44).
@@ -2208,6 +2178,12 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
         %init(UnifiedNotifAvatarButton);
     } else {
         gAvatarBarFailed = YES;
+    }
+    Class tabNavigation = objc_getClass("T1TabNavigationController");
+    if (tabNavigation && class_getInstanceMethod(tabNavigation, NSSelectorFromString(@"handleTabSelectionIfAlreadySelected")) != NULL) {
+        %init(UnifiedNotifTabRetap);
+    } else {
+        gTabRetapNote = @"not hooked (no such method)";
     }
     // Unified mode, the pair or the switch changed in settings (or from the
     // dock): what no longer holds is taken away. queue:nil, then main (a main

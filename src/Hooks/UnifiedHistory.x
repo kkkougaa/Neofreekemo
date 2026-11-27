@@ -537,7 +537,8 @@ static NSString* UHHandle(id account, NSString* fallback) {
 // - Otherwise (a pushed screen with a back button): a self-contained pair,
 //   the last left bar item, so the search field is laid out to its right.
 
-static const CGFloat kHUnselectedScale = 0.9;
+// 7.3.152: both pictures are always the same size; the one not in use is only dimmed.
+static const CGFloat kHUnselectedScale = 1.0;
 static const CGFloat kHUnselectedAlpha = 0.6;
 static const CGFloat kHPairWidth = 80;
 static const CGFloat kHPairHeight = 40;
@@ -686,14 +687,21 @@ static void UHToggle(NSString* from);
 
 @end
 
-// X's avatar picture inside its button (DashAvatarImageView : TUIAvatarImageView).
-static UIView* UHAvatarIn(UIView* container) {
+// X's avatar picture inside its button (DashAvatarImageView : TUIAvatarImageView),
+// however deep it sits.
+static UIView* UHAvatarInDepth(UIView* view, NSInteger depth) {
     Class avatarClass = objc_getClass("TUIAvatarImageView");
-    if (!avatarClass) return nil;
-    for (UIView* sub in container.subviews) {
+    if (!avatarClass || depth > 4) return nil;
+    for (UIView* sub in view.subviews) {
         if ([sub isKindOfClass:avatarClass]) return sub;
+        UIView* found = UHAvatarInDepth(sub, depth + 1);
+        if (found) return found;
     }
     return nil;
+}
+
+static UIView* UHAvatarIn(UIView* container) {
+    return UHAvatarInDepth(container, 0);
 }
 
 // X's avatar button view of the history screen, only if it is that class.
@@ -712,43 +720,46 @@ static NFBHistoryPairControl* UHPairOf(UIViewController* screen) {
     return nil;
 }
 
-// Which picture is the one in use: highlights, dimming, VoiceOver.
+// Which picture is the one in use: dimming, VoiceOver. At X's avatar button
+// both pictures keep their size and X's own glass platter (7.3.152).
 static void UHApplyState(void) {
     BOOL onB = gHOnB;
     [UHPairOf(gHSwitchScreen) place];
     UIBarButtonItem* ours = gHBItem;
     if (!ours) return;
     UIView* side = ours.customView;
-    UIView* bHighlight = [side viewWithTag:1];
     UIView* bPicture = [side viewWithTag:2];
-    bHighlight.alpha = onB ? 1.0 : 0.0;
-    bHighlight.transform = onB ? CGAffineTransformIdentity : CGAffineTransformScale(CGAffineTransformMakeTranslation(-18, 0), 0.6, 0.6);
     bPicture.alpha = onB ? 1.0 : kHUnselectedAlpha;
-    bPicture.transform = onB ? CGAffineTransformIdentity : CGAffineTransformMakeScale(kHUnselectedScale, kHUnselectedScale);
     side.accessibilityTraits = onB ? (UIAccessibilityTraitButton | UIAccessibilityTraitSelected) : UIAccessibilityTraitButton;
-    UIView* container = UHAvatarContainer();
-    UIView* aHighlight = nil;
-    for (UIView* sub in container.subviews) {
-        if (sub.tag == kHAvatarHighlightTag) aHighlight = sub;
-    }
-    aHighlight.layer.cornerRadius = MIN(CGRectGetWidth(aHighlight.bounds), CGRectGetHeight(aHighlight.bounds)) / 2;
-    aHighlight.alpha = onB ? 0.0 : 1.0;
-    aHighlight.transform = onB ? CGAffineTransformScale(CGAffineTransformMakeTranslation(18, 0), 0.6, 0.6) : CGAffineTransformIdentity;
     // X's avatar keeps its frame; only dimmed while B is the one in use.
-    UHAvatarIn(container).alpha = onB ? kHUnselectedAlpha : 1.0;
+    UHAvatarIn(UHAvatarContainer()).alpha = onB ? kHUnselectedAlpha : 1.0;
 }
 
-// B's picture takes the size X's own A picture has in that bar (28 until it
-// can be read). Bounds and centre only: its transform is the selection's.
+static NSLayoutConstraint* gHSideWidth;
+static NSLayoutConstraint* gHSideHeight;
+
+// B's picture takes exactly the size X's own A picture is drawn at in that bar
+// (28 until it can be read), and our item the size of X's avatar button, so
+// X's bar gives both the same glass circle.
 static void UHSizeBPicture(void) {
     UIBarButtonItem* ours = gHBItem;
-    UIView* picture = [ours.customView viewWithTag:2];
+    UIView* side = ours.customView;
+    UIView* picture = [side viewWithTag:2];
     if (!picture) return;
-    UIView* avatar = UHAvatarIn(UHAvatarContainer());
-    CGFloat size = MIN(CGRectGetWidth(avatar.bounds), CGRectGetHeight(avatar.bounds));
-    if (size < 16 || size > 36) size = 28;
+    UIView* container = UHAvatarContainer();
+    UIView* avatar = UHAvatarIn(container);
+    CGRect aRect = avatar ? [avatar convertRect:avatar.bounds toView:container] : CGRectZero;
+    CGFloat size = round(MIN(CGRectGetWidth(aRect), CGRectGetHeight(aRect)) * 2) / 2;
+    if (size < 16 || size > 64) size = 28;
+    CGFloat box = size + 8;
+    CGFloat boxWidth = MIN(MAX(box, CGRectGetWidth(container.bounds)), 64);
+    CGFloat boxHeight = MIN(MAX(box, CGRectGetHeight(container.bounds)), 64);
+    if (gHSideWidth.constant != boxWidth) gHSideWidth.constant = boxWidth;
+    if (gHSideHeight.constant != boxHeight) gHSideHeight.constant = boxHeight;
+    if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);
     if (CGRectGetWidth(picture.bounds) != size) picture.bounds = CGRectMake(0, 0, size, size);
-    if (!CGPointEqualToPoint(picture.center, CGPointMake(18, 18))) picture.center = CGPointMake(18, 18);
+    CGPoint middle = CGPointMake(CGRectGetMidX(side.bounds), CGRectGetMidY(side.bounds));
+    if (!CGPointEqualToPoint(picture.center, middle)) picture.center = middle;
     if (picture.layer.cornerRadius != size / 2) picture.layer.cornerRadius = size / 2;
 }
 
@@ -772,6 +783,8 @@ static void UHRemoveAvatarSwitch(void) {
     gHBItem = nil;
     gHAvatarItem = nil;
     gHAvatarHolder = nil;
+    gHSideWidth = nil;
+    gHSideHeight = nil;
 }
 
 // X's avatar bar item of the history screen: in the leftBarButtonItems of the
@@ -804,13 +817,10 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
     if (!ours) {
         UIButton* side = [UIButton buttonWithType:UIButtonTypeCustom];
         side.frame = CGRectMake(0, 0, 36, 36);
-        [side.widthAnchor constraintEqualToConstant:36].active = YES;
-        [side.heightAnchor constraintEqualToConstant:36].active = YES;
-        UIVisualEffectView* highlight = UHMakeHighlight();
-        highlight.tag = 1;
-        highlight.frame = side.bounds;
-        highlight.layer.cornerRadius = 18;
-        [side addSubview:highlight];
+        gHSideWidth = [side.widthAnchor constraintEqualToConstant:36];
+        gHSideHeight = [side.heightAnchor constraintEqualToConstant:36];
+        gHSideWidth.active = YES;
+        gHSideHeight.active = YES;
         UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(4, 4, 28, 28)];
         picture.tag = 2;
         picture.contentMode = UIViewContentModeScaleAspectFill;
@@ -818,6 +828,8 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
         picture.layer.cornerRadius = 14;
         picture.layer.borderWidth = 1.5;
         picture.userInteractionEnabled = NO;
+        picture.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
+                                   UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
         [side addSubview:picture];
         [side addTarget:[NFBHistoryAvatarTarget shared] action:@selector(tappedB:) forControlEvents:UIControlEventTouchUpInside];
         ours = [[UIBarButtonItem alloc] initWithCustomView:side];
@@ -832,19 +844,6 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
     }
     gHAvatarItem = avatarItem;
     gHAvatarHolder = holder;
-    // A's highlight: behind X's avatar, inside X's own button, taking no touch.
-    UIView* container = UHAvatarContainer();
-    BOOL has = NO;
-    for (UIView* sub in container.subviews) {
-        if (sub.tag == kHAvatarHighlightTag) has = YES;
-    }
-    if (container && !has) {
-        UIVisualEffectView* highlight = UHMakeHighlight();
-        highlight.tag = kHAvatarHighlightTag;
-        highlight.frame = container.bounds;
-        highlight.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [container insertSubview:highlight atIndex:0];
-    }
     UIView* side = ours.customView;
     UIImageView* picture = (UIImageView*)[side viewWithTag:2];
     UIColor* bColor = NFBUnifiedBColor() ?: [UIColor systemOrangeColor];

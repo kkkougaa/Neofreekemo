@@ -41,7 +41,8 @@
 //
 //  7.3.152: B's picture is exactly the size of X's A picture (X's avatar is
 //  now found however deep it sits and measured as drawn), and one glass
-//  capsule goes round the two instead of a glass circle round each.
+//  capsule goes round the two instead of a glass circle round each: X's own
+//  bar platter when it will share one between the two items, else one of ours.
 //
 
 #import "HookHelpers.h"
@@ -94,7 +95,12 @@ static NSLayoutConstraint* gPairHeight;
 static BOOL gPairPlaceQueued = NO;
 static NSString* gPairCapsuleNote = @"-";
 static NSString* gPairBackgroundNote = @"-";
-static const void* kHSHidBackgroundKey = &kHSHidBackgroundKey;  // on a bar item: its own hidesSharedBackground
+static const void* kHSHidBackgroundKey = &kHSHidBackgroundKey;    // on a bar item: its own hidesSharedBackground
+static const void* kHSSharedBackgroundKey = &kHSSharedBackgroundKey;  // on a bar item: its own sharesBackground
+// How the two pictures get one glass: 0 = asked X's bar to put both items on
+// one platter, not seen yet; 1 = X's bar did; 2 = it did not, a capsule of ours.
+static NSInteger gPairGlassMode = 0;
+static BOOL gPairGlassCheckQueued = NO;
 
 static void HSLog(NSString* line) {
     static NSDateFormatter* formatter;
@@ -283,6 +289,7 @@ static void HSPairRemove(NSString* why) {
     gPairHeight = nil;
     gPairPlacement = @"none";
     gPairCapsuleNote = @"-";
+    gPairGlassMode = 0;
     HSLog([NSString stringWithFormat:@"pair taken off (%@)", why]);
     void (^drop)(void) = ^{
         // The capsule goes and the bar's own glass round X's avatar comes back.
@@ -375,10 +382,23 @@ static CGFloat HSAvatarSizeIn(UIView* container) {
 // MARK: - The capsule (7.3.152)
 //
 // Both pictures are the same size and one glass capsule goes round the two.
-// The bar's own glass circle round each item is switched off for the pair
-// (UIBarButtonItem.hidesSharedBackground, iOS 26; X's item gets its own value
-// back when the pair goes), and a capsule of ours is put at the back of the
-// nearest view that holds both items, sized from the two pictures.
+//
+// X 12.44 draws its navigation bar itself (XServiceLibraries dump: XNavigation's
+// LiquidNavigationBarView; every group of bar items is a
+// LiquidNavigationBarItemGroupView with ivars `glass` and `slots`, the platter
+// seen round each item). Its binary reads UIBarButtonItem's `sharesBackground`
+// and `hidesSharedBackground` (both selectors are in XServiceLibraries, with a
+// Swift `sharesPlatterWithNeighbours`), and in 7.3.151 our item and X's avatar
+// item came out as two groups, a circle each.
+//
+// 1. Both items are told to share (`sharesBackground` YES; X's item gets its
+//    own value back when the pair goes) before ours is put in the bar. When
+//    the two then sit in the same ItemGroupView, X's own platter is the
+//    capsule and nothing else is done.
+// 2. When after 0.8s they are still in different groups (or the bar is not
+//    that one), both platters are switched off (`hidesSharedBackground`) and
+//    a capsule of ours is put at the back of the nearest view that holds both
+//    items, sized from the two pictures.
 
 // Liquid Glass when the app has it on (iOS 26), a thin blur otherwise.
 static UIVisualEffect* HSGlassEffect(void) {
@@ -390,25 +410,93 @@ static UIVisualEffect* HSGlassEffect(void) {
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
 }
 
-// NO when this iOS has no such property (then the bar draws no glass either).
-static BOOL HSHideSharedBackground(UIBarButtonItem* item) {
-    SEL get = NSSelectorFromString(@"hidesSharedBackground");
-    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
+// Sets a BOOL property of a bar item, remembering under `key` what it was.
+// NO when this iOS has no such property.
+static BOOL HSSetItemFlag(UIBarButtonItem* item, NSString* getter, NSString* setter, const void* key, BOOL value) {
+    SEL get = NSSelectorFromString(getter);
+    SEL set = NSSelectorFromString(setter);
     if (!item || ![item respondsToSelector:get] || ![item respondsToSelector:set]) return NO;
     BOOL now = ((BOOL (*)(id, SEL))objc_msgSend)(item, get);
-    if (!objc_getAssociatedObject(item, kHSHidBackgroundKey)) {
-        objc_setAssociatedObject(item, kHSHidBackgroundKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!objc_getAssociatedObject(item, key)) {
+        objc_setAssociatedObject(item, key, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (!now) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, YES);
+    if (now != value) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, value);
     return YES;
 }
 
-static void HSRestoreSharedBackground(UIBarButtonItem* item) {
-    NSNumber* was = item ? objc_getAssociatedObject(item, kHSHidBackgroundKey) : nil;
+static void HSRestoreItemFlag(UIBarButtonItem* item, NSString* setter, const void* key) {
+    NSNumber* was = item ? objc_getAssociatedObject(item, key) : nil;
     if (!was) return;
-    SEL set = NSSelectorFromString(@"setHidesSharedBackground:");
+    SEL set = NSSelectorFromString(setter);
     if ([item respondsToSelector:set]) ((void (*)(id, SEL, BOOL))objc_msgSend)(item, set, was.boolValue);
-    objc_setAssociatedObject(item, kHSHidBackgroundKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(item, key, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static BOOL HSShareBackground(UIBarButtonItem* item) {
+    return HSSetItemFlag(item, @"sharesBackground", @"setSharesBackground:", kHSSharedBackgroundKey, YES);
+}
+
+static BOOL HSHideSharedBackground(UIBarButtonItem* item) {
+    return HSSetItemFlag(item, @"hidesSharedBackground", @"setHidesSharedBackground:", kHSHidBackgroundKey, YES);
+}
+
+// X's item as X had it.
+static void HSRestoreSharedBackground(UIBarButtonItem* item) {
+    HSRestoreItemFlag(item, @"setHidesSharedBackground:", kHSHidBackgroundKey);
+    HSRestoreItemFlag(item, @"setSharesBackground:", kHSSharedBackgroundKey);
+}
+
+// X's bar's group view (one glass platter) this view sits in; nil in any other bar.
+static UIView* HSGroupViewOf(UIView* view) {
+    for (UIView* up = view.superview; up && ![up isKindOfClass:[UIWindow class]]; up = up.superview) {
+        if ([NSStringFromClass([up class]) containsString:@"LiquidNavigationBarItemGroupView"]) return up;
+    }
+    return nil;
+}
+
+static void HSPlaceCapsuleSoon(void);
+
+// Mode 0 -> 1 or 2 (see above). YES when a capsule of ours is to be drawn.
+static BOOL HSPairWantsOwnCapsule(UIView* container, UIView* side) {
+    if (gPairGlassMode == 2) return YES;
+    UIView* groupA = HSGroupViewOf(container);
+    UIView* groupB = HSGroupViewOf(side);
+    if (groupA && groupA == groupB) {
+        if (gPairGlassMode != 1) {
+            gPairGlassMode = 1;
+            HSLog(@"glass: X's bar put both pictures on one platter");
+        }
+        gPairCapsuleNote = [NSString stringWithFormat:@"X's own platter %@", NSStringFromCGRect(groupA.frame)];
+        return NO;
+    }
+    if (CFAbsoluteTimeGetCurrent() - gPairPlacedAt < 0.8) {
+        // The bar may still be regrouping: looked at once more afterwards.
+        if (!gPairGlassCheckQueued) {
+            gPairGlassCheckQueued = YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                gPairGlassCheckQueued = NO;
+                HSPlaceCapsuleSoon();
+            });
+        }
+        return NO;
+    }
+    gPairGlassMode = 2;
+    BOOL hidOurs = HSHideSharedBackground(gPairItem);
+    BOOL hidTheirs = HSHideSharedBackground(gPairAvatarItem);
+    HSLog([NSString stringWithFormat:@"glass: still two groups (%@ / %@), a capsule of ours; platters hidden ours=%d X's=%d",
+                                     groupA ? @"group" : @"no group", groupB ? @"group" : @"no group", hidOurs, hidTheirs]);
+    // The bar reads its items again.
+    UIViewController* holder = gPairHolder;
+    UIBarButtonItem* ours = gPairItem;
+    NSArray<UIBarButtonItem*>* items = holder.navigationItem.leftBarButtonItems;
+    if (ours && [items containsObject:ours]) {
+        NSMutableArray<UIBarButtonItem*>* without = [items mutableCopy];
+        [without removeObject:ours];
+        holder.navigationItem.leftBarButtonItems = without;
+        holder.navigationItem.leftBarButtonItems = items;
+        gPairPlacedAt = CFAbsoluteTimeGetCurrent();
+    }
+    return YES;
 }
 
 // The capsule's frame from where the two pictures are now. Nothing of X's is
@@ -420,6 +508,14 @@ static void HSPlaceCapsule(void) {
     UIView* side = ours.customView;
     UIView* picture = [side viewWithTag:2];
     if (!ours || !picture || !container.window || container.window != side.window) return;
+    if (!HSPairWantsOwnCapsule(container, side)) {
+        UIVisualEffectView* stale = gPairCapsule;
+        if (stale) {
+            gPairCapsule = nil;
+            [stale removeFromSuperview];
+        }
+        return;
+    }
     UIView* ancestor = side.superview;
     while (ancestor && ![ancestor isKindOfClass:[UIWindow class]] && ![container isDescendantOfView:ancestor]) {
         ancestor = ancestor.superview;
@@ -546,6 +642,13 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
         gPairItem = ours;
         gPairPlacedAt = CFAbsoluteTimeGetCurrent();
         created = YES;
+        // Before it goes into the bar: one platter for the two (see "The capsule").
+        gPairGlassMode = 0;
+        BOOL sharedOurs = HSShareBackground(ours);
+        BOOL sharedTheirs = HSShareBackground(avatarItem);
+        gPairBackgroundNote = [NSString stringWithFormat:@"sharesBackground ours=%@ X's=%@ (X's own value was %@)",
+                                                         sharedOurs ? @"set" : @"no such property", sharedTheirs ? @"set" : @"no such property",
+                                                         objc_getAssociatedObject(avatarItem, kHSSharedBackgroundKey) ?: @"-"];
         HSLog(@"pair put next to the home avatar (second bar item)");
     }
     UINavigationItem* item = holder.navigationItem;
@@ -565,23 +668,20 @@ static BOOL HSPairEnsure(UIView* container, BOOL recheck) {
     // The same size as X's A picture; always whole and in full colour here.
     CGFloat size = HSAvatarSizeIn(container);
     gPairPictureSize = size;
-    // Our item is the picture plus the capsule's margin; the picture stays in
-    // its middle whatever size the bar gives it.
+    // Our item is as big as X's avatar button (so the two take the same room
+    // in the bar), never less than the picture plus the capsule's margin; the
+    // picture stays in its middle whatever size the bar gives it.
     CGFloat box = size + 2 * kPairPad;
-    if (gPairWidth.constant != box) gPairWidth.constant = box;
-    if (gPairHeight.constant != box) gPairHeight.constant = box;
-    if (!side.superview) side.frame = CGRectMake(0, 0, box, box);
+    CGFloat boxWidth = MIN(MAX(box, CGRectGetWidth(container.bounds)), 64);
+    CGFloat boxHeight = MIN(MAX(box, CGRectGetHeight(container.bounds)), 64);
+    if (gPairWidth.constant != boxWidth) gPairWidth.constant = boxWidth;
+    if (gPairHeight.constant != boxHeight) gPairHeight.constant = boxHeight;
+    if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);
     picture.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
                                UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
     if (CGRectGetWidth(picture.bounds) != size) picture.bounds = CGRectMake(0, 0, size, size);
     CGPoint middle = CGPointMake(CGRectGetMidX(side.bounds), CGRectGetMidY(side.bounds));
     if (!CGPointEqualToPoint(picture.center, middle)) picture.center = middle;
-    // One capsule of ours instead of the bar's glass circle round each item.
-    BOOL hidOurs = HSHideSharedBackground(ours);
-    BOOL hidTheirs = HSHideSharedBackground(avatarItem);
-    gPairBackgroundNote = [NSString stringWithFormat:@"ours=%@ X's=%@ (X's own value was %@)", hidOurs ? @"hidden" : @"no such property",
-                                                     hidTheirs ? @"hidden" : @"no such property",
-                                                     objc_getAssociatedObject(avatarItem, kHSHidBackgroundKey) ?: @"-"];
     HSPlaceCapsuleSoon();
     if (picture.layer.cornerRadius != size / 2) picture.layer.cornerRadius = size / 2;
     if (picture.image != gSignImage) picture.image = gSignImage;
@@ -841,7 +941,7 @@ NSString* NFBUnifiedHomeSignDebugText(void) {
     [out appendFormat:@"pair shown=%d placement=%@ inWindow=%d size=%.0f fellBack=%d (corner sign shown=%lu)%c", pair != nil,
                       pair ? gPairPlacement : (shown ? @"corner sign (fallback)" : @"none"), pair.customView.window != nil,
                       gPairPictureSize, gPairFailed, (unsigned long)shown, 10];
-    [out appendFormat:@"capsule: %@; bar glass: %@; X's avatar rect %@ in button %@%c", gPairCapsuleNote, gPairBackgroundNote,
+    [out appendFormat:@"glass mode %ld (0 asked, 1 X's one platter, 2 our capsule) capsule: %@; bar glass: %@; X's avatar rect %@ in button %@%c", (long)gPairGlassMode, gPairCapsuleNote, gPairBackgroundNote,
                       NSStringFromCGRect(HSAvatarRectIn(gPairContainer)), NSStringFromCGRect(((UIView*)gPairContainer).bounds), 10];
     if (alive == 0) {
         // Nothing was hooked or laid out: what sits in the navigation bars now,

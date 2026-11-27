@@ -98,6 +98,9 @@ static NSString* gLastForYouMerge = @"(no For You merge yet)";
 // ones whose display name does (the author only B follows).
 static NSMutableSet<NSNumber*>* gBRepostLineIDs;
 static NSMutableSet<NSNumber*>* gBNameIDs;
+// Who each account follows, from its own Following list (UnifiedFollowSync.x).
+static NSMutableDictionary<NSString*, NSSet<NSNumber*>*>* gKnownFollows;
+static void ReapplyMerge(void);
 static id gBTimeline;
 static id gBAccount;
 static CFAbsoluteTime gBLastRefresh;
@@ -296,6 +299,7 @@ static void EnsurePair(void) {
     for (id userID in known) {
         if ([userID isKindOfClass:[NSNumber class]]) [gAFollowedBringers addObject:userID];
     }
+    if (aID && gKnownFollows[aID]) [gAFollowedBringers unionSet:gKnownFollows[aID]];
     [gBReposted removeAllObjects];
     if (changed) UnifiedLog([NSString stringWithFormat:@"account pair changed; %lu ids retired", (unsigned long)gRetiredIDs.count]);
 }
@@ -695,7 +699,8 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
             long long acted = ActedID(object);
             BOOL repost = Getter(status, @"representedStatus") != nil || (acted > 0 && acted != statusID);
             long long author = NumberGetter(ActedStatusOf(object), @"fromUserID");
-            BOOL bFollowsAuthor = NumberGetter(object, @"representedFromUserFollowedByCurrentAccountState") == 1;
+            BOOL bFollowsAuthor = NumberGetter(object, @"representedFromUserFollowedByCurrentAccountState") == 1 ||
+                                  (BID() && [gKnownFollows[BID()] containsObject:@(author)]);
             if (!gBRepostLineIDs) gBRepostLineIDs = [NSMutableSet set];
             if (!gBNameIDs) gBNameIDs = [NSMutableSet set];
             if (!repost) {
@@ -1544,6 +1549,20 @@ static void UpdateAccountBadge(UIView* authorView) {
     badge.frame = CGRectMake(nameX, CGRectGetMidY(name.frame) - 7, 14, 14);
 }
 
+void NFBUnifiedAddKnownFollows(NSString* accountID, NSSet<NSNumber*>* userIDs) {
+    if (accountID.length == 0 || !userIDs) return;
+    if (!gKnownFollows) gKnownFollows = [NSMutableDictionary dictionary];
+    gKnownFollows[accountID] = [userIDs copy];
+    if ([accountID isEqualToString:AccountUserID(CurrentAccount())]) {
+        if (!gAFollowedBringers) gAFollowedBringers = [NSMutableSet set];
+        [gAFollowedBringers unionSet:userIDs];
+    }
+    UnifiedLog([NSString stringWithFormat:@"following list for %@: %lu people", accountID, (unsigned long)userIDs.count]);
+    ReapplyMerge();
+}
+
+extern NSString* NFBUnifiedFollowSyncDebugText(void);
+
 NSString* NFBUnifiedTimelineDebugText(void) {
     NSMutableString* out = [NSMutableString string];
     NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedB];
@@ -1587,6 +1606,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
                       (unsigned long)([Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects") isKindOfClass:[NSArray class]]
                                           ? [Getter(Getter(gBForYouTimeline, @"stream"), @"streamObjects") count] : 0),
                       gLastForYouMerge];
+    [out appendFormat:@"following lists:\n%@", NFBUnifiedFollowSyncDebugText()];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,

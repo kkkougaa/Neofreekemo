@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.152",
+      "subtitle": "NeoFreeBird version 7.3.153",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.153",
+          "buildVersion": "153",
+          "date": "2026-11-27T10:20:40Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.153/NeoFreeBird-Twitter-sideloaded_7.3.153_12.44.ipa",
+          "size": 273898647,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 모드 점검 수정: A 계정이 저장돼 있지 않으면 팔로우 시트와 알림 전환이 뜨지 않아요. B가 로그아웃되면 통합 모드가 꺼져요. 계정이 확실하지 않은 전송·재게시 취소·게시물 열기는 막아요. 재게시 시트에 '인용 목록 보기'를 넣었어요."
+        },
         {
           "version": "7.3.152",
           "buildVersion": "152",

@@ -165,39 +165,11 @@ static void UPLog(NSString* line) {
     }
 }
 
+extern void NFBShowNotice(NSString* text);
+
+// 7.3.150: X-style toast (UnifiedSheet.x).
 static void UPNotice(NSString* text) {
-    UIWindow* window = nil;
-    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-        for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
-            if (candidate.isKeyWindow) window = candidate;
-        }
-    }
-    if (!window) return;
-    UILabel* label = [UILabel new];
-    label.text = text;
-    label.numberOfLines = 0;
-    label.textAlignment = NSTextAlignmentCenter;
-    label.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    label.textColor = UIColor.whiteColor;
-    label.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.92];
-    label.layer.cornerRadius = 14;
-    label.clipsToBounds = YES;
-    CGFloat width = MIN(window.bounds.size.width - 48, 320);
-    CGSize size = [label sizeThatFits:CGSizeMake(width - 28, CGFLOAT_MAX)];
-    label.frame = CGRectMake((window.bounds.size.width - width) / 2,
-                             window.bounds.size.height - window.safeAreaInsets.bottom - 150, width, size.height + 22);
-    label.alpha = 0;
-    [window addSubview:label];
-    [UIView animateWithDuration:0.2 animations:^{
-        label.alpha = 1;
-    } completion:^(BOOL finished) {
-        [UIView animateWithDuration:0.3 delay:1.8 options:0 animations:^{
-            label.alpha = 0;
-        } completion:^(BOOL done) {
-            [label removeFromSuperview];
-        }];
-    }];
+    NFBShowNotice(text);
 }
 
 static UIViewController* UPTopController(void) {
@@ -400,6 +372,8 @@ static NSString* UPFollowText(UPFollow follow) {
     }
 }
 
+static UPFollow UPFollowStateFor(NSString* accountID, long long userID, NSString* contextID, id user, NSString** source);
+
 static void UPUpdateChips(UIViewController* profile) {
     UIView* root = profile.viewIfLoaded;
     if (!root) return;
@@ -419,19 +393,22 @@ static void UPUpdateChips(UIViewController* profile) {
         gProfileState = [NSString stringWithFormat:@"user %lld: follow button not found", userID];
         return;
     }
-    long long rawA = -1;
-    UPFollow aFollow = UPFollowFromUser(UPProfileUser(profile), &rawA);
-    NSNumber* bKnown = gBFollowByUser[@(userID)];
-    UPFollow bFollow = bKnown ? (UPFollow)bKnown.integerValue : UPFollowUnknown;
-    if (!bKnown) {
+    // 7.3.150: each account's own state. The profile may be in B's context
+    // (opened from a tweet shown as B); its relationship is then B's, not A's.
+    NSString* contextID = UPAccountUserID(UPGetter(follow, @"account")) ?: UPAccountUserID(UPGetter(profile, @"account"));
+    id profileUser = UPProfileUser(profile);
+    NSString* aSource = nil, *bSource = nil;
+    UPFollow aFollow = UPFollowStateFor(aID, userID, contextID, profileUser, &aSource);
+    UPFollow bFollow = UPFollowStateFor(bID, userID, contextID, profileUser, &bSource);
+    if (bFollow == UPFollowUnknown) {
         __weak UIViewController* weakProfile = profile;
         UPAskBFollow(userID, ^{
             if (weakProfile) UPUpdateChips(weakProfile);
         });
     }
     gLastProfileUserID = userID;
-    gProfileState = [NSString stringWithFormat:@"user %lld: A=%ld (raw %lld) B=%ld follow=%@ %@", userID, (long)aFollow, rawA,
-                                               (long)bFollow, NSStringFromClass([follow class]),
+    gProfileState = [NSString stringWithFormat:@"user %lld: A=%ld (%@) B=%ld (%@) context=%@ follow=%@ %@", userID, (long)aFollow, aSource,
+                                               (long)bFollow, bSource, contextID ?: @"-", NSStringFromClass([follow class]),
                                                NSStringFromCGRect(follow.frame)];
 
     // 7.3.149: inside the follow button, on its left (below it there was no
@@ -709,47 +686,122 @@ static BOOL UPShouldAsk(id performer, long long userID) {
 
 // MARK: - Follow / unfollow as A or B (the follow button opens a sheet)
 
-static void UPRememberBFollow(long long userID, BOOL following) {
-    if (!gBFollowByUser) gBFollowByUser = [NSMutableDictionary dictionary];
-    gBFollowByUser[@(userID)] = @(following ? UPFollowYes : UPFollowNo);
-    NSString* key = [@"kemo_unified_follows_" stringByAppendingString:UPBID() ?: @""];
-    NSMutableSet* list = [NSMutableSet setWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:key] ?: @[]];
-    if (following) [list addObject:@(userID)];
-    else [list removeObject:@(userID)];
-    if (UPBID().length) [[NSUserDefaults standardUserDefaults] setObject:[list allObjects] forKey:key];
-    extern void NFBUnifiedAddKnownFollows(NSString* accountID, NSSet<NSNumber*>* userIDs);
-    if (UPBID().length) NFBUnifiedAddKnownFollows(UPBID(), list);
+// 7.3.150: every follow button, wherever it is and whichever account's context
+// the screen was opened in (a profile reached from a tweet opened as B is in
+// B's context: its follow button and relationship are B's). Each account's
+// state comes from: what we did this session > that account's own relationship
+// (only when the screen is that account's) > that account's synced Following
+// list > for B, a lookup in B's model context.
+
+static NSMutableDictionary<NSString*, NSNumber*>* gFollowDone;  // "account:user" -> UPFollow
+
+static NSString* UPFollowKey(NSString* accountID, long long userID) {
+    return [NSString stringWithFormat:@"%@:%lld", accountID ?: @"", userID];
 }
 
-// B follows or unfollows with B's own account; stops unless that is sure.
-static void UPFollowAsB(BOOL follow, long long userID, id reference) {
-    id b = UPBAccount();
-    if (!b || !reference || userID <= 0) {
-        UPLog(@"follow as B stopped: B account or user missing");
-        UPNotice(@"B 계정이나 대상을 확인하지 못해서 보내지 않았어요");
-        return;
+extern NSSet<NSNumber*>* NFBUnifiedKnownFollows(NSString* accountID);
+
+static UPFollow UPFollowFromList(NSString* accountID, long long userID) {
+    if (accountID.length == 0 || userID <= 0) return UPFollowUnknown;
+    NSSet* known = NFBUnifiedKnownFollows(accountID);
+    if (!known.count) {
+        NSArray* list = [[NSUserDefaults standardUserDefaults] arrayForKey:[@"kemo_unified_follows_" stringByAppendingString:accountID]];
+        if (!list.count) return UPFollowUnknown;
+        known = [NSSet setWithArray:list];
+    }
+    return [known containsObject:@(userID)] ? UPFollowYes : UPFollowNo;
+}
+
+// contextID: the account whose context `user` was loaded in (nil = not known,
+// then the relationship is not used at all).
+static UPFollow UPFollowStateFor(NSString* accountID, long long userID, NSString* contextID, id user, NSString** source) {
+    if (accountID.length == 0 || userID <= 0) return UPFollowUnknown;
+    NSNumber* done = gFollowDone[UPFollowKey(accountID, userID)];
+    if (done) {
+        if (source) *source = @"done";
+        return (UPFollow)done.integerValue;
+    }
+    if (contextID.length && [contextID isEqualToString:accountID] && user) {
+        UPFollow follow = UPFollowFromUser(user, NULL);
+        if (follow != UPFollowUnknown) {
+            if (source) *source = @"relationship";
+            return follow;
+        }
+    }
+    UPFollow listed = UPFollowFromList(accountID, userID);
+    if (listed != UPFollowUnknown) {
+        if (source) *source = @"list";
+        return listed;
+    }
+    if ([accountID isEqualToString:UPBID()]) {
+        NSNumber* bKnown = gBFollowByUser[@(userID)];
+        if (bKnown) {
+            if (source) *source = @"B lookup";
+            return (UPFollow)bKnown.integerValue;
+        }
+    }
+    if (source) *source = @"unknown";
+    return UPFollowUnknown;
+}
+
+// After a follow / unfollow by either path: this session's answer, and the
+// account's Following list (the timeline's marks read it too).
+static void UPRememberFollow(NSString* accountID, long long userID, BOOL following) {
+    if (accountID.length == 0 || userID <= 0) return;
+    if (!gFollowDone) gFollowDone = [NSMutableDictionary dictionary];
+    gFollowDone[UPFollowKey(accountID, userID)] = @(following ? UPFollowYes : UPFollowNo);
+    if ([accountID isEqualToString:UPBID()]) {
+        if (!gBFollowByUser) gBFollowByUser = [NSMutableDictionary dictionary];
+        gBFollowByUser[@(userID)] = @(following ? UPFollowYes : UPFollowNo);
+    }
+    NSString* key = [@"kemo_unified_follows_" stringByAppendingString:accountID];
+    NSArray* stored = [[NSUserDefaults standardUserDefaults] arrayForKey:key];
+    NSMutableSet* list = [NSMutableSet setWithArray:stored ?: @[]];
+    if (following) [list addObject:@(userID)];
+    else [list removeObject:@(userID)];
+    // Only keep a list that came from a sync; a one-person list would read as
+    // "follows nobody else".
+    if (stored.count) [[NSUserDefaults standardUserDefaults] setObject:[list allObjects] forKey:key];
+    extern void NFBUnifiedAddKnownFollows(NSString * accountID, NSSet<NSNumber*> * userIDs);
+    if (stored.count) NFBUnifiedAddKnownFollows(accountID, list);
+}
+
+// Follow or unfollow with `account`'s own TFNTwitterAccount. Stops unless the
+// account object really is the one with expectedID.
+static BOOL UPFollowWith(id account, NSString* expectedID, NSString* name, BOOL follow, long long userID, id reference) {
+    if (!account || expectedID.length == 0 || ![UPAccountUserID(account) isEqualToString:expectedID]) {
+        UPLog([NSString stringWithFormat:@"follow as %@ stopped: account not verified", name]);
+        UPNotice([NSString stringWithFormat:@"%@ 계정을 확인하지 못해서 보내지 않았어요", name]);
+        return NO;
+    }
+    if (!reference || userID <= 0) {
+        UPLog([NSString stringWithFormat:@"follow as %@ stopped: no user reference", name]);
+        UPNotice(@"대상 계정을 확인하지 못해서 보내지 않았어요");
+        return NO;
     }
     SEL selector = NSSelectorFromString(follow ? @"followUserWithUserReference:impressionID:isEarned:supportsChallenges:responseBlock:"
                                                : @"unfollowUserWithUserReference:impressionID:isEarned:associatedStatusForLeaveBehindConfirmation:responseBlock:");
-    if (![b respondsToSelector:selector]) {
-        UPNotice(@"이 X 버전에서는 B로 보낼 수 없어요");
-        return;
+    if (![account respondsToSelector:selector]) {
+        UPNotice(@"이 X 버전에서는 이 계정으로 보낼 수 없어요");
+        return NO;
     }
     void (^response)(void) = ^{
     };
     @try {
         if (follow) {
-            ((void (*)(id, SEL, id, id, BOOL, BOOL, id))objc_msgSend)(b, selector, reference, nil, NO, NO, response);
+            ((void (*)(id, SEL, id, id, BOOL, BOOL, id))objc_msgSend)(account, selector, reference, nil, NO, NO, response);
         } else {
-            ((void (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(b, selector, reference, nil, NO, nil, response);
+            ((void (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(account, selector, reference, nil, NO, nil, response);
         }
-        UPRememberBFollow(userID, follow);
-        UPLog([NSString stringWithFormat:@"%@ %lld as B sent", follow ? @"follow" : @"unfollow", userID]);
-        UPNotice([NSString stringWithFormat:@"%@로 %@ 요청을 보냈어요", UPBName(), follow ? @"팔로우" : @"언팔로우"]);
     } @catch (NSException* exception) {
-        UPLog([NSString stringWithFormat:@"follow as B threw %@", exception.name]);
-        UPNotice(@"B로 보내지 못했어요");
+        UPLog([NSString stringWithFormat:@"follow as %@ threw %@", name, exception.name]);
+        UPNotice(@"보내지 못했어요");
+        return NO;
     }
+    UPRememberFollow(expectedID, userID, follow);
+    UPLog([NSString stringWithFormat:@"%@ %lld as %@ sent (direct)", follow ? @"follow" : @"unfollow", userID, name]);
+    UPNotice([NSString stringWithFormat:@"%@로 %@했어요", name, follow ? @"팔로우" : @"언팔로우"]);
+    return YES;
 }
 
 static UIViewController* UPProfileOf(UIView* view) {
@@ -764,55 +816,108 @@ static UIViewController* UPProfileOf(UIView* view) {
     return nil;
 }
 
-// YES when the sheet was shown instead of X's own follow / unfollow.
-static BOOL UPShowFollowSheet(UIView* button, void (^asA)(void)) {
-    if (!UPActive()) return NO;
+// The user a follow button is for, and that user's object / reference.
+static long long UPButtonUser(UIView* button, id* userOut, id* referenceOut) {
+    id dataSource = UPGetter(button, @"userDataSource");
+    id user = UPGetter(dataSource, @"user");
+    long long userID = UPNumber(user, @"userID");
+    if (userID <= 0) userID = UPNumber(UPGetter(button, @"userContext"), @"userID");
+    if (userID <= 0) userID = UPNumber(dataSource, @"userID");
     UIViewController* profile = UPProfileOf(button);
-    if (!profile || profile != gVisibleProfile) return NO;
-    // The button must be the account in use's (A's), so X's own path is A.
-    if (UPGetter(button, @"account") != UPCurrentAccount()) return NO;
-    long long userID = UPProfileUserID(profile);
+    if (profile && (userID <= 0 || UPProfileUserID(profile) == userID)) {
+        if (userID <= 0) userID = UPProfileUserID(profile);
+        if (!user) user = UPProfileUser(profile);
+    }
+    id reference = UPGetter(user, @"userReference") ?: UPGetter(UPGetter(button, @"userContext"), @"userReference") ?:
+                   UPGetter(dataSource, @"userReference");
+    if (UPReferenceUserID(reference) > 0 && UPReferenceUserID(reference) != userID) reference = nil;
+    if (UPNumber(user, @"userID") > 0 && UPNumber(user, @"userID") != userID) user = nil;
+    if (userOut) *userOut = user;
+    if (referenceOut) *referenceOut = reference;
+    return userID;
+}
+
+static NSString* UPButtonContextID(UIView* button) {
+    NSString* fromButton = UPAccountUserID(UPGetter(button, @"account"));
+    if (fromButton.length) return fromButton;
+    return UPAccountUserID(UPGetter(UPProfileOf(button), @"account"));
+}
+
+static BOOL gFollowSheetBypass;
+
+// YES when the sheet was shown instead of X's own follow / unfollow.
+// xPath runs X's own action, which is the button's account's.
+static BOOL UPShowFollowSheet(UIView* button, void (^xPath)(void)) {
+    if (gFollowSheetBypass || !UPActive()) return NO;
     NSString* aID = UPAccountUserID(UPCurrentAccount());
+    NSString* bID = UPBID();
+    NSString* buttonID = UPAccountUserID(UPGetter(button, @"account"));
+    // A button of a third account: leave it to X.
+    if (buttonID.length && ![buttonID isEqualToString:aID] && ![buttonID isEqualToString:bID]) return NO;
+    id user = nil, reference = nil;
+    long long userID = UPButtonUser(button, &user, &reference);
     NSString* idText = [NSString stringWithFormat:@"%lld", userID];
-    if (userID <= 0 || [idText isEqualToString:aID] || [idText isEqualToString:UPBID()]) return NO;
-    long long raw = -1;
-    UPFollow aFollow = UPFollowFromUser(UPProfileUser(profile), &raw);
-    NSNumber* bKnown = gBFollowByUser[@(userID)];
-    UPFollow bFollow = bKnown ? (UPFollow)bKnown.integerValue : UPFollowUnknown;
-    id reference = UPGetter(UPProfileUser(profile), @"userReference");
-    NSString* aName = UPAName(), *bName = UPBName();
-    NSString* aAtAsk = aID;
+    if (userID <= 0 || [idText isEqualToString:aID] || [idText isEqualToString:bID]) return NO;
+    NSString* contextID = UPButtonContextID(button);
+    NSString* aSource = nil, *bSource = nil;
+    UPFollow aFollow = UPFollowStateFor(aID, userID, contextID, user, &aSource);
+    UPFollow bFollow = UPFollowStateFor(bID, userID, contextID, user, &bSource);
+    __weak UIView* weakButton = button;
+    void (^refresh)(void) = ^{
+        UIViewController* profile = UPProfileOf(weakButton);
+        if (profile) UPUpdateChips(profile);
+    };
+    // Answers hold only for the accounts and button as they are now.
     BOOL (^same)(void) = ^BOOL {
-        if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aAtAsk]) return YES;
+        if (UPActive() && [UPAccountUserID(UPCurrentAccount()) isEqualToString:aID] && [UPBID() isEqualToString:bID] &&
+            weakButton && [(UPAccountUserID(UPGetter(weakButton, @"account")) ?: @"") isEqualToString:(buttonID ?: @"")]) {
+            return YES;
+        }
         UPNotice(@"계정이 바뀌어서 보내지 않았어요");
         return NO;
     };
+    NSArray* accounts = @[
+        @[ aID ?: @"", UPAName(), @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1], @(aFollow) ],
+        @[ bID ?: @"", UPBName(), @"B", UPBColor(), @(bFollow) ],
+    ];
     NSMutableArray* rows = [NSMutableArray array];
-    // A: X's own button action, which follows or unfollows as A.
-    [rows addObject:@{
-        @"title" : [NSString stringWithFormat:@"%@ (A) %@", aName, aFollow == UPFollowYes ? @"언팔로우" : @"팔로우"],
-        @"detail" : [NSString stringWithFormat:@"지금: %@", UPFollowText(aFollow)],
-        @"image" : UPAvatar(aID, @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1]),
-        @"destructive" : @(aFollow == UPFollowYes),
-        @"action" : ^{
-            if (same()) asA();
-        }
-    }];
-    if (bFollow != UPFollowUnknown) {
-        BOOL bFollows = bFollow == UPFollowYes;
+    for (NSArray* entry in accounts) {
+        NSString* accountID = entry[0];
+        NSString* name = entry[1];
+        NSString* letter = entry[2];
+        UPFollow state = (UPFollow)[entry[4] integerValue];
+        BOOL viaX = buttonID.length && [buttonID isEqualToString:accountID];
+        NSString* buttonTitle = state == UPFollowYes ? @"언팔로우" : (state == UPFollowNo ? @"팔로우" : @"확인 안 됨");
         [rows addObject:@{
-            @"title" : [NSString stringWithFormat:@"%@ (B) %@", bName, bFollows ? @"언팔로우" : @"팔로우"],
-            @"detail" : [NSString stringWithFormat:@"지금: %@", UPFollowText(bFollow)],
-            @"image" : UPAvatar(UPBID(), @"B", UPBColor()),
-            @"destructive" : @(bFollows),
+            @"title" : name,
+            @"detail" : [NSString stringWithFormat:@"%@ 계정 · %@", letter, UPFollowText(state)],
+            @"image" : UPAvatar(accountID, letter, entry[3]),
+            @"button" : buttonTitle,
+            @"buttonStyle" : state == UPFollowYes ? @"outline" : (state == UPFollowNo ? @"filled" : @"disabled"),
             @"action" : ^{
-                if (same()) UPFollowAsB(!bFollows, userID, reference);
-                [profile.viewIfLoaded setNeedsLayout];
+                if (state == UPFollowUnknown || !same()) {
+                    if (state == UPFollowUnknown) UPNotice([NSString stringWithFormat:@"%@의 팔로우 상태를 몰라서 보내지 않았어요", name]);
+                    return;
+                }
+                BOOL follow = state != UPFollowYes;
+                if (viaX) {
+                    // X's own button action: the button's account, which is this one.
+                    UPLog([NSString stringWithFormat:@"%@ %lld as %@ via X", follow ? @"follow" : @"unfollow", userID, letter]);
+                    gFollowSheetBypass = YES;
+                    xPath();
+                    gFollowSheetBypass = NO;
+                    UPRememberFollow(accountID, userID, follow);
+                } else {
+                    id account = [letter isEqualToString:@"A"] ? UPCurrentAccount() : UPBAccount();
+                    UPFollowWith(account, accountID, name, follow, userID, reference);
+                }
+                refresh();
             }
         }];
     }
-    NFBPresentAccountSheet(@"어느 계정으로 할까요?", nil, rows);
-    UPLog([NSString stringWithFormat:@"follow sheet for %lld (A=%ld B=%ld)", userID, (long)aFollow, (long)bFollow]);
+    NFBPresentAccountSheet(@"팔로우", @"계정별로 팔로우 상태를 바꿀 수 있어요", rows);
+    UPLog([NSString stringWithFormat:@"follow sheet for %lld (A=%ld %@, B=%ld %@, button %@, context %@)", userID, (long)aFollow, aSource,
+                                     (long)bFollow, bSource, buttonID ?: @"-", contextID ?: @"-"]);
     return YES;
 }
 

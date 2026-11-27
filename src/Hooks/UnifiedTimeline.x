@@ -972,39 +972,11 @@ static void ReapplyMerge(void) {
 
 // MARK: - Notice
 
+extern void NFBShowNotice(NSString* text);
+
+// 7.3.150: X-style toast (UnifiedSheet.x).
 static void ShowNotice(NSString* text) {
-    UIWindow* window = nil;
-    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-        for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
-            if (candidate.isKeyWindow) window = candidate;
-        }
-    }
-    if (!window) return;
-    UILabel* label = [UILabel new];
-    label.text = text;
-    label.numberOfLines = 0;
-    label.textAlignment = NSTextAlignmentCenter;
-    label.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    label.textColor = UIColor.whiteColor;
-    label.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.92];
-    label.layer.cornerRadius = 14;
-    label.clipsToBounds = YES;
-    CGFloat width = MIN(window.bounds.size.width - 48, 320);
-    CGSize size = [label sizeThatFits:CGSizeMake(width - 28, CGFLOAT_MAX)];
-    label.frame = CGRectMake((window.bounds.size.width - width) / 2,
-                             window.bounds.size.height - window.safeAreaInsets.bottom - 150, width, size.height + 22);
-    label.alpha = 0;
-    [window addSubview:label];
-    [UIView animateWithDuration:0.2 animations:^{
-        label.alpha = 1;
-    } completion:^(BOOL finished) {
-        [UIView animateWithDuration:0.3 delay:1.8 options:0 animations:^{
-            label.alpha = 0;
-        } completion:^(BOOL done) {
-            [label removeFromSuperview];
-        }];
-    }];
+    NFBShowNotice(text);
 }
 
 static NSUInteger gBlocked;
@@ -1060,15 +1032,29 @@ static void CallStatusMethod(id account, NSString* selectorName, long long statu
     ((void (*)(id, SEL, long long, id))objc_msgSend)(account, selector, statusID, response);
 }
 
-static void LikeAsB(id viewModel) {
+static id BStatusFor(long long actedID);
+
+// B's like on this tweet: 1 liked, 0 not, -1 not known. statusIsB: the tweet
+// on screen was loaded as B (a B-only tweet, a B screen), so its flags are B's;
+// otherwise they are A's and only B's own copy counts (7.3.150).
+static int BLikeState(id viewModel, BOOL statusIsB) {
+    id status = ActedStatus(viewModel);
+    long long statusID = NumberGetter(status, @"statusID");
+    if (statusID <= 0) return -1;
+    if ([gBLiked containsObject:@(statusID)]) return 1;
+    if ([gBUnliked containsObject:@(statusID)]) return 0;
+    id bStatus = statusIsB ? status : BStatusFor(statusID);
+    if (!bStatus) return -1;
+    return (BoolGetter(bStatus, @"favoritedByLoadingAccount") || BoolGetter(bStatus, @"seenAsFavorited")) ? 1 : 0;
+}
+
+static void LikeAsB(id viewModel, BOOL statusIsB) {
     id status = ActedStatus(viewModel);
     long long statusID = NumberGetter(status, @"statusID");
     if (statusID <= 0 || !gBAccount) return;
     if (!gBLiked) gBLiked = [NSMutableSet set];
     if (!gBUnliked) gBUnliked = [NSMutableSet set];
-    BOOL liked = [gBLiked containsObject:@(statusID)] ||
-                 (![gBUnliked containsObject:@(statusID)] &&
-                  (BoolGetter(status, @"favoritedByLoadingAccount") || BoolGetter(status, @"seenAsFavorited")));
+    BOOL liked = BLikeState(viewModel, statusIsB) == 1;
     if (liked) {
         CallStatusMethod(gBAccount, @"unfavoriteStatusWithStatusID:responseBlock:", statusID);
         [gBLiked removeObject:@(statusID)];
@@ -1258,8 +1244,10 @@ static BOOL IsInBScreen(UIView* view) {
     return NO;
 }
 
+static BOOL gInlineBypass;  // X's own tap path as A, chosen in the long-press sheet
+
 static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
-    if (!UnifiedActive()) return NO;
+    if (gInlineBypass || !UnifiedActive()) return NO;
     EnsurePair();
     NSString* buttonClass = NSStringFromClass([button class]);
     if ([buttonClass containsString:@"Share"] || [buttonClass containsString:@"Analytics"]) return NO;
@@ -1272,7 +1260,7 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
         }
         UIView* source = [button isKindOfClass:[UIView class]] ? button : nil;
         if ([buttonClass containsString:@"Favorite"]) {
-            LikeAsB(viewModel);
+            LikeAsB(viewModel, YES);
             return YES;
         }
         if ([buttonClass containsString:@"Retweet"]) {
@@ -1327,7 +1315,7 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
             return YES;
         }
         if (like) {
-            LikeAsB(viewModel);
+            LikeAsB(viewModel, YES);
             return YES;
         }
         if (repost) {
@@ -1344,6 +1332,10 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
         return YES;
     }
 
+    // 7.3.150: a plain tap on like / repost follows the rule (both have it -> A,
+    // X's own path); a long press asks (LongPressChooser). "Always ask" still asks.
+    if ((like || repost) && ![BHTSettings boolForKey:kUnifiedAlwaysAsk]) return NO;
+
     // Both have it (or "always ask"): like, repost and reply ask, A first.
     NSString* message = both ? @"두 계정 모두 이 게시물을 보고 있어요." : [NSString stringWithFormat:@"%@만 팔로우 중인 게시물이에요.", AName()];
     if (like) {
@@ -1352,7 +1344,7 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
             orig();
             if (weakActions) RelayoutSoon(weakActions);
         }, ^{
-            LikeAsB(viewModel);
+            LikeAsB(viewModel, NO);
             if (weakActions) RelayoutSoon(weakActions);
         });
         return YES;
@@ -1377,6 +1369,136 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
         return YES;
     }
     return NO;
+}
+
+// 7.3.150: a long press on like / repost opens the account sheet: each
+// account with its state and a button. A runs X's own tap path (the account in
+// use); B goes with B's own account. A is offered only where X's path really
+// is A's: not on a screen opened as B, not on a tweet only B has (its state on
+// screen is B's).
+static CFAbsoluteTime gLongPressAt;
+static __weak id gLongPressButton;
+
+// A tap X may still send for the button just long-pressed is not a second action.
+static BOOL SwallowAfterLongPress(id button) {
+    if (gInlineBypass || !button || button != gLongPressButton) return NO;
+    if (CFAbsoluteTimeGetCurrent() - gLongPressAt > 1.5) return NO;
+    UnifiedLog(@"tap right after the long press ignored");
+    return YES;
+}
+
+static BOOL LongPressChooser(id actionsView, id button) {
+    if (!UnifiedActive() || ![actionsView isKindOfClass:[UIView class]]) return NO;
+    NSString* buttonClass = NSStringFromClass([button class]);
+    BOOL like = [buttonClass containsString:@"Favorite"];
+    BOOL repost = [buttonClass containsString:@"Retweet"];
+    if (!like && !repost) return NO;
+    EnsurePair();
+    id viewModel = Getter(actionsView, @"viewModel");
+    long long statusID = ViewModelStatusID(viewModel);
+    if (statusID <= 0) return NO;
+    BOOL inB = IsInBScreen((UIView*)actionsView);
+    BOOL bOnly = [gBOnlyIDs containsObject:@(statusID)];
+    BOOL listed = bOnly || [gBothIDs containsObject:@(statusID)] || [gAOnlyIDs containsObject:@(statusID)];
+    if (!inB && !listed && [gRetiredIDs containsObject:@(statusID)]) {
+        gBlocked++;
+        ShowNotice(@"계정 설정이 바뀌어서 막았어요. 당겨서 새로고침한 뒤 다시 눌러주세요");
+        return YES;
+    }
+    BOOL statusIsB = inB || bOnly;
+    id status = ActedStatus(viewModel);
+    BOOL protectedTweet = IsProtectedStatus(status);
+    NSString* verb = like ? @"마음에 들어요" : @"재게시";
+
+    // A's state: the tweet on screen is A's only when it is not B's.
+    int aState = -1;
+    if (!statusIsB) {
+        aState = like ? ((BoolGetter(status, @"favoritedByLoadingAccount") || BoolGetter(status, @"seenAsFavorited")) ? 1 : 0)
+                      : (BoolGetter(status, @"seenAsRetweeted") ? 1 : 0);
+    }
+    int bState = -1;
+    if (like) {
+        bState = BLikeState(viewModel, statusIsB);
+    } else {
+        id bStatus = statusIsB ? status : BStatusFor(NumberGetter(status, @"statusID"));
+        if ([gBReposted containsObject:@(NumberGetter(status, @"statusID"))]) bState = 1;
+        else if (bStatus) bState = BoolGetter(bStatus, @"seenAsRetweeted") ? 1 : 0;
+    }
+    NSString* (^stateText)(int) = ^NSString*(int state) {
+        if (state < 0) return @"상태 확인 안 됨";
+        return state ? [NSString stringWithFormat:@"%@ 함", verb] : [NSString stringWithFormat:@"%@ 안 함", verb];
+    };
+    NSString* (^buttonText)(int) = ^NSString*(int state) {
+        return state == 1 ? @"취소" : verb;
+    };
+
+    NSString* pairAtAsk = gPairKey;
+    BOOL (^stillSame)(void) = ^BOOL {
+        EnsurePair();
+        if (UnifiedActive() && [gPairKey isEqualToString:pairAtAsk]) return YES;
+        ShowNotice(@"계정이 바뀌어서 보내지 않았어요");
+        UnifiedLog(@"long-press choice dropped: account pair changed while asking");
+        return NO;
+    };
+    __weak UIView* weakActions = (UIView*)actionsView;
+    __weak id weakButton = button;
+
+    NSString* aWhy = nil;
+    if (inB) aWhy = @"B로 보는 화면이에요";
+    else if (bOnly) aWhy = @"B만 보는 게시물이에요";
+    else if (repost && protectedTweet) aWhy = @"비공개 계정은 재게시할 수 없어요";
+    else if (![actionsView respondsToSelector:@selector(didTapInlineActionButton:)]) aWhy = @"이 X 버전에서는 안 돼요";
+    NSString* bWhy = nil;
+    if (!gBAccount) bWhy = @"B 계정을 찾지 못했어요";
+    else if (repost && protectedTweet) bWhy = @"비공개 계정은 재게시할 수 없어요";
+
+    UIColor* purple = [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1];
+    NSDictionary* aRow = @{
+        @"title" : AName(),
+        @"detail" : aWhy ?: [NSString stringWithFormat:@"A 계정 · %@", stateText(aState)],
+        @"image" : AccountAvatar(CurrentAccount(), @"A", purple),
+        @"button" : aWhy ? verb : buttonText(aState),
+        @"buttonStyle" : aState == 1 ? @"outline" : @"filled",
+        @"disabled" : @(aWhy != nil),
+        @"action" : ^{
+            UIView* actions = weakActions;
+            id tapped = weakButton;
+            if (!stillSame() || !actions || !tapped) return;
+            // X's own tap, which is the account in use's (A's): re-checked now.
+            if (IsInBScreen(actions)) {
+                ShowNotice(@"B로 보는 화면이라 A로는 보내지 않았어요");
+                return;
+            }
+            UnifiedLog([NSString stringWithFormat:@"long press: %@ as A via X", like ? @"like" : @"repost"]);
+            gInlineBypass = YES;
+            @try {
+                ((void (*)(id, SEL, id))objc_msgSend)(actions, @selector(didTapInlineActionButton:), tapped);
+            } @finally {
+                gInlineBypass = NO;
+            }
+            RelayoutSoon(actions);
+        }
+    };
+    NSDictionary* bRow = @{
+        @"title" : BName(),
+        @"detail" : bWhy ?: [NSString stringWithFormat:@"B 계정 · %@", stateText(bState)],
+        @"image" : AccountAvatar(gBAccount, @"B", BColor()),
+        @"button" : bWhy ? verb : buttonText(bState),
+        @"buttonStyle" : bState == 1 ? @"outline" : @"filled",
+        @"disabled" : @(bWhy != nil),
+        @"action" : ^{
+            if (!stillSame()) return;
+            if (like) LikeAsB(viewModel, statusIsB);
+            else RepostAsB(viewModel);
+            if (weakActions) RelayoutSoon(weakActions);
+        }
+    };
+    gLongPressAt = CFAbsoluteTimeGetCurrent();
+    gLongPressButton = button;
+    NFBPresentAccountSheet(like ? @"어느 계정으로 마음에 들어요할까요?" : @"어느 계정으로 재게시할까요?", nil, @[ aRow, bRow ]);
+    UnifiedLog([NSString stringWithFormat:@"long press sheet: %@ %lld (A=%d%@ B=%d%@)", like ? @"like" : @"repost", statusID, aState,
+                                          aWhy ? @" off" : @"", bState, bWhy ? @" off" : @""]);
+    return YES;
 }
 
 // MARK: - Which account has it (badge next to the time)
@@ -1625,6 +1747,10 @@ void NFBUnifiedAddKnownFollows(NSString* accountID, NSSet<NSNumber*>* userIDs) {
     }
     UnifiedLog([NSString stringWithFormat:@"following list for %@: %lu people", accountID, (unsigned long)userIDs.count]);
     ReapplyMerge();
+}
+
+NSSet<NSNumber*>* NFBUnifiedKnownFollows(NSString* accountID) {
+    return accountID.length ? gKnownFollows[accountID] : nil;
 }
 
 extern NSString* NFBUnifiedFollowSyncDebugText(void);
@@ -1938,6 +2064,7 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 
 - (void)didTapInlineActionButton:(id)button {
+    if (SwallowAfterLongPress(button)) return;
     if ([NSStringFromClass([button class]) containsString:@"Favorite"]) RelayoutSoon((UIView*)self);
     if (HandleInlineAction(self, button, ^{
             %orig;
@@ -1947,6 +2074,7 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 
 - (void)didTapInlineActionButton:(id)button withPrompt:(id)prompt menuItem:(long long)menuItem {
+    if (SwallowAfterLongPress(button)) return;
     if (HandleInlineAction(self, button, ^{
             %orig;
         }))
@@ -1955,6 +2083,7 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 
 - (void)inlineActionButtonDidRecognizeLongPressBegan:(id)button {
+    if (LongPressChooser(self, button)) return;
     if (HandleInlineAction(self, button, ^{
             %orig;
         }))
@@ -1963,6 +2092,7 @@ static void FollowBottomLoad(id stream, long long source) {
 }
 
 - (void)didTriggerAlternateActionInInlineActionButton:(id)button {
+    if (SwallowAfterLongPress(button)) return;
     if (HandleInlineAction(self, button, ^{
             %orig;
         }))

@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.141",
+      "subtitle": "NeoFreeBird version 7.3.142",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.142",
+          "buildVersion": "142",
+          "date": "2026-11-27T06:15:21Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.142/NeoFreeBird-Twitter-sideloaded_7.3.142_12.44.ipa",
+          "size": 273606362,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: 추천 탭에도 B의 추천을 반반으로 섞습니다(광고 제외). 작성 화면 프로필 아래에 다른 계정이 흐리게 보이고, 누르면 그 계정으로 바뀝니다. 보내기 전에 모든 부분이 고른 계정인지 다시 확인합니다. B 트윗 답글 전환을 더 일찍, 더 확실하게 합니다."
+        },
         {
           "version": "7.3.141",
           "buildVersion": "141",

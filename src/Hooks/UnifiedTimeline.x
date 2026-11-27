@@ -9,7 +9,7 @@
 //  - B's timeline is X's own: -[T1TimelineFactory homeLatestTimelineForAccount:]
 //    with its stream set up by -deserializeStream, refreshed with the source X used
 //    for the active account's last refresh, whenever that refresh happens (at most
-//    every 30s). Requests go out as B, the way X itself sends them (probe 7.3.132).
+//    every 3s since 7.3.140; it was 30s). Requests go out as B, the way X itself sends them (probe 7.3.132).
 //  - Which home controller shows the Following tab: the one whose _timeline came
 //    from homeLatestTimelineForAccount: or homeRankedFollowingTimelineForAccount:.
 //  - Its sections (TFNItemsDataViewController -setSections:restoreScrollPosition:
@@ -297,7 +297,8 @@ static void RefreshB(long long source, NSString* why) {
     id timeline = BTimeline();
     SEL refresh = NSSelectorFromString(@"refreshWithSource:completion:");
     if (!timeline || ![timeline respondsToSelector:refresh]) return;
-    if (CFAbsoluteTimeGetCurrent() - gBLastRefresh < 30) return;
+    // X refreshes a timeline through several calls at once; one B refresh per A refresh.
+    if (CFAbsoluteTimeGetCurrent() - gBLastRefresh < 3) return;
     gBLastRefresh = CFAbsoluteTimeGetCurrent();
     UnifiedLog([NSString stringWithFormat:@"refresh B (%@, source %lld)", why, source]);
     void (^completion)(void) = ^{

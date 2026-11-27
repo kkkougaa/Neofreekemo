@@ -11,6 +11,8 @@
 
 #import "HookHelpers.h"
 
+extern BOOL NFBUnifiedProbeActive(void);
+
 static NSMutableDictionary<NSString*, NSString*>* gProbeByOperation;
 static NSMutableArray<NSString*>* gProbeOrder;
 static NSMutableArray<NSString*>* gProbeLog;
@@ -200,8 +202,9 @@ static void RecordTimelineResponse(NSURLRequest* request, NSURLResponse* respons
             formatter = [NSDateFormatter new];
             formatter.dateFormat = @"HH:mm:ss";
         }
-        [gProbeLog addObject:[NSString stringWithFormat:@"%@ %@ %ld %lu B", [formatter stringFromDate:[NSDate date]],
-                                                        operation, (long)status, (unsigned long)data.length]];
+        [gProbeLog addObject:[NSString stringWithFormat:@"%@ %@ %ld %lu B%@", [formatter stringFromDate:[NSDate date]],
+                                                        operation, (long)status, (unsigned long)data.length,
+                                                        NFBUnifiedProbeActive() ? @" [during probe]" : @""]];
         if (gProbeLog.count > 30) [gProbeLog removeObjectAtIndex:0];
         gProbeByOperation[operation] = out;
         [gProbeOrder removeObject:operation];

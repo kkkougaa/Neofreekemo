@@ -15,6 +15,12 @@
 //    -[TFNTwitterHomeTimeline refreshWithSource:completion:].
 //  - The timeline objects of both accounts are described: class, whether they
 //    are the same object, getters that hold entries and their counts.
+//  7.3.130: 7.3.129 showed the factory hands out a fresh timeline with no stream
+//  each call, and its refresh completed after exactly 5s with no request sent.
+//  X's home controller sets the stream up itself (_setupStreamFromTimeline), so
+//  the probe now asks the timeline to deserializeStream first; requests sent
+//  while the probe runs are tagged in TIMELINE REQUESTS; and the on-screen
+//  THFHomeTimelineItemsViewControllers' object ivars are listed.
 //  No tweet text, user names or IDs are recorded. The GraphQL request itself
 //  shows in the dump's TIMELINE REQUESTS section (TimelineProbe.x).
 //
@@ -167,6 +173,63 @@ static NSString* DescribeTimeline(id timeline) {
     return out;
 }
 
+// Object ivars of a controller (name and class only), to find the timeline it shows.
+static NSString* ObjectIvars(id object) {
+    NSMutableArray* parts = [NSMutableArray array];
+    for (Class cls = [object class]; cls && cls != [UIViewController class]; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Ivar* ivars = class_copyIvarList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char* type = ivar_getTypeEncoding(ivars[i]);
+            if (!type || type[0] != '@') continue;
+            id value = nil;
+            @try {
+                value = object_getIvar(object, ivars[i]);
+            } @catch (__unused NSException* exception) {
+            }
+            NSString* name = [NSString stringWithUTF8String:ivar_getName(ivars[i]) ?: "?"];
+            if (!value) continue;
+            [parts addObject:[NSString stringWithFormat:@"%@=%@", name, CountOf(value)]];
+        }
+        free(ivars);
+    }
+    return [parts componentsJoinedByString:@" "];
+}
+
+static void CollectHomeControllers(UIViewController* controller, NSMutableArray* found) {
+    if (!controller || found.count > 6) return;
+    if ([NSStringFromClass([controller class]) isEqualToString:@"THFHomeTimelineItemsViewController"]) {
+        [found addObject:controller];
+    }
+    for (UIViewController* child in controller.childViewControllers) {
+        CollectHomeControllers(child, found);
+    }
+    if (controller.presentedViewController && controller.presentedViewController.presentingViewController == controller) {
+        CollectHomeControllers(controller.presentedViewController, found);
+    }
+}
+
+static NSString* DescribeHomeControllers(void) {
+    NSMutableArray* found = [NSMutableArray array];
+    for (UIWindow* window in [UIApplication sharedApplication].windows) {
+        CollectHomeControllers(window.rootViewController, found);
+    }
+    if (found.count == 0) return @"(no THFHomeTimelineItemsViewController)\n";
+    NSMutableString* out = [NSMutableString string];
+    for (UIViewController* controller in found) {
+        [out appendFormat:@"%@ %p account=%@ onScreen=%d\n  ivars: %@\n", NSStringFromClass([controller class]), controller,
+                          WhoseAccount(CallGetter(controller, @"account")), controller.viewIfLoaded.window != nil,
+                          ObjectIvars(controller)];
+        id timeline = CallGetter(controller, @"timeline");
+        if (timeline) [out appendFormat:@"  timeline: %@", DescribeTimeline(timeline)];
+    }
+    return out;
+}
+
+BOOL NFBUnifiedProbeActive(void) {
+    return gProbeRefreshing;
+}
+
 static void RecordRefresh(id timeline, long long source, BOOL withTweet) {
     BOOL ours = gProbeRefreshing && timeline == gOtherTimeline;
     if (!ours && CallGetter(timeline, @"account") == CurrentAccount()) {
@@ -225,12 +288,26 @@ void NFBUnifiedProbeKick(void) {
         gLastKick = 0;
         return;
     }
+    // X's home controller sets the stream up itself (_setupStreamFromTimeline); a timeline
+    // taken straight from the factory has none, and its refresh just times out (7.3.129).
+    if (!CallGetter(otherTimeline, @"stream")) {
+        id stream = CallGetter(otherTimeline, @"deserializeStream");
+        ProbeLine([NSString stringWithFormat:@"deserializeStream -> %@", stream ? NSStringFromClass([stream class]) : @"nil"]);
+        if (stream && !CallGetter(otherTimeline, @"stream") &&
+            [otherTimeline respondsToSelector:NSSelectorFromString(@"setStream:")]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(otherTimeline, NSSelectorFromString(@"setStream:"), stream);
+            ProbeLine(@"setStream: done");
+        }
+        ProbeLine([NSString stringWithFormat:@"other stream now %@", CallGetter(otherTimeline, @"stream") ? @"set" : @"nil"]);
+    }
     long long source = gXSource.longLongValue;
     ProbeLine([NSString stringWithFormat:@"refreshing other with X's source %lld", source]);
     CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     gProbeRefreshing = YES;
     void (^completion)(void) = ^{
-        gProbeRefreshing = NO;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            gProbeRefreshing = NO;
+        });
         ProbeLine([NSString stringWithFormat:@"other refresh completed after %.1fs", CFAbsoluteTimeGetCurrent() - started]);
     };
     @try {
@@ -249,7 +326,7 @@ NSString* NFBUnifiedProbeText(void) {
         [out appendFormat:@"probe:\n%@\n", gProbeLines.count ? [gProbeLines componentsJoinedByString:@"\n"] : @"(not run)"];
     }
     @try {
-        [out appendFormat:@"-- active latest --\n%@", DescribeTimeline(LatestTimelineForAccount(CurrentAccount()))];
+        [out appendFormat:@"-- home controllers --\n%@", DescribeHomeControllers()];
         if (gOtherTimeline) {
             [out appendFormat:@"-- other latest --\n%@", DescribeTimeline(gOtherTimeline)];
         }

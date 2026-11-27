@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.155",
+      "subtitle": "NeoFreeBird version 7.3.156",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.156",
+          "buildVersion": "156",
+          "date": "2026-11-27T11:00:59Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.156/NeoFreeBird-Twitter-sideloaded_7.3.156_12.44.ipa",
+          "size": 273904652,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 상단 알약 안의 두 사진 둘레에 여백을 넣었어요. 알림 탭을 한 번 더 눌러 A↔B를 바꾸는 동작을 X의 새 내비게이션에 맞게 다시 걸었어요."
+        },
         {
           "version": "7.3.155",
           "buildVersion": "155",

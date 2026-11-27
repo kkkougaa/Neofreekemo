@@ -587,3 +587,11 @@
 "KEMO_UNIFIED_A_MESSAGE" = "Picking A/B switches to this account. Without one, the account in use is A.";
 "KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "Always ask which account";
 "KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "Also asks on tweets only A has when you like, repost or reply. Tweets only B has always go as B.";
+"KEMO_UNIFIED_B_COLOR_TITLE" = "Colour of B's tweets";
+"KEMO_UNIFIED_B_COLOR_MESSAGE" = "Used for the display name and the folded top-left corner of tweets only B has.";
+"KEMO_UNIFIED_COLOR_ORANGE" = "Orange";
+"KEMO_UNIFIED_COLOR_BLUE" = "Blue";
+"KEMO_UNIFIED_COLOR_GREEN" = "Green";
+"KEMO_UNIFIED_COLOR_PINK" = "Pink";
+"KEMO_UNIFIED_COLOR_PURPLE" = "Purple";
+"KEMO_UNIFIED_COLOR_YELLOW" = "Yellow";

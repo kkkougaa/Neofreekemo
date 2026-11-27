@@ -44,6 +44,9 @@
 //    "Always ask" (kemo_unified_always_ask) asks on A-only tweets too; a reply on
 //    a tweet both have asks as well.
 //  - The accounts that liked a tweet show as small pictures left of the heart.
+//  - 7.3.138: a tweet only B has also gets its display name in B's colour
+//    (kemo_unified_b_color, orange unless picked) and a small folded corner of
+//    that colour at the top left of its row. A-only tweets stay as they are.
 //  - A small avatar of the only account that has a tweet sits after its time
 //    (TTAStatusAuthorView); none when both have it. "A only" means A has it and it
 //    is newer than the oldest tweet B has loaded.
@@ -861,6 +864,72 @@ static UIImage* AccountAvatar(id account, NSString* letter, UIColor* color) {
 }
 
 static const NSInteger kBadgeTag = 0x4E4642;  // "NFB"
+static const NSInteger kCornerTag = 0x4E4643;
+static const void* kNameColorKey = &kNameColorKey;
+
+static UIColor* BColor(void) {
+    NSString* hex = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_color"] ?: @"FF7A00";
+    unsigned int value = 0;
+    if (hex.length != 6 || ![[NSScanner scannerWithString:hex] scanHexInt:&value]) value = 0xFF7A00;
+    return [UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0
+                           green:((value >> 8) & 0xFF) / 255.0
+                            blue:(value & 0xFF) / 255.0
+                           alpha:1];
+}
+
+// A tweet only B has: the display name in B's colour and a folded top-left
+// corner. Anything else gets X's own colour back and no corner.
+static void ApplyBMark(UIView* authorView, UIView* statusView, BOOL bOnly) {
+    UIColor* color = bOnly ? BColor() : nil;
+    for (UIView* view in authorView.subviews) {
+        if (![view isKindOfClass:[UILabel class]] || ![view.accessibilityIdentifier isEqualToString:@"StatusFullname"]) {
+            continue;
+        }
+        UILabel* name = (UILabel*)view;
+        UIColor* saved = objc_getAssociatedObject(name, kNameColorKey);
+        if (bOnly) {
+            if (!saved) {
+                objc_setAssociatedObject(name, kNameColorKey, name.textColor ?: [UIColor labelColor],
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            if (![name.textColor isEqual:color]) name.textColor = color;
+        } else if (saved) {
+            name.textColor = saved;
+            objc_setAssociatedObject(name, kNameColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    }
+    if (!statusView) return;
+    UIView* corner = [statusView viewWithTag:kCornerTag];
+    if (!bOnly) {
+        corner.hidden = YES;
+        return;
+    }
+    const CGFloat size = 11;
+    if (!corner) {
+        corner = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+        corner.tag = kCornerTag;
+        corner.userInteractionEnabled = NO;
+        CAShapeLayer* flap = [CAShapeLayer layer];
+        UIBezierPath* path = [UIBezierPath bezierPath];
+        [path moveToPoint:CGPointZero];
+        [path addLineToPoint:CGPointMake(size, 0)];
+        [path addLineToPoint:CGPointMake(0, size)];
+        [path closePath];
+        flap.path = path.CGPath;
+        // A faint shadow along the fold, like a page corner turned down.
+        flap.shadowColor = [UIColor blackColor].CGColor;
+        flap.shadowOpacity = 0.18;
+        flap.shadowRadius = 0.8;
+        flap.shadowOffset = CGSizeMake(0.6, 0.6);
+        flap.shadowPath = path.CGPath;
+        [corner.layer addSublayer:flap];
+        [statusView addSubview:corner];
+    }
+    ((CAShapeLayer*)corner.layer.sublayers.firstObject).fillColor = color.CGColor;
+    corner.frame = CGRectMake(0, 0, size, size);
+    corner.hidden = NO;
+    [statusView bringSubviewToFront:corner];
+}
 
 static void UpdateAccountBadge(UIView* authorView) {
     if (UnifiedActive()) EnsurePair();
@@ -870,6 +939,7 @@ static void UpdateAccountBadge(UIView* authorView) {
         statusView = statusView.superview;
     }
     long long statusID = UnifiedActive() && statusView ? ViewModelStatusID(Getter(statusView, @"viewModel")) : 0;
+    ApplyBMark(authorView, statusView, statusID > 0 && [gBOnlyIDs containsObject:@(statusID)]);
     id account = nil;
     NSString* letter = nil;
     UIColor* color = nil;

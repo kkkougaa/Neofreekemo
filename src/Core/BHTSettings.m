@@ -432,6 +432,15 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"parentKey": @"kemo_unified_exp"
                     },
                     @{
+                        @"type": @"compactButton",
+                        @"key": @"kemo_unified_b_color_button",
+                        @"titleKey": @"KEMO_UNIFIED_B_COLOR_TITLE",
+                        @"action": @"pickUnifiedBColor:",
+                        @"prefKeyForSubtitle": @"kemo_unified_b_color_name",
+                        @"subtitleDefaultKey": @"KEMO_UNIFIED_COLOR_ORANGE",
+                        @"parentKey": @"kemo_unified_exp"
+                    },
+                    @{
                         @"key": @"kemo_unified_always_ask",
                         @"default": @NO,
                         @"type": @"toggle",

@@ -589,3 +589,11 @@
 "KEMO_UNIFIED_A_MESSAGE" = "A/B 통합을 고르면 이 계정으로 전환됩니다. 정하지 않으면 지금 쓰는 계정이 A입니다.";
 "KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "항상 계정 묻기";
 "KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "A만 가진 트윗에도 마음·재게시·답글할 때 어느 계정으로 할지 묻습니다. B만 가진 트윗은 언제나 B입니다.";
+"KEMO_UNIFIED_B_COLOR_TITLE" = "B 트윗 색";
+"KEMO_UNIFIED_B_COLOR_MESSAGE" = "B만 가진 트윗의 닉네임과 왼쪽 위 접힌 모서리에 쓰는 색입니다.";
+"KEMO_UNIFIED_COLOR_ORANGE" = "주황";
+"KEMO_UNIFIED_COLOR_BLUE" = "파랑";
+"KEMO_UNIFIED_COLOR_GREEN" = "초록";
+"KEMO_UNIFIED_COLOR_PINK" = "분홍";
+"KEMO_UNIFIED_COLOR_PURPLE" = "보라";
+"KEMO_UNIFIED_COLOR_YELLOW" = "노랑";

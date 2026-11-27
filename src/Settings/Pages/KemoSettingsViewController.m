@@ -211,6 +211,38 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
+// The colour of tweets only B has (folded corner and display name), kemo_unified_b_color.
+- (void)pickUnifiedBColor:(NSDictionary*)sender {
+    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:[self localized:@"KEMO_UNIFIED_B_COLOR_TITLE"]
+                                                                   message:[self localized:@"KEMO_UNIFIED_B_COLOR_MESSAGE"]
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    NSString* current = [defaults stringForKey:@"kemo_unified_b_color"] ?: @"FF7A00";
+    NSArray* choices = @[
+        @[ @"FF7A00", @"KEMO_UNIFIED_COLOR_ORANGE" ], @[ @"1D9BF0", @"KEMO_UNIFIED_COLOR_BLUE" ],
+        @[ @"00BA7C", @"KEMO_UNIFIED_COLOR_GREEN" ], @[ @"F91880", @"KEMO_UNIFIED_COLOR_PINK" ],
+        @[ @"7856FF", @"KEMO_UNIFIED_COLOR_PURPLE" ], @[ @"E0A800", @"KEMO_UNIFIED_COLOR_YELLOW" ]
+    ];
+    for (NSArray* choice in choices) {
+        NSString* name = [self localized:choice[1]];
+        NSString* title = [choice[0] isEqualToString:current] ? [name stringByAppendingString:@" ✓"] : name;
+        [sheet addAction:[UIAlertAction actionWithTitle:title
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction* action) {
+                                                    [defaults setObject:choice[0] forKey:@"kemo_unified_b_color"];
+                                                    [defaults setObject:name forKey:@"kemo_unified_b_color_name"];
+                                                    [self.tableView reloadData];
+                                                }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect =
+        CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (void)openAliasEditor:(NSDictionary*)sender {
     [self.navigationController pushViewController:[KemoAliasListViewController new] animated:YES];
 }

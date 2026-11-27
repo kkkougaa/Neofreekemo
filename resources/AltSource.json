@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.137",
+      "subtitle": "NeoFreeBird version 7.3.138",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.138",
+          "buildVersion": "138",
+          "date": "2026-11-27T05:24:02Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.138/NeoFreeBird-Twitter-sideloaded_7.3.138_12.44.ipa",
+          "size": 273590896,
+          "minOSVersion": "15.0",
+          "localizedDescription": "A/B 통합 타임라인 실험: B만 가진 트윗은 행 왼쪽 위에 살짝 접힌 모서리가 생기고 닉네임이 같은 색으로 바뀝니다. 색은 설정의 \"B 트윗 색\"에서 고를 수 있습니다(기본 주황)."
+        },
         {
           "version": "7.3.137",
           "buildVersion": "137",

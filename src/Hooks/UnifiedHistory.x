@@ -732,15 +732,30 @@ static void UHApplyState(void) {
     bPicture.alpha = onB ? 1.0 : kHUnselectedAlpha;
     side.accessibilityTraits = onB ? (UIAccessibilityTraitButton | UIAccessibilityTraitSelected) : UIAccessibilityTraitButton;
     // X's avatar keeps its frame; only dimmed while B is the one in use.
-    UHAvatarIn(UHAvatarContainer()).alpha = onB ? kHUnselectedAlpha : 1.0;
+    UIView* container = UHAvatarContainer();
+    UHAvatarIn(container).alpha = onB ? kHUnselectedAlpha : 1.0;
+    // The glass circle is behind the one in use only.
+    UIView* bGlass = [side viewWithTag:1];
+    UIView* aGlass = nil;
+    for (UIView* sub in container.subviews) {
+        if (sub.tag == kHAvatarHighlightTag) aGlass = sub;
+    }
+    bGlass.alpha = onB ? 1.0 : 0.0;
+    bGlass.transform = onB ? CGAffineTransformIdentity : CGAffineTransformMakeScale(0.6, 0.6);
+    aGlass.alpha = onB ? 0.0 : 1.0;
+    aGlass.transform = onB ? CGAffineTransformMakeScale(0.6, 0.6) : CGAffineTransformIdentity;
 }
 
 static NSLayoutConstraint* gHSideWidth;
 static NSLayoutConstraint* gHSideHeight;
 
 // B's picture takes exactly the size X's own A picture is drawn at in that bar
-// (28 until it can be read), and our item the size of X's avatar button, so
-// X's bar gives both the same glass circle.
+// (28 until it can be read).
+// 7.3.154 (device feedback on 7.3.152): X's bar draws no platter round its own
+// avatar item, so only B had glass, and it was out of shape. Back to a glass
+// circle of ours behind the picture in use, a little bigger than the picture
+// and round; the bar's platter round our item is switched off
+// (hidesSharedBackground, our own item only). The pictures stay one size.
 static void UHSizeBPicture(void) {
     UIBarButtonItem* ours = gHBItem;
     UIView* side = ours.customView;
@@ -752,15 +767,32 @@ static void UHSizeBPicture(void) {
     CGFloat size = round(MIN(CGRectGetWidth(aRect), CGRectGetHeight(aRect)) * 2) / 2;
     if (size < 16 || size > 64) size = 28;
     CGFloat box = size + 8;
-    CGFloat boxWidth = MIN(MAX(box, CGRectGetWidth(container.bounds)), 64);
-    CGFloat boxHeight = MIN(MAX(box, CGRectGetHeight(container.bounds)), 64);
-    if (gHSideWidth.constant != boxWidth) gHSideWidth.constant = boxWidth;
-    if (gHSideHeight.constant != boxHeight) gHSideHeight.constant = boxHeight;
-    if (!side.superview) side.frame = CGRectMake(0, 0, boxWidth, boxHeight);
+    if (gHSideWidth.constant != box) gHSideWidth.constant = box;
+    if (gHSideHeight.constant != box) gHSideHeight.constant = box;
+    if (!side.superview) side.frame = CGRectMake(0, 0, box, box);
     if (CGRectGetWidth(picture.bounds) != size) picture.bounds = CGRectMake(0, 0, size, size);
     CGPoint middle = CGPointMake(CGRectGetMidX(side.bounds), CGRectGetMidY(side.bounds));
     if (!CGPointEqualToPoint(picture.center, middle)) picture.center = middle;
     if (picture.layer.cornerRadius != size / 2) picture.layer.cornerRadius = size / 2;
+    // The glass circles: bounds and centre only (their transform is the selection's).
+    UIView* bGlass = [side viewWithTag:1];
+    if (CGRectGetWidth(bGlass.bounds) != box) bGlass.bounds = CGRectMake(0, 0, box, box);
+    if (!CGPointEqualToPoint(bGlass.center, middle)) bGlass.center = middle;
+    if (bGlass.layer.cornerRadius != box / 2) bGlass.layer.cornerRadius = box / 2;
+    UIView* aGlass = nil;
+    for (UIView* sub in container.subviews) {
+        if (sub.tag == kHAvatarHighlightTag) aGlass = sub;
+    }
+    if (aGlass) {
+        CGFloat diameter = box;
+        if (container.clipsToBounds) diameter = MIN(diameter, MIN(CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds)));
+        BOOL readable = avatar && CGRectGetWidth(aRect) >= 16;
+        CGPoint aMiddle = readable ? CGPointMake(CGRectGetMidX(aRect), CGRectGetMidY(aRect))
+                                   : CGPointMake(CGRectGetMidX(container.bounds), CGRectGetMidY(container.bounds));
+        if (CGRectGetWidth(aGlass.bounds) != diameter) aGlass.bounds = CGRectMake(0, 0, diameter, diameter);
+        if (!CGPointEqualToPoint(aGlass.center, aMiddle)) aGlass.center = aMiddle;
+        if (aGlass.layer.cornerRadius != diameter / 2) aGlass.layer.cornerRadius = diameter / 2;
+    }
 }
 
 // Ours goes; X's avatar button is as X made it again.
@@ -821,6 +853,13 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
         gHSideHeight = [side.heightAnchor constraintEqualToConstant:36];
         gHSideWidth.active = YES;
         gHSideHeight.active = YES;
+        UIVisualEffectView* glass = UHMakeHighlight();
+        glass.tag = 1;
+        glass.frame = side.bounds;
+        glass.layer.cornerRadius = 18;
+        glass.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
+                                 UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+        [side addSubview:glass];
         UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(4, 4, 28, 28)];
         picture.tag = 2;
         picture.contentMode = UIViewContentModeScaleAspectFill;
@@ -833,6 +872,9 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
         [side addSubview:picture];
         [side addTarget:[NFBHistoryAvatarTarget shared] action:@selector(tappedB:) forControlEvents:UIControlEventTouchUpInside];
         ours = [[UIBarButtonItem alloc] initWithCustomView:side];
+        // The bar's own platter round our item is not wanted (ours is the glass).
+        SEL hide = NSSelectorFromString(@"setHidesSharedBackground:");
+        if ([ours respondsToSelector:hide]) ((void (*)(id, SEL, BOOL))objc_msgSend)(ours, hide, YES);
         gHBItem = ours;
     }
     UINavigationItem* item = holder.navigationItem;
@@ -844,6 +886,18 @@ static BOOL UHInstallAvatarSwitch(UIViewController* screen) {
     }
     gHAvatarItem = avatarItem;
     gHAvatarHolder = holder;
+    // A's glass: behind X's avatar, inside X's own button, taking no touch.
+    UIView* container = UHAvatarContainer();
+    BOOL has = NO;
+    for (UIView* sub in container.subviews) {
+        if (sub.tag == kHAvatarHighlightTag) has = YES;
+    }
+    if (container && !has) {
+        UIVisualEffectView* glass = UHMakeHighlight();
+        glass.tag = kHAvatarHighlightTag;
+        glass.frame = container.bounds;
+        [container insertSubview:glass atIndex:0];
+    }
     UIView* side = ours.customView;
     UIImageView* picture = (UIImageView*)[side viewWithTag:2];
     UIColor* bColor = NFBUnifiedBColor() ?: [UIColor systemOrangeColor];

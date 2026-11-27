@@ -436,7 +436,7 @@ static BOOL HSShareBackground(UIBarButtonItem* item) {
     return HSSetItemFlag(item, @"sharesBackground", @"setSharesBackground:", kHSSharedBackgroundKey, YES);
 }
 
-static BOOL HSHideSharedBackground(UIBarButtonItem* item) {
+__attribute__((unused)) static BOOL HSHideSharedBackground(UIBarButtonItem* item) {
     return HSSetItemFlag(item, @"hidesSharedBackground", @"setHidesSharedBackground:", kHSHidBackgroundKey, YES);
 }
 
@@ -480,23 +480,11 @@ static BOOL HSPairWantsOwnCapsule(UIView* container, UIView* side) {
         }
         return NO;
     }
-    gPairGlassMode = 2;
-    BOOL hidOurs = HSHideSharedBackground(gPairItem);
-    BOOL hidTheirs = HSHideSharedBackground(gPairAvatarItem);
-    HSLog([NSString stringWithFormat:@"glass: still two groups (%@ / %@), a capsule of ours; platters hidden ours=%d X's=%d",
-                                     groupA ? @"group" : @"no group", groupB ? @"group" : @"no group", hidOurs, hidTheirs]);
-    // The bar reads its items again.
-    UIViewController* holder = gPairHolder;
-    UIBarButtonItem* ours = gPairItem;
-    NSArray<UIBarButtonItem*>* items = holder.navigationItem.leftBarButtonItems;
-    if (ours && [items containsObject:ours]) {
-        NSMutableArray<UIBarButtonItem*>* without = [items mutableCopy];
-        [without removeObject:ours];
-        holder.navigationItem.leftBarButtonItems = without;
-        holder.navigationItem.leftBarButtonItems = items;
-        gPairPlacedAt = CFAbsoluteTimeGetCurrent();
-    }
-    return YES;
+    // 7.3.154: no capsule of ours. On the device X's bar did give the two
+    // one platter, this check did not see it (the items' views are not inside
+    // the group view), and 0.8s later our capsule came up over the pictures.
+    gPairCapsuleNote = @"asked X's bar to share one platter; the group view was not seen from here";
+    return NO;
 }
 
 // The capsule's frame from where the two pictures are now. Nothing of X's is

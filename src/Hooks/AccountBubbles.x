@@ -1100,6 +1100,10 @@ static void Tick(void) {
 @property (nonatomic, strong) UILabel* badge;
 // The dock's magnified copy of the picture along the rim (see PutGlassOverBubble).
 @property (nonatomic, weak) UIImageView* lens;
+// The dock's "A/B" circle (UnifiedTimeline.x): A's picture with B's small at
+// the bottom right; `account` is A.
+@property (nonatomic, assign) BOOL unified;
+@property (nonatomic, strong) UIImageView* subAvatar;
 - (void)setCount:(NSInteger)count;
 @end
 
@@ -2256,6 +2260,21 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     [bubble bringSubviewToFront:bubble.badge];
 }
 
+// The A/B unified timeline (UnifiedTimeline.x).
+extern BOOL NFBUnifiedDockPair(id* outA, id* outB);
+extern BOOL NFBUnifiedIsActive(void);
+extern void NFBUnifiedDockChose(BOOL unified, id a);
+
+// Stands in the dock's account list for the "A/B" circle.
+static id UnifiedMarker(void) {
+    static id marker;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        marker = [NSObject new];
+    });
+    return marker;
+}
+
 @implementation NFBAccountDock
 
 + (BOOL)openInWindow:(UIWindow*)window {
@@ -2357,6 +2376,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         // The hidden ones go before the first account, beyond the row's left end.
         _hiddenCount = (NSInteger)hidden.count;
         [ordered insertObjects:hidden atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, hidden.count)]];
+        // "A/B" goes right before A (A/B, A, B, C, ...).
+        id unifiedA = nil, unifiedB = nil;
+        BOOL unifiedActive = NO;
+        if (NFBUnifiedDockPair(&unifiedA, &unifiedB)) {
+            unifiedActive = NFBUnifiedIsActive();
+            NSUInteger at = (NSUInteger)_hiddenCount;
+            for (NSUInteger i = (NSUInteger)_hiddenCount; i < ordered.count; i++) {
+                if (SameAccount(ordered[i], unifiedA)) at = i;
+            }
+            [ordered insertObject:UnifiedMarker() atIndex:at];
+        }
         NSInteger accountCount = (NSInteger)ordered.count;
         // Room on both ends so the first and the last account can reach the middle.
         CGFloat inset = (width - size) / 2.0;
@@ -2373,10 +2403,14 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
         NSInteger currentIndex = _hiddenCount;
         for (NSInteger i = 0; i <= accountCount; i++) {
             BOOL gear = i == accountCount;
-            id account = gear ? nil : ordered[i];
+            BOOL unified = !gear && ordered[i] == UnifiedMarker();
+            id account = gear ? nil : (unified ? unifiedA : ordered[i]);
+            // While A/B is in use, it is the current circle and A's is not.
+            BOOL isCurrent = unified ? unifiedActive
+                                     : SameAccount(account, current) && !(unifiedActive && SameAccount(account, unifiedA));
             NFBAccountBubble* bubble = gear ? [[NFBAccountBubble alloc] initSettings]
-                                            : [[NFBAccountBubble alloc] initWithAccount:account
-                                                                                current:SameAccount(account, current)];
+                                            : [[NFBAccountBubble alloc] initWithAccount:account current:isCurrent];
+            bubble.unified = unified;
             CGFloat x = inset + i * _pitch;
             ResizeBubble(bubble, gear ? CGRectMake(gearX, 6.0 + (size - kDialGear) / 2.0, kDialGear, kDialGear)
                                       : CGRectMake(x, 6.0, size, size));
@@ -2387,6 +2421,20 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
             if (!gear) {
                 PutProfileLookOnBubble(bubble);
             }
+            if (unified) {
+                CGFloat sub = round(size * 0.36);
+                UIImageView* small = [[UIImageView alloc]
+                    initWithFrame:CGRectMake(size - sub + 2.0, size - sub + 2.0, sub, sub)];
+                small.contentMode = UIViewContentModeScaleAspectFill;
+                small.clipsToBounds = YES;
+                small.layer.cornerRadius = sub / 2.0;
+                small.layer.borderWidth = 2.0;
+                small.layer.borderColor = paper.CGColor;
+                small.backgroundColor = [UIColor systemGray4Color];
+                [bubble addSubview:small];
+                bubble.subAvatar = small;
+                [bubble bringSubviewToFront:bubble.badge];
+            }
             [_strip addSubview:bubble];
             [bubbles addObject:bubble];
 
@@ -2396,7 +2444,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                 }
                 UILabel* name = [[UILabel alloc]
                     initWithFrame:CGRectMake(x - kDockGap / 2.0, 6.0 + size + 6.0, size + kDockGap, 15.0)];
-                name.text = AccountTitle(account);
+                name.text = unified ? @"A/B 통합" : AccountTitle(account);
                 name.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
                 name.textColor = ink;
                 name.textAlignment = NSTextAlignmentCenter;
@@ -2410,7 +2458,17 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
                     [weakBubble setImage:image];
                 });
                 // The screen is not lifted yet, so the tab bar can still be read.
-                [bubble setCount:bubble.current ? CurrentBadgeCount(account, window) : BadgeCountFor(account)];
+                NSInteger count = SameAccount(account, current) ? CurrentBadgeCount(account, window) : BadgeCountFor(account);
+                if (unified) {
+                    // Both accounts' unread, together.
+                    LoadAvatar(unifiedB, ^(UIImage* image) {
+                        weakBubble.subAvatar.image = image;
+                    });
+                    count += SameAccount(unifiedB, current) ? CurrentBadgeCount(unifiedB, window) : BadgeCountFor(unifiedB);
+                    bubble.accessibilityLabel = [NSString stringWithFormat:@"A/B 통합, %@, %@", AccountTitle(account),
+                                                                           AccountTitle(unifiedB)];
+                }
+                [bubble setCount:count];
             }
         }
         _bubbles = bubbles;
@@ -2996,6 +3054,13 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
     [self.catcher removeFromSuperview];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     id account = chosen && !chosen.current && !chosen.settings ? chosen.account : nil;
+    BOOL pickedUnified = chosen.unified;
+    BOOL pickedAccount = chosen && !chosen.settings && !chosen.unified;
+    id unifiedA = pickedUnified ? chosen.account : nil;
+    // A/B and A are the same account: going between them only changes the mode.
+    if (account && SameAccount(account, CurrentAccount())) {
+        account = nil;
+    }
     BOOL openOrder = chosen.settings;
     UIView* rootView = self.rounded;
 
@@ -3026,6 +3091,12 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
             [self removeFromSuperview];
             if (gLiveDock == self) {
                 gLiveDock = nil;
+            }
+            // The mode first, so A's timeline is mixed (or not) from its first load.
+            if (pickedUnified) {
+                NFBUnifiedDockChose(YES, unifiedA);
+            } else if (pickedAccount) {
+                NFBUnifiedDockChose(NO, nil);
             }
             if (account) {
                 gBubbleLog = @"dock: switched account";

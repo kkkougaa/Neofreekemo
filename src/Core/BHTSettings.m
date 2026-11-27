@@ -415,11 +415,26 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                     },
                     @{
                         @"type": @"compactButton",
+                        @"key": @"kemo_unified_a_button",
+                        @"titleKey": @"KEMO_UNIFIED_A_TITLE",
+                        @"action": @"pickUnifiedAccountA:",
+                        @"prefKeyForSubtitle": @"kemo_unified_a_name",
+                        @"subtitleDefaultKey": @"KEMO_UNIFIED_A_NONE",
+                        @"parentKey": @"kemo_unified_exp"
+                    },
+                    @{
+                        @"type": @"compactButton",
                         @"key": @"kemo_unified_b_button",
                         @"titleKey": @"KEMO_UNIFIED_B_TITLE",
                         @"action": @"pickUnifiedAccountB:",
                         @"prefKeyForSubtitle": @"kemo_unified_b_name",
                         @"subtitleDefaultKey": @"KEMO_UNIFIED_B_NONE",
+                        @"parentKey": @"kemo_unified_exp"
+                    },
+                    @{
+                        @"key": @"kemo_unified_always_ask",
+                        @"default": @NO,
+                        @"type": @"toggle",
                         @"parentKey": @"kemo_unified_exp"
                     },
                     @{

@@ -576,9 +576,14 @@
 "KEMO_CLICKER_REMIND_TO" = "To";
 
 "KEMO_UNIFIED_EXP_TITLE" = "A/B unified timeline (experiment)";
-"KEMO_UNIFIED_EXP_DETAIL" = "Mixes account B's Following timeline into the Following tab of the account in use (A). Like, repost, reply and bookmark stay blocked on tweets only B has.";
+"KEMO_UNIFIED_EXP_DETAIL" = "Mixes the Following timelines of accounts A and B. Pick \"A/B\" at the bottom account dock to turn it on; picking any other account turns it off. Tweets only B has are answered as B; tweets both have ask which account.";
 "KEMO_UNIFIED_B_TITLE" = "Account B";
 "KEMO_UNIFIED_B_NONE" = "None";
-"KEMO_UNIFIED_B_MESSAGE" = "A is the account in use. Nothing is mixed while B is the account in use.";
+"KEMO_UNIFIED_B_MESSAGE" = "B's Following timeline is mixed into A's. B cannot be the same account as A.";
 "KEMO_UNIFIED_B_ACTIVE" = "in use";
 "KEMO_UNIFIED_B_CLEAR" = "Clear";
+"KEMO_UNIFIED_A_TITLE" = "Account A";
+"KEMO_UNIFIED_A_NONE" = "Account in use";
+"KEMO_UNIFIED_A_MESSAGE" = "Picking A/B switches to this account. Without one, the account in use is A.";
+"KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "Always ask which account";
+"KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "Also asks on tweets only A has when you like, repost or reply. Tweets only B has always go as B.";

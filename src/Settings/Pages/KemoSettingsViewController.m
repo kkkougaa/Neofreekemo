@@ -158,12 +158,30 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
 }
 
 // Account B of the A/B unified timeline experiment. A is whichever account is active.
+- (void)pickUnifiedAccountA:(NSDictionary*)sender {
+    [self pickUnifiedAccount:@"a"];
+}
+
 - (void)pickUnifiedAccountB:(NSDictionary*)sender {
-    UIAlertController* sheet = [UIAlertController alertControllerWithTitle:[self localized:@"KEMO_UNIFIED_B_TITLE"]
-                                                                   message:[self localized:@"KEMO_UNIFIED_B_MESSAGE"]
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    NSString* current = [[NSUserDefaults standardUserDefaults] stringForKey:@"kemo_unified_b_id"];
+    [self pickUnifiedAccount:@"b"];
+}
+
+// A and B of the unified timeline (kemo_unified_a_id / kemo_unified_b_id). The
+// account sheet's "A/B" row picks them too (long press).
+- (void)pickUnifiedAccount:(NSString*)which {
+    BOOL isA = [which isEqualToString:@"a"];
+    NSString* idKey = [NSString stringWithFormat:@"kemo_unified_%@_id", which];
+    NSString* nameKey = [NSString stringWithFormat:@"kemo_unified_%@_name", which];
+    NSString* otherKey = isA ? @"kemo_unified_b_id" : @"kemo_unified_a_id";
+    UIAlertController* sheet =
+        [UIAlertController alertControllerWithTitle:[self localized:isA ? @"KEMO_UNIFIED_A_TITLE" : @"KEMO_UNIFIED_B_TITLE"]
+                                            message:[self localized:isA ? @"KEMO_UNIFIED_A_MESSAGE" : @"KEMO_UNIFIED_B_MESSAGE"]
+                                     preferredStyle:UIAlertControllerStyleActionSheet];
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    NSString* current = [defaults stringForKey:idKey];
+    NSString* other = [defaults stringForKey:otherKey];
     for (NSDictionary* choice in NFBUnifiedAccountChoices()) {
+        if ([choice[@"id"] isEqualToString:other]) continue;  // A and B are never the same
         NSString* title = choice[@"name"];
         if ([choice[@"id"] isEqualToString:current]) title = [title stringByAppendingString:@" ✓"];
         if ([choice[@"active"] boolValue]) {
@@ -172,18 +190,16 @@ static NSString* const kSpotifyRedirectURI = @"http://127.0.0.1:8888/callback";
         [sheet addAction:[UIAlertAction actionWithTitle:title
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction* action) {
-                                                    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-                                                    [defaults setObject:choice[@"id"] forKey:@"kemo_unified_b_id"];
-                                                    [defaults setObject:choice[@"name"] forKey:@"kemo_unified_b_name"];
+                                                    [defaults setObject:choice[@"id"] forKey:idKey];
+                                                    [defaults setObject:choice[@"name"] forKey:nameKey];
                                                     [self.tableView reloadData];
                                                 }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"KEMO_UNIFIED_B_CLEAR"]
                                               style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction* action) {
-                                                NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-                                                [defaults removeObjectForKey:@"kemo_unified_b_id"];
-                                                [defaults removeObjectForKey:@"kemo_unified_b_name"];
+                                                [defaults removeObjectForKey:idKey];
+                                                [defaults removeObjectForKey:nameKey];
                                                 [self.tableView reloadData];
                                             }]];
     [sheet addAction:[UIAlertAction actionWithTitle:[self localized:@"CANCEL_ACTION_LABEL"]

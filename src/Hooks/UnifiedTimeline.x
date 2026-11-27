@@ -33,6 +33,17 @@
 //    its single-tweet and table controllers and the avatar all hold B, nothing is
 //    sent. A tweet meant for B never falls through to A when B is missing.
 //    The badge moved before the display name.
+//  - 7.3.137: A and B are a pair (kemo_unified_a_id, kemo_unified_b_id). Our account
+//    dock (AccountBubbles.x) gets an "A/B" circle before A: stopping on it turns
+//    the unified mode on (kemo_unified_mode) and switches to A; stopping on any
+//    account turns it off, so that account shows alone. X's own account sheet is
+//    left alone.
+//    Unified is only active while the account in use is A. The ID lists belong to
+//    one pair; when the pair changes they are retired, and a tap on a tweet from
+//    a retired list is stopped instead of going out as whoever is in use now.
+//    "Always ask" (kemo_unified_always_ask) asks on A-only tweets too; a reply on
+//    a tweet both have asks as well.
+//  - The accounts that liked a tweet show as small pictures left of the heart.
 //  - A small avatar of the only account that has a tweet sits after its time
 //    (TTAStatusAuthorView); none when both have it. "A only" means A has it and it
 //    is newer than the oldest tweet B has loaded.
@@ -43,6 +54,10 @@
 static NSString* const kUnifiedOn = @"kemo_unified_exp";
 static NSString* const kUnifiedB = @"kemo_unified_b_id";
 static NSString* const kUnifiedBName = @"kemo_unified_b_name";
+static NSString* const kUnifiedA = @"kemo_unified_a_id";
+static NSString* const kUnifiedAName = @"kemo_unified_a_name";
+static NSString* const kUnifiedMode = @"kemo_unified_mode";  // unset = on, for setups from before 7.3.137
+static NSString* const kUnifiedAlwaysAsk = @"kemo_unified_always_ask";
 
 static NSHashTable* gFollowingTimelines;  // A's Following-tab timelines, from X's factory
 static NSHashTable* gFollowingControllers;
@@ -168,11 +183,32 @@ NSArray<NSDictionary*>* NFBUnifiedAccountChoices(void) {
     return choices;
 }
 
+static NSString* AID(void) {
+    return [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedA];
+}
+
+static NSString* BID(void) {
+    return [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedB];
+}
+
+static BOOL UnifiedModeSelected(void) {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:kUnifiedMode];
+    return value ? [value boolValue] : YES;
+}
+
+static void SetUnifiedMode(BOOL on) {
+    [[NSUserDefaults standardUserDefaults] setBool:on forKey:kUnifiedMode];
+}
+
+// Unified only while the account in use is A (or, with no A picked, any account but B).
 static BOOL UnifiedActive(void) {
-    if (![BHTSettings boolForKey:kUnifiedOn]) return NO;
-    NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedB];
+    if (![BHTSettings boolForKey:kUnifiedOn] || !UnifiedModeSelected()) return NO;
+    NSString* bID = BID();
     if (bID.length == 0) return NO;
-    return ![bID isEqualToString:AccountUserID(CurrentAccount())];
+    NSString* currentID = AccountUserID(CurrentAccount());
+    if (currentID.length == 0 || [bID isEqualToString:currentID]) return NO;
+    NSString* aID = AID();
+    return aID.length == 0 || [aID isEqualToString:currentID];
 }
 
 static id AccountForID(NSString* userID) {
@@ -184,11 +220,43 @@ static id AccountForID(NSString* userID) {
 
 static void RefreshB(long long source, NSString* why);
 
+// The ID lists below belong to one (account in use, B) pair. When the pair
+// changes, what they held is retired: those tweets may still be on screen with
+// the old pair's badge, and a tap on one must not go out as the new pair.
+static NSString* gPairKey;
+static NSMutableSet<NSNumber*>* gRetiredIDs;
+static NSMutableSet<NSNumber*>* gBLiked;
+static NSMutableSet<NSNumber*>* gBUnliked;
+static NSMutableSet<NSNumber*>* gBReposted;
+
+static void EnsurePair(void) {
+    NSString* key = [NSString stringWithFormat:@"%@|%@", AccountUserID(CurrentAccount()) ?: @"-", BID() ?: @"-"];
+    if ([key isEqualToString:gPairKey]) return;
+    BOOL changed = gPairKey != nil;
+    gPairKey = key;
+    @synchronized([NSObject class]) {
+        if (!gRetiredIDs) gRetiredIDs = [NSMutableSet set];
+        if (gBOnlyIDs) [gRetiredIDs unionSet:gBOnlyIDs];
+        if (gBothIDs) [gRetiredIDs unionSet:gBothIDs];
+        if (gAOnlyIDs) [gRetiredIDs unionSet:gAOnlyIDs];
+        [gBOnlyIDs removeAllObjects];
+        [gBothIDs removeAllObjects];
+        [gAOnlyIDs removeAllObjects];
+    }
+    [gBLiked removeAllObjects];
+    [gBUnliked removeAllObjects];
+    [gBReposted removeAllObjects];
+    if (changed) UnifiedLog([NSString stringWithFormat:@"account pair changed; %lu ids retired", (unsigned long)gRetiredIDs.count]);
+}
+
 // B's timeline, made once per B account the way the 7.3.132 probe did.
 static id BTimeline(void) {
-    NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedB];
-    id account = AccountForID(bID);
-    if (!account) return nil;
+    id account = AccountForID(BID());
+    if (!account) {
+        gBTimeline = nil;
+        gBAccount = nil;
+        return nil;
+    }
     if (gBTimeline && gBAccount == account) return gBTimeline;
 
     Class factoryClass = objc_getClass("T1TimelineFactory");
@@ -315,6 +383,7 @@ static long long BlockKey(NSArray* block) {
 static NSString* gTemplateNote = @"-";
 
 static NSArray* MergedSections(id controller, NSArray* sections) {
+    EnsurePair();
     id stream = Getter(gBTimeline, @"stream");
     id bObjects = Getter(stream, @"streamObjects");
     if (![bObjects isKindOfClass:[NSArray class]] || [bObjects count] == 0) {
@@ -433,6 +502,10 @@ static NSArray* MergedSections(id controller, NSArray* sections) {
         [gBOnlyIDs minusSet:both];
         [gAOnlyIDs unionSet:aOnly];
         [gAOnlyIDs minusSet:both];
+        // Seen again under this pair: no longer retired.
+        [gRetiredIDs minusSet:bOnly];
+        [gRetiredIDs minusSet:both];
+        [gRetiredIDs minusSet:aOnly];
     }
     gLastMerge = [NSString stringWithFormat:@"A items=%lu blocks=%lu statuses=%lu (raw %lu, wrapped %lu) | B inserted=%lu "
                                             @"both=%lu olderThanA=%lu promoted=%lu leftOver=%lu | A outOfOrder=%lu",
@@ -553,10 +626,8 @@ static NSString* AName(void) {
     return name ? ([name hasPrefix:@"@"] ? name : [@"@" stringByAppendingString:name]) : @"A";
 }
 
-// Likes and reposts made as B in this session, so a second tap undoes them.
-static NSMutableSet<NSNumber*>* gBLiked;
-static NSMutableSet<NSNumber*>* gBUnliked;
-static NSMutableSet<NSNumber*>* gBReposted;
+// Likes and reposts made as B in this session (gBLiked and friends, above), so a
+// second tap undoes them.
 
 static void CallStatusMethod(id account, NSString* selectorName, long long statusID) {
     SEL selector = NSSelectorFromString(selectorName);
@@ -615,9 +686,24 @@ static void RepostAsB(id viewModel) {
 static CFAbsoluteTime gComposeAsBUntil;
 static NSSet<NSNumber*>* gComposeTargets;
 
-static void ChooseAccount(NSString* title, void (^asA)(void), void (^asB)(void)) {
+static void ChooseAccount(NSString* title, NSString* message, void (^asAOrig)(void), void (^asBOrig)(void)) {
+    // What was asked holds only for the accounts in use when it was asked.
+    NSString* pairAtAsk = gPairKey;
+    BOOL (^stillSame)(void) = ^BOOL {
+        EnsurePair();
+        if (UnifiedActive() && [gPairKey isEqualToString:pairAtAsk]) return YES;
+        ShowNotice(@"계정이 바뀌어서 보내지 않았어요");
+        UnifiedLog(@"choice dropped: account pair changed while asking");
+        return NO;
+    };
+    void (^asA)(void) = ^{
+        if (stillSame()) asAOrig();
+    };
+    void (^asB)(void) = ^{
+        if (stillSame()) asBOrig();
+    };
     UIAlertController* sheet = [UIAlertController alertControllerWithTitle:title
-                                                                   message:@"두 계정 모두 이 게시물을 보고 있어요."
+                                                                   message:message
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (A) ✓", AName()]
                                               style:UIAlertActionStyleDefault
@@ -637,10 +723,19 @@ static void ChooseAccount(NSString* title, void (^asA)(void), void (^asB)(void))
     [top presentViewController:sheet animated:YES completion:nil];
 }
 
+static void RelayoutSoon(UIView* view);
+
+static void MarkReplyAsB(id viewModel, long long statusID) {
+    gComposeAsBUntil = CFAbsoluteTimeGetCurrent() + 6;
+    gComposeTargets = [NSSet setWithObjects:@(statusID), @(NumberGetter(ActedStatus(viewModel), @"statusID")), nil];
+    UnifiedLog(@"reply: composer will switch to B");
+}
+
 // YES when the tap was handled here (sent as B, a sheet shown, or stopped).
 // `orig` runs X's own handling, which acts as A.
 static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     if (!UnifiedActive()) return NO;
+    EnsurePair();
     NSString* buttonClass = NSStringFromClass([button class]);
     if ([buttonClass containsString:@"Share"] || [buttonClass containsString:@"Analytics"]) return NO;
     id viewModel = Getter(actionsView, @"viewModel");
@@ -648,7 +743,16 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
     if (statusID <= 0) return NO;
     BOOL bOnly = [gBOnlyIDs containsObject:@(statusID)];
     BOOL both = [gBothIDs containsObject:@(statusID)];
-    if (!bOnly && !both) return NO;
+    BOOL aOnly = [gAOnlyIDs containsObject:@(statusID)];
+    if (!bOnly && !both && !aOnly && [gRetiredIDs containsObject:@(statusID)]) {
+        // Shown under the previous A/B pair: who it belongs to is not known now.
+        gBlocked++;
+        UnifiedLog(@"blocked a tap on a tweet from the previous account pair");
+        ShowNotice(@"계정 설정이 바뀌어서 막았어요. 당겨서 새로고침한 뒤 다시 눌러주세요");
+        return YES;
+    }
+    BOOL ask = both || (aOnly && [BHTSettings boolForKey:kUnifiedAlwaysAsk]);
+    if (!bOnly && !ask) return NO;
     if (!BTimeline() || !gBAccount) {
         // Never let a tweet meant for B fall through to A.
         if (!bOnly) return NO;
@@ -670,9 +774,7 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
             return YES;
         }
         if (reply) {
-            gComposeAsBUntil = CFAbsoluteTimeGetCurrent() + 6;
-            gComposeTargets = [NSSet setWithObjects:@(statusID), @(NumberGetter(ActedStatus(viewModel), @"statusID")), nil];
-            UnifiedLog(@"reply: composer will switch to B");
+            MarkReplyAsB(viewModel, statusID);
             return NO;
         }
         gBlocked++;
@@ -681,16 +783,29 @@ static BOOL HandleInlineAction(id actionsView, id button, void (^orig)(void)) {
         return YES;
     }
 
-    // Both accounts have it: like and repost ask, A first.
+    // Both have it (or "always ask"): like, repost and reply ask, A first.
+    NSString* message = both ? @"두 계정 모두 이 게시물을 보고 있어요." : [NSString stringWithFormat:@"%@만 팔로우 중인 게시물이에요.", AName()];
     if (like) {
-        ChooseAccount(@"어느 계정으로 마음에 들어요할까요?", orig, ^{
+        __weak UIView* weakActions = (UIView*)actionsView;
+        ChooseAccount(@"어느 계정으로 마음에 들어요할까요?", message, ^{
+            orig();
+            if (weakActions) RelayoutSoon(weakActions);
+        }, ^{
             LikeAsB(viewModel);
+            if (weakActions) RelayoutSoon(weakActions);
         });
         return YES;
     }
     if (repost) {
-        ChooseAccount(@"어느 계정으로 재게시할까요?", orig, ^{
+        ChooseAccount(@"어느 계정으로 재게시할까요?", message, orig, ^{
             RepostAsB(viewModel);
+        });
+        return YES;
+    }
+    if (reply) {
+        ChooseAccount(@"어느 계정으로 답글할까요?", message, orig, ^{
+            MarkReplyAsB(viewModel, statusID);
+            orig();
         });
         return YES;
     }
@@ -748,6 +863,7 @@ static UIImage* AccountAvatar(id account, NSString* letter, UIColor* color) {
 static const NSInteger kBadgeTag = 0x4E4642;  // "NFB"
 
 static void UpdateAccountBadge(UIView* authorView) {
+    if (UnifiedActive()) EnsurePair();
     UIImageView* badge = [authorView viewWithTag:kBadgeTag];
     UIView* statusView = authorView.superview;
     while (statusView && ![NSStringFromClass([statusView class]) isEqualToString:@"T1StandardStatusView"]) {
@@ -824,6 +940,10 @@ NSString* NFBUnifiedTimelineDebugText(void) {
     NSMutableString* out = [NSMutableString string];
     NSString* bID = [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedB];
     NSString* currentID = AccountUserID(CurrentAccount());
+    [out appendFormat:@"mode=%d A=%@ (%@) unifiedActive=%d alwaysAsk=%d retired=%lu\n", UnifiedModeSelected(),
+                      AID().length ? ([AID() isEqualToString:currentID] ? @"set, in use" : @"set, not in use") : @"none",
+                      [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedAName] ?: @"-", UnifiedActive(),
+                      [BHTSettings boolForKey:kUnifiedAlwaysAsk], (unsigned long)gRetiredIDs.count];
     [out appendFormat:@"on=%d B=%@ (%@) active=%@ sameAsActive=%d\n", [BHTSettings boolForKey:kUnifiedOn],
                       bID.length ? @"set" : @"none",
                       [[NSUserDefaults standardUserDefaults] stringForKey:kUnifiedBName] ?: @"-",
@@ -843,6 +963,121 @@ NSString* NFBUnifiedTimelineDebugText(void) {
         [out appendFormat:@"%@\n", gUnifiedLog.count ? [gUnifiedLog componentsJoinedByString:@"\n"] : @"(no events)"];
     }
     return out;
+}
+
+// MARK: - Who liked it (left of the heart)
+
+static const NSInteger kLikeBadgeTag = 0x4E464C;  // "NFL"
+
+static void UpdateLikeBadges(UIView* actionsView) {
+    UIView* holder = [actionsView viewWithTag:kLikeBadgeTag];
+    UIView* heart = nil;
+    for (UIView* view in actionsView.subviews) {
+        if ([NSStringFromClass([view class]) containsString:@"FavoriteButton"]) heart = view;
+    }
+    BOOL likedByA = NO, likedByB = NO;
+    if (UnifiedActive() && heart && !heart.hidden) {
+        EnsurePair();
+        id viewModel = Getter(actionsView, @"viewModel");
+        long long statusID = ViewModelStatusID(viewModel);
+        id status = ActedStatus(viewModel);
+        long long actedID = NumberGetter(status, @"statusID");
+        BOOL loadingLiked = BoolGetter(status, @"favoritedByLoadingAccount") || BoolGetter(status, @"seenAsFavorited");
+        BOOL bSaysLiked = [gBLiked containsObject:@(actedID)];
+        BOOL bSaysUnliked = [gBUnliked containsObject:@(actedID)];
+        if (statusID > 0 && [gBOnlyIDs containsObject:@(statusID)]) {
+            // Loaded by B, so X's own flag is B's.
+            likedByB = bSaysLiked || (!bSaysUnliked && loadingLiked);
+        } else if (statusID > 0 && ([gBothIDs containsObject:@(statusID)] || [gAOnlyIDs containsObject:@(statusID)])) {
+            // A's copy: X's own flag is A's; B's likes are the ones made here.
+            likedByA = loadingLiked;
+            likedByB = bSaysLiked;
+        }
+    }
+    if (!likedByA && !likedByB) {
+        holder.hidden = YES;
+        return;
+    }
+    if (!holder) {
+        holder = [UIView new];
+        holder.tag = kLikeBadgeTag;
+        holder.userInteractionEnabled = NO;
+        [actionsView addSubview:holder];
+    }
+    [holder.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
+    NSMutableArray* accounts = [NSMutableArray array];
+    if (likedByA) [accounts addObject:@[ CurrentAccount() ?: [NSNull null], @"A", [UIColor colorWithRed:0.47 green:0.34 blue:1 alpha:1] ]];
+    if (likedByB) [accounts addObject:@[ gBAccount ?: [NSNull null], @"B", [UIColor colorWithRed:1 green:0.48 blue:0 alpha:1] ]];
+    const CGFloat size = 16, overlap = 5;
+    CGFloat width = size + (accounts.count - 1) * (size - overlap);
+    // The heart's picture sits 6pt into its button (TFNAnimatableButton's image).
+    CGFloat heartX = CGRectGetMinX(heart.frame) + 6;
+    holder.frame = CGRectMake(heartX - 3 - width, CGRectGetMidY(heart.frame) - size / 2, width, size);
+    for (NSUInteger i = 0; i < accounts.count; i++) {
+        id account = accounts[i][0] == [NSNull null] ? nil : accounts[i][0];
+        UIImageView* picture = [[UIImageView alloc] initWithFrame:CGRectMake(i * (size - overlap), 0, size, size)];
+        picture.image = AccountAvatar(account, accounts[i][1], accounts[i][2]);
+        picture.contentMode = UIViewContentModeScaleAspectFill;
+        picture.clipsToBounds = YES;
+        picture.layer.cornerRadius = size / 2;
+        picture.layer.borderWidth = 1;
+        picture.layer.borderColor = [UIColor systemBackgroundColor].CGColor;
+        [holder addSubview:picture];
+    }
+    holder.hidden = NO;
+    [actionsView bringSubviewToFront:holder];
+}
+
+static void RelayoutSoon(UIView* view) {
+    __weak UIView* weakView = view;
+    for (NSNumber* delay in @[ @0.15, @0.8 ]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           [weakView setNeedsLayout];
+                       });
+    }
+}
+
+// MARK: - The dock's "A/B" circle (AccountBubbles.x)
+
+// A and B for the dock: B from settings, A from settings or else the account in use.
+BOOL NFBUnifiedDockPair(id* outA, id* outB) {
+    if (![BHTSettings boolForKey:kUnifiedOn]) return NO;
+    id b = AccountForID(BID());
+    id current = CurrentAccount();
+    id a = AID().length ? AccountForID(AID()) : current;
+    if (!a || !b || [AccountUserID(a) isEqualToString:AccountUserID(b)]) return NO;
+    if (outA) *outA = a;
+    if (outB) *outB = b;
+    return YES;
+}
+
+BOOL NFBUnifiedIsActive(void) {
+    return UnifiedActive();
+}
+
+// The dock stopped on the "A/B" circle (unified YES, `a` is A) or on an account.
+void NFBUnifiedDockChose(BOOL unified, id a) {
+    if (![BHTSettings boolForKey:kUnifiedOn]) return;
+    if (unified) {
+        NSString* aID = AccountUserID(a);
+        if (aID.length && AID().length == 0) {
+            NSString* name = AccountUsername(a) ?: aID;
+            [[NSUserDefaults standardUserDefaults] setObject:aID forKey:kUnifiedA];
+            [[NSUserDefaults standardUserDefaults] setObject:[name hasPrefix:@"@"] ? name : [@"@" stringByAppendingString:name]
+                                                      forKey:kUnifiedAName];
+        }
+    }
+    if (UnifiedModeSelected() == unified && [[NSUserDefaults standardUserDefaults] objectForKey:kUnifiedMode]) return;
+    SetUnifiedMode(unified);
+    UnifiedLog(unified ? @"dock: A/B chosen, unified on" : @"dock: an account chosen, unified off");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        ReapplyMerge();
+        if (unified && UnifiedActive()) {
+            gBLastRefresh = 0;
+            RefreshB(101, @"A/B chosen");
+        }
+    });
 }
 
 // MARK: - Hooks
@@ -914,7 +1149,14 @@ NSString* NFBUnifiedTimelineDebugText(void) {
 
 %hook TTAStatusInlineActionsView
 
+- (void)layoutSubviews {
+    %orig;
+    UIView* view = (UIView*)self;
+    if (UnifiedActive() || [view viewWithTag:kLikeBadgeTag]) UpdateLikeBadges(view);
+}
+
 - (void)didTapInlineActionButton:(id)button {
+    if ([NSStringFromClass([button class]) containsString:@"Favorite"]) RelayoutSoon((UIView*)self);
     if (HandleInlineAction(self, button, ^{
             %orig;
         }))

@@ -286,6 +286,18 @@ static void UPAskBFollow(long long userID, void (^done)(void)) {
     if (!gBFollowAsked) gBFollowAsked = [NSMutableSet set];
     if ([gBFollowAsked containsObject:@(userID)]) return;
     [gBFollowAsked addObject:@(userID)];
+    // 7.3.148: B's own Following list (UnifiedFollowSync.x) answers without
+    // asking anything, and is not stale like a cached user object.
+    NSArray* bList = UPBID().length
+                         ? [[NSUserDefaults standardUserDefaults] arrayForKey:[@"kemo_unified_follows_" stringByAppendingString:UPBID()]]
+                         : nil;
+    if (bList.count) {
+        UPFollow follow = [bList containsObject:@(userID)] ? UPFollowYes : UPFollowNo;
+        gBFollowByUser[@(userID)] = @(follow);
+        UPLog([NSString stringWithFormat:@"B follow of %lld: %ld (from B's following list)", userID, (long)follow]);
+        if (done) done();
+        return;
+    }
     id b = UPBAccount();
     id context = UPGetter(b, @"modelContext");
     Class supportClass = objc_getClass("TFSLegacyModelSupport");

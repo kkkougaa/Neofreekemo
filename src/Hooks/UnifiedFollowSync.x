@@ -120,6 +120,7 @@ static void FSFinish(BOOL keep) {
         } @catch (__unused NSException* exception) {
         }
     }
+    [gSyncHost.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
     [gSyncHost removeFromSuperview];
     gSyncHost = nil;
     gSyncController = nil;

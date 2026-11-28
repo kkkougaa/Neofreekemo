@@ -1522,8 +1522,46 @@ static NSUInteger gBMoreCount;
 static long long gBMoreOldest;
 static NSString* gMoreNote = @"-";
 
+// 7.3.163: B's For You tweets already shown in an earlier round (a round is
+// from one refresh of A's For You to the next) are not mixed in again; B's
+// For You kept handing out the same ones (the user: "비슷한 것만 계속"). Only
+// here, on the device: nothing about it is sent anywhere. Kept 6 hours, at
+// most kForYouSeenMax IDs (tweet and original both).
+static const NSUInteger kForYouSeenMax = 1500;
+static const NSTimeInterval kForYouSeenLife = 6 * 60 * 60;
+static NSMutableDictionary<NSNumber*, NSNumber*>* gForYouSeen;  // ID -> when its round ended
+static NSMutableSet<NSNumber*>* gForYouThisRound;               // IDs on the list in this round
+static CFAbsoluteTime gForYouRoundAt;                           // when this round began (0: none yet)
+static BOOL gForYouAwaitingB;                                   // B's refresh for this round not in yet
+static NSUInteger gForYouRounds;
+
+static void ForYouNewRound(void) {
+    if (!gForYouSeen) gForYouSeen = [NSMutableDictionary dictionary];
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    for (NSNumber* statusID in gForYouThisRound) gForYouSeen[statusID] = @(now);
+    [gForYouThisRound removeAllObjects];
+    for (NSNumber* statusID in [gForYouSeen allKeys]) {
+        if (now - gForYouSeen[statusID].doubleValue > kForYouSeenLife) [gForYouSeen removeObjectForKey:statusID];
+    }
+    if (gForYouSeen.count > kForYouSeenMax) {
+        NSArray<NSNumber*>* oldestFirst = [gForYouSeen keysSortedByValueUsingSelector:@selector(compare:)];
+        for (NSUInteger i = 0; i < gForYouSeen.count - kForYouSeenMax && i < oldestFirst.count; i++) {
+            [gForYouSeen removeObjectForKey:oldestFirst[i]];
+        }
+    }
+    gForYouRoundAt = now;
+    gForYouAwaitingB = YES;
+    gForYouRounds++;
+}
+
 static void LoadMoreBForYou(id controller, NSUInteger bCount) {
     if (!ControllerVisible(controller)) return;  // never from a merge of a tab that is not being looked at
+    // 7.3.163: right after A's refresh B's own refresh is on its way; no next
+    // page of B's old list meanwhile (15s at most).
+    if (gForYouAwaitingB && CFAbsoluteTimeGetCurrent() - gForYouRoundAt < 15) {
+        gMoreNote = @"For You: waiting for B's refresh of this round";
+        return;
+    }
     static CFAbsoluteTime last;
     if (CFAbsoluteTimeGetCurrent() - last <= 5) return;
     if (gBForYouMorePages >= kMoreBudget) {
@@ -1590,7 +1628,8 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     NSMutableSet<NSNumber*>* both = record[@"both"];
     NSMutableSet<NSNumber*>* bothActed = [NSMutableSet set];
     NSSet<NSNumber*>* aFollows = AFollowSet(nil);
-    NSUInteger dupes = 0, ads = 0, followedByA = 0;
+    NSUInteger dupes = 0, ads = 0, followedByA = 0, seenBefore = 0;
+    if (!gForYouThisRound) gForYouThisRound = [NSMutableSet set];
     for (id object in bObjects) {
         if (!IsStatusItem(object)) continue;
         if (BoolGetter(object, @"isPromoted")) {
@@ -1600,6 +1639,12 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
         long long statusID = NumberGetter(object, @"statusID");
         if (statusID <= 0) continue;
         long long acted = ActedID(object);
+        // 7.3.163: shown in an earlier round (this round's stay where they are).
+        if (![gForYouThisRound containsObject:@(statusID)] &&
+            (gForYouSeen[@(statusID)] || (acted > 0 && gForYouSeen[@(acted)]))) {
+            seenBefore++;
+            continue;
+        }
         if ([aIDs containsObject:@(statusID)] || (acted > 0 && [aActed containsObject:@(acted)])) {
             dupes++;
             [both addObject:@(statusID)];
@@ -1616,6 +1661,9 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
         if (BlockKey(block) > 0 && next < bItems.count) {
             id object = bItems[next++];
             [merged addObject:object];
+            [gForYouThisRound addObject:@(NumberGetter(object, @"statusID"))];
+            long long objectActed = ActedID(object);
+            if (objectActed > 0) [gForYouThisRound addObject:@(objectActed)];
             // 7.3.147: B's For You is recommendations; marks and B reactions
             // only when B follows whoever brought it and A does not. A tweet B
             // was only recommended is shown plain and reacts as A.
@@ -1637,10 +1685,12 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     }
     objc_setAssociatedObject(controller, kRecordKey, record, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     gLastForYouMerge = [NSString stringWithFormat:@"A statuses=%lu blocks=%lu | B inserted=%lu of %lu (followed by A %lu) "
-                                                 @"same as A=%lu ads=%lu",
+                                                 @"same as A=%lu ads=%lu | shown before=%lu (round %lu, remembered %lu%@)",
                                                  (unsigned long)best, (unsigned long)blocks.count, (unsigned long)next,
                                                  (unsigned long)bItems.count, (unsigned long)followedByA,
-                                                 (unsigned long)dupes, (unsigned long)ads];
+                                                 (unsigned long)dupes, (unsigned long)ads, (unsigned long)seenBefore,
+                                                 (unsigned long)gForYouRounds, (unsigned long)gForYouSeen.count,
+                                                 gForYouAwaitingB ? @", B's refresh pending" : @""];
     if (next >= bItems.count && blocks.count > bItems.count) {
         // B ran out before A did: B's next page (7.3.151: within LoadMoreBForYou's limits).
         LoadMoreBForYou(controller, [bObjects count]);
@@ -4236,6 +4286,7 @@ static void FollowARefresh(id timeline, long long source) {
             return;
         }
         gBForYouMorePages = 0;
+        ForYouNewRound();
         RefreshBForYou(source);
     }
 }
@@ -4264,6 +4315,7 @@ static void FollowARefresh(id timeline, long long source) {
         gBStreamGen++;
         BadgeMemoClear();
         if (!UnifiedActive()) return;
+        if (!following) gForYouAwaitingB = NO;  // 7.3.163: this round's B list is in
         UnifiedLog(following ? @"B stream updated" : @"B For You updated");
         ReapplyMerge(following, !following);
     };

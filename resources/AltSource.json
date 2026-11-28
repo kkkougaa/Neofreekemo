@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.164",
+      "subtitle": "NeoFreeBird version 7.3.165",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.165",
+          "buildVersion": "165",
+          "date": "2026-11-28T05:17:48Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.165/NeoFreeBird-Twitter-sideloaded_7.3.165_12.44.ipa",
+          "size": 273922452,
+          "minOSVersion": "15.0",
+          "localizedDescription": "kemo 설정에 '개인정보 가리기' 추가: 트윗 이름·@아이디를 임의 이름으로 바꾸고 프로필 사진을 가려요. 통합 홈에서 홈 탭을 길게 눌러도 서랍이 열리지 않아요."
+        },
         {
           "version": "7.3.164",
           "buildVersion": "164",

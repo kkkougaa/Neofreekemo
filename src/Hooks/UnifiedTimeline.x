@@ -840,9 +840,10 @@ static void RebuildMarks(void) {
         for (NSNumber* statusID in actedByID) {
             if (![both containsObject:statusID]) [acted addObject:actedByID[statusID]];
         }
+        BOOL viewB = [record[@"viewB"] boolValue];  // 7.3.162: the "B only" list
         for (NSArray* entry in record[@"entries"]) {
             NSInteger cls = [entry[1] integerValue];
-            if (cls == kProvBOnly && [both containsObject:entry[0]]) cls = kProvBBoth;
+            if (cls == kProvBOnly && !viewB && [both containsObject:entry[0]]) cls = kProvBBoth;
             if (cls == kProvAOnly && [both containsObject:entry[0]]) cls = kProvABoth;
             if (cls == kProvBOnly || cls == kProvBBoth || cls == kProvBPlain) countB++;
             else countA++;
@@ -854,6 +855,9 @@ static void RebuildMarks(void) {
     }
     [bOnly minusSet:both];
     [aOnly minusSet:both];
+    for (NSDictionary* record in records) {
+        if ([record[@"viewB"] boolValue]) [bOnly unionSet:record[@"bOnly"]];  // 7.3.162
+    }
     gMarks = marks;
     gStatusMarks = statusMarks;
     gMarkCountB = countB;
@@ -1646,6 +1650,170 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     return result;
 }
 
+// MARK: - What the Following tab shows (7.3.162)
+//
+// The user's: a long press on the home tab, while home is showing, goes round
+// "A and B mixed" -> "A only" -> "B only" -> mixed (kHomeViewKey; Following
+// tab only, For You always mixes). A only: X's own list, nothing of B's.
+// B only: none of A's tweets, B's Following stream in B's own order, and every
+// row of it is B's alone (kProvBOnly, never turned into "both" by another
+// merge: kRecordViewBKey), so every tap, reply and tweet screen from it goes as
+// B (the user: "B만 보기면 전부 B").
+static NSString* const kHomeViewKey = @"kemo_unified_home_view";  // 0 mixed, 1 A only, 2 B only
+static NSString* gHomeViewNote = @"-";
+
+static NSInteger HomeView(void) {
+    NSInteger value = [[NSUserDefaults standardUserDefaults] integerForKey:kHomeViewKey];
+    return (value == 1 || value == 2) ? value : 0;
+}
+
+// Whether a row of A's section carries a tweet (a status or a module of them).
+static BOOL ItemHasStatus(id item) {
+    NSMutableSet<NSNumber*>* ids = [NSMutableSet set];
+    CollectStatusIDs(unwrapDataViewItem(item), ids, 0);
+    return ids.count > 0 || IsStatusItem(unwrapDataViewItem(item));
+}
+
+// B only: of A's sections nothing with a tweet in it stays; of the timeline
+// section, only what comes before A's first tweet and after its last (X's
+// cursors and the bottom loader, so scrolling down still loads more, and A's
+// loading more loads B's too: FollowBottomLoad). B's rows go in between.
+static NSArray* BOnlySections(id controller, NSArray* sections) {
+    NSMutableDictionary* record = objc_getAssociatedObject(controller, kRecordKey);
+    record[@"viewB"] = @YES;
+    NSUInteger target = NSNotFound, best = 0;
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        if (![sections[i] isKindOfClass:[NSArray class]]) continue;
+        NSUInteger count = 0;
+        for (id item in sections[i]) {
+            id model = unwrapDataViewItem(item);
+            if (IsStatusItem(model)) count++;
+            if (gAModuleShapes.count < 6 && model != item && IsStatusItem(model)) {
+                if (!gAModuleShapes) gAModuleShapes = [NSMutableSet set];
+                [gAModuleShapes addObject:RowShape(item)];
+            }
+        }
+        if (count > best) {
+            best = count;
+            target = i;
+        }
+    }
+    NSMutableArray* result = [NSMutableArray arrayWithCapacity:sections.count];
+    NSUInteger aDropped = 0, aKept = 0;
+    NSMutableArray* lead = [NSMutableArray array];
+    NSMutableArray* tail = [NSMutableArray array];
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        id section = sections[i];
+        if (![section isKindOfClass:[NSArray class]]) {
+            [result addObject:section];
+            continue;
+        }
+        NSMutableArray* kept = [NSMutableArray array];
+        if (i == target) {
+            BOOL seenStatus = NO;
+            for (id item in section) {
+                if (ItemHasStatus(item)) {
+                    seenStatus = YES;
+                    aDropped++;
+                    [tail removeAllObjects];  // only what is after the last tweet is a tail
+                    continue;
+                }
+                if (!seenStatus) [lead addObject:item];
+                else [tail addObject:item];
+            }
+        } else {
+            for (id item in section) {
+                if (ItemHasStatus(item)) {
+                    aDropped++;
+                } else {
+                    [kept addObject:item];
+                }
+            }
+        }
+        [result addObject:kept];
+    }
+    // The middle of A's list that was not a tweet (a who-to-follow box and the
+    // like) is left out: it was A's.
+    aKept = lead.count + tail.count;
+
+    NSMutableArray* bRows = [NSMutableArray array];
+    NSUInteger bStatuses = 0, bModules = 0, bSkipped = 0, promoted = 0;
+    id stream = Getter(gBTimeline, @"stream");
+    id bObjects = Getter(stream, @"streamObjects");
+    if ([bObjects isKindOfClass:[NSArray class]]) {
+        id transformer = ModuleTransformer(controller);
+        NSDictionary* oldCache = objc_getAssociatedObject(controller, kModuleCacheKey);
+        NSMutableDictionary* newCache = [NSMutableDictionary dictionary];
+        NSMutableSet<NSNumber*>* taken = [NSMutableSet set];
+        for (id object in bObjects) {
+            if (IsStatusItem(object)) {
+                if (BoolGetter(object, @"isPromoted")) {
+                    promoted++;
+                    continue;
+                }
+                long long statusID = NumberGetter(object, @"statusID");
+                if (statusID <= 0 || [taken containsObject:@(statusID)]) continue;
+                [taken addObject:@(statusID)];
+                RecordEntry(record, object, kProvBOnly);
+                [record[@"bOnly"] addObject:@(statusID)];
+                [bRows addObject:object];
+                bStatuses++;
+                continue;
+            }
+            if (!IsModuleViewModel(object) || !transformer) {
+                bSkipped++;
+                continue;
+            }
+            NSDictionary* info = ModuleInfo(transformer, object, oldCache, newCache);
+            NSArray* rows = info[@"rows"];
+            if (!rows || ![gAModuleShapes containsObject:info[@"shape"]]) {
+                bSkipped++;
+                continue;
+            }
+            BOOL duplicate = NO;
+            for (id row in rows) {
+                id model = unwrapDataViewItem(row);
+                if (IsStatusItem(model) && [taken containsObject:@(NumberGetter(model, @"statusID"))]) duplicate = YES;
+            }
+            if (duplicate) {
+                bSkipped++;
+                continue;
+            }
+            for (id row in rows) {
+                NoteBRow(row);
+                id model = unwrapDataViewItem(row);
+                if (!IsStatusItem(model)) continue;
+                long long statusID = NumberGetter(model, @"statusID");
+                [taken addObject:@(statusID)];
+                RecordEntry(record, model, kProvBOnly);
+                [record[@"bOnly"] addObject:@(statusID)];
+            }
+            [bRows addObjectsFromArray:rows];
+            bModules++;
+        }
+        objc_setAssociatedObject(controller, kModuleCacheKey, newCache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (target != NSNotFound) {
+        NSMutableArray* list = [NSMutableArray arrayWithCapacity:lead.count + bRows.count + tail.count];
+        [list addObjectsFromArray:lead];
+        [list addObjectsFromArray:bRows];
+        [list addObjectsFromArray:tail];
+        result[target] = list;
+    } else if (bRows.count) {
+        [result addObject:bRows];
+    }
+    static CFAbsoluteTime emptyAskedAt;
+    if (bStatuses == 0 && CFAbsoluteTimeGetCurrent() - emptyAskedAt > 60) {
+        emptyAskedAt = CFAbsoluteTimeGetCurrent();
+        RefreshB(101, @"B only, B's stream empty");
+    }
+    gLastMerge = [NSString stringWithFormat:@"B only: B statuses=%lu modules=%lu skipped=%lu promoted=%lu | A rows left out=%lu, "
+                                            @"A's non-tweet rows kept=%lu",
+                                            (unsigned long)bStatuses, (unsigned long)bModules, (unsigned long)bSkipped,
+                                            (unsigned long)promoted, (unsigned long)aDropped, (unsigned long)aKept];
+    return result;
+}
+
 static NSMutableArray<NSString*>* gMergeHistory;
 static BOOL gUnmerging;  // A's lists are being given back as X made them
 static const void* kReapplyOwedKey = &kReapplyOwedKey;
@@ -1674,6 +1842,22 @@ static NSArray* SectionsForController(id controller, NSArray* sections) {
                 objc_setAssociatedObject(controller, kRecordKey, NewRecord(), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 result = sections;
             }
+        }
+    } else if (HomeView() == 1) {
+        // A only: X's own list.
+        gLastMerge = @"A only: X's own list, nothing of B's";
+    } else if (HomeView() == 2) {
+        // B only: built even before B's stream is there (A's tweets never show).
+        (void)BTimeline();
+        @try {
+            result = BOnlySections(controller, sections);
+        } @catch (NSException* exception) {
+            // Never A's tweets in "B only": an empty list rather than X's.
+            gLastMerge = [NSString stringWithFormat:@"B only threw %@; list left empty", exception.name];
+            objc_setAssociatedObject(controller, kRecordKey, NewRecord(), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            NSMutableArray* empty = [NSMutableArray array];
+            for (id section in sections) [empty addObject:[section isKindOfClass:[NSArray class]] ? @[] : section];
+            result = empty;
         }
     } else if (BTimeline()) {
         @try {
@@ -3578,6 +3762,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
                       gLastForYouMerge];
     [out appendFormat:@"following lists:\n%@", NFBUnifiedFollowSyncDebugText()];
     [out appendFormat:@"reposts as B:\n%@\n", NFBUnifiedRepostDebugText()];
+    [out appendFormat:@"home view: %ld (0 mixed, 1 A only, 2 B only) | last switch: %@\n", (long)HomeView(), gHomeViewNote];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
@@ -5439,6 +5624,130 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 %end
 
 static BOOL gDefaultsLookQueued;
+
+// MARK: - Long press on the home tab (7.3.162)
+//
+// The same reading of the touch as the notifications tab's (UnifiedNotifications.x,
+// 7.3.158/7.3.161): a finger that comes down on the tab bar's selection pill
+// (XNavigation.TabBarView > XNavigation.TabBarPill) while the unified home
+// is on screen, and stays put for kHomeLongPress, moves the Following tab on
+// to the next of mixed / A only / B only. A tap is X's own.
+
+static __weak UITouch* gHomeTouch;
+static CGPoint gHomeTouchStart;
+static NSUInteger gHomeTouchSerial;
+static const NSTimeInterval kHomeLongPress = 0.45;
+
+static UIView* HomePillIn(UIView* view, int depth) {
+    if (!view || depth > 4) return nil;
+    for (UIView* sub in view.subviews) {
+        if ([NSStringFromClass([sub class]) hasSuffix:@"TabBarPill"]) return sub;
+        UIView* found = HomePillIn(sub, depth + 1);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static UIScrollView* HomeListOf(id controller) {
+    id table = Getter(controller, @"tableView");
+    if ([table isKindOfClass:[UIScrollView class]]) return table;
+    UIView* view = [controller isKindOfClass:[UIViewController class]] ? ((UIViewController*)controller).viewIfLoaded : nil;
+    NSMutableArray<UIView*>* queue = view ? [NSMutableArray arrayWithObject:view] : [NSMutableArray array];
+    while (queue.count) {
+        UIView* current = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([current isKindOfClass:[UITableView class]] || [current isKindOfClass:[UICollectionView class]]) return (UIScrollView*)current;
+        [queue addObjectsFromArray:current.subviews];
+    }
+    return nil;
+}
+
+static void CycleHomeView(void) {
+    NSInteger next = (HomeView() + 1) % 3;
+    [[NSUserDefaults standardUserDefaults] setInteger:next forKey:kHomeViewKey];
+    NSString* text = next == 0 ? [NSString stringWithFormat:@"홈 팔로잉: %@ + %@ 섞어서 보기", AName(), BName()]
+                               : [NSString stringWithFormat:@"홈 팔로잉: %@만 보기", next == 1 ? AName() : BName()];
+    NSDateFormatter* formatter = [NSDateFormatter new];
+    formatter.dateFormat = @"HH:mm:ss";
+    gHomeViewNote = [NSString stringWithFormat:@"%@ -> %ld", [formatter stringFromDate:[NSDate date]], (long)next];
+    UnifiedLog([NSString stringWithFormat:@"home view -> %ld (long press on the home tab)", (long)next]);
+    UIImpactFeedbackGenerator* thump = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [thump impactOccurred];
+    ShowNotice(text);
+    // The Following tab's list made again from X's last sections; one not in a
+    // window gets it when it is next shown.
+    for (id controller in [gFollowingControllers allObjects]) {
+        if (IsForYouController(controller)) continue;
+        UIView* view = [controller isKindOfClass:[UIViewController class]] ? ((UIViewController*)controller).viewIfLoaded : nil;
+        if (!view.window) {
+            objc_setAssociatedObject(controller, kReapplyOwedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            continue;
+        }
+        ReapplyController(controller);
+        __weak id weakController = controller;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIScrollView* list = HomeListOf(weakController);
+            if (list) [list setContentOffset:CGPointMake(list.contentOffset.x, -list.adjustedContentInset.top) animated:NO];
+        });
+    }
+}
+
+static void HomeLongPressCheck(NSUInteger serial) {
+    UITouch* touch = gHomeTouch;
+    if (!touch || serial != gHomeTouchSerial) return;
+    if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) return;
+    CGPoint now = [touch locationInView:nil];
+    if (hypot(now.x - gHomeTouchStart.x, now.y - gHomeTouchStart.y) > 12) return;
+    gHomeTouch = nil;
+    if (!UnifiedActive() || !UnifiedHomeOnScreen()) return;
+    CycleHomeView();
+}
+
+static void HomeTabTouches(UIEvent* event) {
+    for (UITouch* touch in event.allTouches) {
+        if (touch.phase == UITouchPhaseBegan) {
+            gHomeTouch = nil;
+            if (event.allTouches.count != 1) continue;
+            UIView* bar = touch.view;
+            while (bar && ![NSStringFromClass([bar class]) hasSuffix:@"XNavigation.TabBarView"] &&
+                   ![NSStringFromClass([bar class]) hasSuffix:@"10TabBarView"]) {
+                bar = bar.superview;
+            }
+            if (!bar) continue;
+            UIView* pill = HomePillIn(bar, 0);
+            if (!pill || pill.hidden || !CGRectContainsPoint(pill.bounds, [touch locationInView:pill])) continue;
+            if (!UnifiedHomeOnScreen()) continue;
+            gHomeTouch = touch;
+            gHomeTouchStart = [touch locationInView:nil];
+            NSUInteger serial = ++gHomeTouchSerial;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kHomeLongPress * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                @try {
+                    HomeLongPressCheck(serial);
+                } @catch (__unused NSException* exception) {
+                }
+            });
+        } else if (touch == gHomeTouch && (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled)) {
+            gHomeTouch = nil;
+        } else if (touch == gHomeTouch && touch.phase == UITouchPhaseMoved) {
+            CGPoint now = [touch locationInView:nil];
+            if (hypot(now.x - gHomeTouchStart.x, now.y - gHomeTouchStart.y) > 12) gHomeTouch = nil;
+        }
+    }
+}
+
+%hook UIWindow
+
+- (void)sendEvent:(UIEvent*)event {
+    if (gEverActive && event.type == UIEventTypeTouches && gFollowingControllers.count) {
+        @try {
+            HomeTabTouches(event);
+        } @catch (__unused NSException* exception) {
+        }
+    }
+    %orig;
+}
+
+%end
 
 %ctor {
     gStartedAt = CFAbsoluteTimeGetCurrent();

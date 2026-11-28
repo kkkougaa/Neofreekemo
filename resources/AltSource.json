@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.160",
+      "subtitle": "NeoFreeBird version 7.3.161",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.161",
+          "buildVersion": "161",
+          "date": "2026-11-28T03:32:40Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.161/NeoFreeBird-Twitter-sideloaded_7.3.161_12.44.ipa",
+          "size": 273907467,
+          "minOSVersion": "15.0",
+          "localizedDescription": "통합 알림의 A↔B 전환을 알림 탭 길게 누르기로 바꿨어요. 탭은 이제 맨 위로 올라가기만 해요."
+        },
         {
           "version": "7.3.160",
           "buildVersion": "160",

@@ -89,6 +89,7 @@ static NSUInteger gTabRetapToggles;
 static NSString* gTabRetapNote = @"never called";
 static NSString* gTabRetapSeen = @"-";
 static NSUInteger gTabXNavCalls;
+static NSUInteger gTabLongPressSkips;
 static NSString* gTabRetapClass = @"-";
 static BOOL gTabRetapInside;
 static __weak UIView* gFilterView;
@@ -1972,8 +1973,9 @@ NSString* NFBUnifiedNotificationsDebugText(void) {
                       (unsigned long)gBSeenBatches, gBSeenSignature ?: @"-",
                       seen ? [NSString stringWithFormat:@"on for %@ (dock number then %@)", seen[@"id"], seen[@"base"]] : @"off",
                       (unsigned long)gSilentViewedStopped];
-    [out appendFormat:@"tab again: %@ (toggles %lu) on %@, list: %@ | xnav scroll-to-top calls %lu%c", gTabRetapNote,
-                      (unsigned long)gTabRetapToggles, gTabRetapClass, gTabRetapSeen, (unsigned long)gTabXNavCalls, 10];
+    [out appendFormat:@"tab again: %@ (toggles %lu) on %@, list: %@ | xnav scroll-to-top calls %lu (skipped after long press %lu)%c", gTabRetapNote,
+                      (unsigned long)gTabRetapToggles, gTabRetapClass, gTabRetapSeen, (unsigned long)gTabXNavCalls,
+                      (unsigned long)gTabLongPressSkips, 10];
     UIView* glassContainer = UNAvatarContainer();
     [out appendFormat:@"avatar pair: A rect %@ in button %@, B item %@%c", NSStringFromCGRect(UNAvatarRectIn(glassContainer)),
                       NSStringFromCGRect(glassContainer.bounds), NSStringFromCGRect(gBBarItem.customView.bounds), 10];
@@ -2185,6 +2187,8 @@ shouldStartQuickPromoteOnOpen:(BOOL)quickPromote
 // scrolls it to the top as X does (A's list by X's own code, B's embedded
 // list here, since X's code only knows A's). Anywhere else, and with unified
 // off, X's own.
+// 7.3.161: the user asked for the switch on a long press of the tab instead;
+// a tap now only scrolls to the top (see UNTabRetapToggles).
 
 // The list being looked at inside `view`. 7.3.159: the first big table or
 // collection view found was the screen's sideways pager (모두 / 우선 알림 / 멘션,
@@ -2212,8 +2216,14 @@ static UIScrollView* UNVerticalList(UIView* view, UIView* skip, int depth) {
 }
 
 static CFAbsoluteTime gTabRetapAt;
+static CFAbsoluteTime gTabLongPressAt;  // 7.3.161: when a long press last switched
 
-static BOOL UNTabRetapToggles(UINavigationController* navigation) {
+// 7.3.161: the switch is a long press on the notifications tab, no longer a
+// tap. `longPress` NO (a tap on the tab already showing): B's list scrolled
+// down goes to the top here, everything else is X's own (A's list to the
+// top); nothing switches. `longPress` YES: the list goes over to the other
+// account, wherever it is scrolled.
+static BOOL UNTabRetapToggles(UINavigationController* navigation, BOOL longPress) {
     if (![NSThread isMainThread] || ![navigation isKindOfClass:[UINavigationController class]]) return NO;
     // One tap is answered once, whichever way it was noticed.
     if (CFAbsoluteTimeGetCurrent() - gTabRetapAt < 0.6) return NO;
@@ -2227,6 +2237,14 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
     if (!UNActive() || (!gBBarItem && !gFilterView)) {
         gTabRetapNote = @"notifications tab, no switch up: X's own";
         return NO;
+    }
+    if (longPress) {
+        gTabRetapAt = CFAbsoluteTimeGetCurrent();
+        gTabLongPressAt = gTabRetapAt;
+        gTabRetapToggles++;
+        gTabRetapNote = @"long press: toggled";
+        UNSwitchTo(!UNFilterIsB(), @"notifications tab long press");
+        return YES;
     }
     BOOL onB = UNFilterIsB() && gBLiveHost && UNLiveValid();
     UIScrollView* list = onB ? UNVerticalList(gBLiveHost, nil, 0) : UNVerticalList(a.view, gBLiveHost, 0);
@@ -2258,11 +2276,9 @@ static BOOL UNTabRetapToggles(UINavigationController* navigation) {
             return YES;
         }
     }
-    gTabRetapAt = CFAbsoluteTimeGetCurrent();
-    gTabRetapToggles++;
-    gTabRetapNote = list ? @"at the top: toggled" : @"list not found: toggled";
-    UNSwitchTo(!UNFilterIsB(), @"notifications tab again");
-    return YES;
+    // 7.3.161: a tap no longer switches (a long press does).
+    gTabRetapNote = list ? @"tap at the top: X's own (long press switches)" : @"tap, list not found: X's own";
+    return NO;
 }
 
 // One tap is answered once: a subclass's method calling the base class's
@@ -2271,7 +2287,7 @@ static BOOL UNTabRetapAnswer(id navigation) {
     gTabRetapClass = NSStringFromClass([navigation class]);
     BOOL toggled = NO;
     @try {
-        toggled = UNTabRetapToggles((UINavigationController*)navigation);
+        toggled = UNTabRetapToggles((UINavigationController*)navigation, NO);
     } @catch (__unused NSException* exception) {
         toggled = NO;
     }
@@ -2356,6 +2372,12 @@ static BOOL UNTabRetapAnswer(id navigation) {
 - (BOOL)xnav_scrollToTopAnimated:(BOOL)animated completion:(id)completion {
     // 7.3.158: only counted (the tap itself is read from the touch, below).
     gTabXNavCalls++;
+    // 7.3.161: the finger of a long press that switched lifts as a tap on the
+    // tab; X's scroll-to-top for it is not wanted.
+    if (gTabLongPressAt > 0 && CFAbsoluteTimeGetCurrent() - gTabLongPressAt < 1.5) {
+        gTabLongPressSkips++;
+        return NO;
+    }
     return %orig;
 }
 
@@ -2376,6 +2398,34 @@ static BOOL UNTabRetapAnswer(id navigation) {
 static __weak UITouch* gTabTouch;
 static CGPoint gTabTouchStart;
 static NSTimeInterval gTabTouchAt;
+static BOOL gTabTouchLongFired;
+static NSUInteger gTabTouchSerial;
+static const NSTimeInterval kTabLongPress = 0.45;
+
+// 7.3.161: a finger still down on the pill, not moved, after kTabLongPress
+// switches the list to the other account (with a tap of haptics). The lift
+// that follows does nothing here.
+static void UNTabLongPressCheck(NSUInteger serial) {
+    UITouch* touch = gTabTouch;
+    if (!touch || serial != gTabTouchSerial || gTabTouchLongFired) return;
+    if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) return;
+    CGPoint now = [touch locationInView:nil];
+    if (hypot(now.x - gTabTouchStart.x, now.y - gTabTouchStart.y) > 12) return;
+    UIViewController* a = gANotifController;
+    UINavigationController* navigation = a.navigationController;
+    if (!gAVisible || !navigation) return;
+    gTabRetapClass = @"long press on the selection pill";
+    BOOL toggled = NO;
+    @try {
+        toggled = UNTabRetapToggles(navigation, YES);
+    } @catch (__unused NSException* exception) {
+        toggled = NO;
+    }
+    if (!toggled) return;
+    gTabTouchLongFired = YES;
+    UIImpactFeedbackGenerator* thump = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [thump impactOccurred];
+}
 
 static UIView* UNPillIn(UIView* view, int depth) {
     if (!view || depth > 4) return nil;
@@ -2403,16 +2453,31 @@ static void UNTabTouches(UIEvent* event) {
             gTabTouch = touch;
             gTabTouchStart = [touch locationInView:nil];
             gTabTouchAt = touch.timestamp;
+            gTabTouchLongFired = NO;
+            NSUInteger serial = ++gTabTouchSerial;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kTabLongPress * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                @try {
+                    UNTabLongPressCheck(serial);
+                } @catch (__unused NSException* exception) {
+                }
+            });
+        } else if (touch == gTabTouch && touch.phase == UITouchPhaseMoved) {
+            CGPoint now = [touch locationInView:nil];
+            if (!gTabTouchLongFired && hypot(now.x - gTabTouchStart.x, now.y - gTabTouchStart.y) > 12) gTabTouch = nil;
         } else if (touch == gTabTouch && touch.phase == UITouchPhaseEnded) {
             gTabTouch = nil;
+            if (gTabTouchLongFired) {
+                gTabTouchLongFired = NO;
+                continue;  // the long press already switched
+            }
             CGPoint end = [touch locationInView:nil];
             if (hypot(end.x - gTabTouchStart.x, end.y - gTabTouchStart.y) > 12 || touch.timestamp - gTabTouchAt > 0.5) continue;
             UIViewController* a = gANotifController;
             UINavigationController* navigation = a.navigationController;
             if (!gAVisible || !navigation) continue;
-            gTabRetapClass = @"touch on the selection pill";
+            gTabRetapClass = @"tap on the selection pill";
             @try {
-                UNTabRetapToggles(navigation);
+                UNTabRetapToggles(navigation, NO);
             } @catch (__unused NSException* exception) {
             }
         } else if (touch == gTabTouch && touch.phase == UITouchPhaseCancelled) {

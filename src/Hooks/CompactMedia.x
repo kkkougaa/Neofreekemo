@@ -57,6 +57,22 @@ static BOOL NFBCompactMedia(void) {
     return [BHTSettings boolForKey:kCompactKey] && ![BHTSettings boolForKey:kSensitiveKey];
 }
 
+static BOOL gTextHooked = NO;
+static NSInteger gFullOutsideList = 0;
+static NSMutableSet<NSString*>* gCellLayoutClasses;  // which cells lay rows out (for the dump)
+
+// 7.3.166: small media only for tweets in a list (timelines; the user: "타임라인에서만
+// 작게"). The tweet a conversation screen is about has a layout of its own
+// (not T1StandardStatusViewLayoutStateGenerator / T1StatusCell /
+// T1StandardStatusView, which set tInTweet below), so it keeps X's sizes.
+// Without those hooks (gTextHooked NO) it cannot be told: small everywhere, as before.
+static BOOL NFBCompactHere(void) {
+    if (!NFBCompactMedia()) return NO;
+    if (!gTextHooked || tInTweet) return YES;
+    gFullOutsideList++;
+    return NO;
+}
+
 // 7.3.99: 92 points was large next to a line or two of text; 56 is about three
 // lines. Chosen with the slider on the media settings page.
 static CGFloat ThumbSide(void) {
@@ -122,7 +138,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 // turned off so every photo takes the size path that is shrunk.
 - (BOOL)_t1_useAdaptiveMediaLayoutForAttachmentType:(NSUInteger)attachmentType {
     BOOL adaptive = %orig;
-    if (adaptive && NFBCompactMedia()) {
+    if (adaptive && NFBCompactHere()) {
         gAdaptiveOff++;
         return NO;
     }
@@ -140,7 +156,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
         gLayoutMetricsClass = [layoutMetrics class];
     }
     gLastMediaWidth = width;
-    if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
+    if (!NFBCompactHere() || size.width <= 0 || size.height <= 0) {
         return size;
     }
     if (NFBMediaCount(viewModel) > 1) {
@@ -156,7 +172,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 // their size from this, after the size method above has run.
 - (CGSize)_t1_verticalPhotoSizeForAspectRatio:(CGFloat)ratio width:(CGFloat)width {
     CGSize size = %orig;
-    if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
+    if (!NFBCompactHere() || size.width <= 0 || size.height <= 0) {
         return size;
     }
     gVertical++;
@@ -165,7 +181,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 }
 
 - (id)_t1_cardViewLayoutStateForViewModel:(id)viewModel layoutMetrics:(id)layoutMetrics width:(CGFloat)width {
-    if (NFBCompactMedia() && width > kCardWidth && NFBIsPreviewCard(viewModel)) {
+    if (NFBCompactHere() && width > kCardWidth && NFBIsPreviewCard(viewModel)) {
         gCardCalls++;
         return %orig(viewModel, layoutMetrics, kCardWidth);
     }
@@ -177,7 +193,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
                                 shouldHideFooter:(BOOL)shouldHideFooter
                                    layoutMetrics:(id)layoutMetrics
                                            width:(CGFloat)width {
-    if (NFBCompactMedia() && width > kCardWidth) {
+    if (NFBCompactHere() && width > kCardWidth) {
         gCardCalls++;
         return %orig(viewModel, unifiedCard, shouldHideFooter, layoutMetrics, kCardWidth);
     }
@@ -219,7 +235,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 
 - (CGSize)_t1_verticalVideoViewSizeForViewModel:(id)viewModel width:(CGFloat)width anatomyFeatures:(id)anatomyFeatures {
     CGSize size = %orig;
-    if (!NFBCompactMedia() || size.width <= 0 || size.height <= 0) {
+    if (!NFBCompactHere() || size.width <= 0 || size.height <= 0) {
         return size;
     }
     gVerticalVideos++;
@@ -242,7 +258,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 %hook T1StandardStatusAttachmentViewAdapter
 
 + (BOOL)isVerticalVideoLayoutForViewModel:(id)viewModel displayType:(NSUInteger)displayType {
-    if (NFBCompactMedia()) {
+    if (NFBCompactHere()) {
         gVerticalVideos++;
         return NO;
     }
@@ -250,7 +266,7 @@ static BOOL NFBIsPreviewCard(id viewModel) {
 }
 
 + (BOOL)_t1_isVerticalVideoFillWidthEligibleForViewModel:(id)viewModel displayType:(NSUInteger)displayType {
-    return NFBCompactMedia() ? NO : %orig;
+    return NFBCompactHere() ? NO : %orig;
 }
 
 %end
@@ -382,7 +398,6 @@ static NSInteger gCornerPlaced = 0, gCornerSkipped = 0;
 static NSString* gCornerLog = @"-";
 // Set once the hooks that lay the text out narrower are in (see the constructor).
 // Without them the photo stays under the text, at the right end.
-static BOOL gTextHooked = NO;
 
 // The side of the photo that goes beside the text for this tweet, or 0.
 static CGFloat NFBCornerThumbFor(id viewModel) {
@@ -789,6 +804,10 @@ static void LeaveTweet(NFBTextScope was) {
                      account:(id)account
                layoutMetrics:(id)layoutMetrics
           withPreviousLayout:(id)previousLayout {
+    @synchronized([NSObject class]) {
+        if (!gCellLayoutClasses) gCellLayoutClasses = [NSMutableSet set];
+        if (gCellLayoutClasses.count < 8) [gCellLayoutClasses addObject:NSStringFromClass((Class)self) ?: @"?"];
+    }
     CGFloat thumb = NFBCornerThumbFor(viewModel);
     BOOL missBefore = tTextMiss;
     tTextMiss = NO;
@@ -914,7 +933,7 @@ static void LeaveTweet(NFBTextScope was) {
                   mediaInfos:(id)mediaInfos {
     CGFloat height = %orig;
     gCarouselCalls++;
-    return NFBCompactMedia() ? MIN(height, ThumbSide()) : height;
+    return NFBCompactHere() ? MIN(height, ThumbSide()) : height;
 }
 
 + (CGFloat)carouselHeightFor:(CGFloat)width
@@ -924,7 +943,7 @@ static void LeaveTweet(NFBTextScope was) {
             itemAspectRatios:(id)ratios {
     CGFloat height = %orig;
     gCarouselCalls++;
-    return NFBCompactMedia() ? MIN(height, ThumbSide()) : height;
+    return NFBCompactHere() ? MIN(height, ThumbSide()) : height;
 }
 
 %end
@@ -1082,6 +1101,12 @@ static void NFBWatchMode(void) {
                 }];
 }
 
+static NSString* CellClassesNote(void) {
+    @synchronized([NSObject class]) {
+        return gCellLayoutClasses.count ? [[gCellLayoutClasses allObjects] componentsJoinedByString:@","] : @"-";
+    }
+}
+
 // Read by Hooks/DebugDump.x.
 NSString* NFBCompactMediaDebugText(void) {
     return [NSString stringWithFormat:@"active=%d switch=%d nsfwMode=%d sizeCalls=%ld squares=%ld "
@@ -1089,7 +1114,7 @@ NSString* NFBCompactMediaDebugText(void) {
                                       @"verticalVideo=%ld(hook=%d) rightContainers=%ld rightInner=%ld (%@) side=%.0f corner=%d "
                                       @"cornerPlaced=%ld cornerSkipped=%ld (%@) lastViewModel=%@\n"
                                       @"text: hooks=%d%d%d tweetLayouts=%ld stateUpdates=%ld narrowed=%ld misses=%ld stale=%ld "
-                                      @"avatarShrinksKept=%ld",
+                                      @"avatarShrinksKept=%ld | full size outside lists=%ld, row cells: %@",
                                       NFBCompactMedia(), [BHTSettings boolForKey:kCompactKey],
                                       [BHTSettings boolForKey:kSensitiveKey], (long)gSizeCalls,
                                       (long)gSquares, (long)gStrips, (long)gCarouselCalls,
@@ -1098,7 +1123,8 @@ NSString* NFBCompactMediaDebugText(void) {
                                       ThumbSide(), [BHTSettings boolForKey:kCornerKey], (long)gCornerPlaced,
                                       (long)gCornerSkipped, gCornerLog, gLastViewModelClass ?: @"-", gTextHooked,
                                       gRowHooked, gStateHooked, (long)gTweetLayouts, (long)gStateUpdates,
-                                      (long)gTextNarrowed, (long)gTextMisses, (long)gTextStale, (long)gAvatarShrinksKept];
+                                      (long)gTextNarrowed, (long)gTextMisses, (long)gTextStale, (long)gAvatarShrinksKept,
+                                      (long)gFullOutsideList, CellClassesNote()];
 }
 
 // Classes the shake dump describes, to find where the text column's width is set.

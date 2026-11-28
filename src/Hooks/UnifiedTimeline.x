@@ -1527,17 +1527,39 @@ static NSString* gMoreNote = @"-";
 // For You kept handing out the same ones (the user: "비슷한 것만 계속"). Only
 // here, on the device: nothing about it is sent anywhere. Kept 6 hours, at
 // most kForYouSeenMax IDs (tweet and original both).
+// 7.3.167 (the user: still the same ones over and over): kept 24 hours and
+// saved (kForYouSeenSaveKey), so a restart does not forget them; a new round
+// is also seen from A's list itself (new tweets at its top), not only from
+// the refresh hook; and a tweet is mixed in once per list.
 static const NSUInteger kForYouSeenMax = 1500;
-static const NSTimeInterval kForYouSeenLife = 6 * 60 * 60;
+static const NSTimeInterval kForYouSeenLife = 24 * 60 * 60;
+static NSString* const kForYouSeenSaveKey = @"kemo_unified_foryou_seen";
+static NSString* gForYouRoundWhy = @"-";
 static NSMutableDictionary<NSNumber*, NSNumber*>* gForYouSeen;  // ID -> when its round ended
 static NSMutableSet<NSNumber*>* gForYouThisRound;               // IDs on the list in this round
 static CFAbsoluteTime gForYouRoundAt;                           // when this round began (0: none yet)
 static BOOL gForYouAwaitingB;                                   // B's refresh for this round not in yet
 static NSUInteger gForYouRounds;
 
-static void ForYouNewRound(void) {
-    if (!gForYouSeen) gForYouSeen = [NSMutableDictionary dictionary];
+// The saved list, read once (ID string -> CFAbsoluteTime).
+static void ForYouSeenLoad(void) {
+    if (gForYouSeen) return;
+    gForYouSeen = [NSMutableDictionary dictionary];
+    NSDictionary* saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kForYouSeenSaveKey];
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    for (NSString* key in saved) {
+        id when = saved[key];
+        if (![key isKindOfClass:[NSString class]] || ![when respondsToSelector:@selector(doubleValue)]) continue;
+        if (now - [when doubleValue] > kForYouSeenLife || key.longLongValue <= 0) continue;
+        gForYouSeen[@(key.longLongValue)] = @([when doubleValue]);
+    }
+}
+
+static void ForYouNewRound(NSString* why) {
+    ForYouSeenLoad();
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    // Two signs of one refresh (the hook and A's new top) make one round.
+    if (gForYouRoundAt > 0 && now - gForYouRoundAt < 5) return;
     for (NSNumber* statusID in gForYouThisRound) gForYouSeen[statusID] = @(now);
     [gForYouThisRound removeAllObjects];
     for (NSNumber* statusID in [gForYouSeen allKeys]) {
@@ -1545,10 +1567,13 @@ static void ForYouNewRound(void) {
     }
     if (gForYouSeen.count > kForYouSeenMax) {
         NSArray<NSNumber*>* oldestFirst = [gForYouSeen keysSortedByValueUsingSelector:@selector(compare:)];
-        for (NSUInteger i = 0; i < gForYouSeen.count - kForYouSeenMax && i < oldestFirst.count; i++) {
-            [gForYouSeen removeObjectForKey:oldestFirst[i]];
-        }
+        NSUInteger excess = gForYouSeen.count - kForYouSeenMax;
+        for (NSUInteger i = 0; i < excess && i < oldestFirst.count; i++) [gForYouSeen removeObjectForKey:oldestFirst[i]];
     }
+    NSMutableDictionary<NSString*, NSNumber*>* save = [NSMutableDictionary dictionaryWithCapacity:gForYouSeen.count];
+    for (NSNumber* statusID in gForYouSeen) save[statusID.stringValue] = gForYouSeen[statusID];
+    [[NSUserDefaults standardUserDefaults] setObject:save forKey:kForYouSeenSaveKey];
+    gForYouRoundWhy = why;
     gForYouRoundAt = now;
     gForYouAwaitingB = YES;
     gForYouRounds++;
@@ -1628,8 +1653,29 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     NSMutableSet<NSNumber*>* both = record[@"both"];
     NSMutableSet<NSNumber*>* bothActed = [NSMutableSet set];
     NSSet<NSNumber*>* aFollows = AFollowSet(nil);
-    NSUInteger dupes = 0, ads = 0, followedByA = 0, seenBefore = 0;
+    NSUInteger dupes = 0, ads = 0, followedByA = 0, seenBefore = 0, repeated = 0;
     if (!gForYouThisRound) gForYouThisRound = [NSMutableSet set];
+    ForYouSeenLoad();
+    // 7.3.167: A's list has new tweets at its top that the last merge did not
+    // have: A refreshed, whichever way X did it. A new round, and B's For You
+    // refreshes with it if the refresh hook did not already ask.
+    static NSSet<NSNumber*>* lastAIDs;
+    long long topA = 0;
+    for (id item in aItems) {
+        id model = unwrapDataViewItem(item);
+        if (!IsStatusItem(model) || BoolGetter(model, @"isPromoted")) continue;
+        topA = NumberGetter(model, @"statusID");
+        if (topA > 0) break;
+    }
+    if (lastAIDs.count && topA > 0 && ![lastAIDs containsObject:@(topA)]) {
+        ForYouNewRound(@"new tweets at the top of A's For You");
+        if (CFAbsoluteTimeGetCurrent() - gBForYouLastRefresh > 10 && ControllerVisible(controller)) {
+            gBForYouMorePages = 0;
+            RefreshBForYou(gLastASource);
+        }
+    }
+    lastAIDs = [aIDs copy];
+    NSMutableSet<NSNumber*>* bTaken = [NSMutableSet set];
     for (id object in bObjects) {
         if (!IsStatusItem(object)) continue;
         if (BoolGetter(object, @"isPromoted")) {
@@ -1645,6 +1691,11 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
             seenBefore++;
             continue;
         }
+        // 7.3.167: once per list (B's pages can hand the same tweet out again).
+        if ([bTaken containsObject:@(statusID)] || (acted > 0 && [bTaken containsObject:@(acted)])) {
+            repeated++;
+            continue;
+        }
         if ([aIDs containsObject:@(statusID)] || (acted > 0 && [aActed containsObject:@(acted)])) {
             dupes++;
             [both addObject:@(statusID)];
@@ -1652,6 +1703,8 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
             continue;
         }
         [bItems addObject:object];
+        [bTaken addObject:@(statusID)];
+        if (acted > 0) [bTaken addObject:@(acted)];
     }
     NSArray<NSArray*>* blocks = Blocks(aItems);
     NSMutableArray* merged = [NSMutableArray arrayWithCapacity:aItems.count + bItems.count];
@@ -1685,11 +1738,11 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
     }
     objc_setAssociatedObject(controller, kRecordKey, record, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     gLastForYouMerge = [NSString stringWithFormat:@"A statuses=%lu blocks=%lu | B inserted=%lu of %lu (followed by A %lu) "
-                                                 @"same as A=%lu ads=%lu | shown before=%lu (round %lu, remembered %lu%@)",
+                                                 @"same as A=%lu ads=%lu | shown before=%lu repeated in B=%lu (round %lu: %@, remembered %lu%@)",
                                                  (unsigned long)best, (unsigned long)blocks.count, (unsigned long)next,
                                                  (unsigned long)bItems.count, (unsigned long)followedByA,
-                                                 (unsigned long)dupes, (unsigned long)ads, (unsigned long)seenBefore,
-                                                 (unsigned long)gForYouRounds, (unsigned long)gForYouSeen.count,
+                                                 (unsigned long)dupes, (unsigned long)ads, (unsigned long)seenBefore, (unsigned long)repeated,
+                                                 (unsigned long)gForYouRounds, gForYouRoundWhy, (unsigned long)gForYouSeen.count,
                                                  gForYouAwaitingB ? @", B's refresh pending" : @""];
     if (next >= bItems.count && blocks.count > bItems.count) {
         // B ran out before A did: B's next page (7.3.151: within LoadMoreBForYou's limits).
@@ -4288,7 +4341,7 @@ static void FollowARefresh(id timeline, long long source) {
             return;
         }
         gBForYouMorePages = 0;
-        ForYouNewRound();
+        ForYouNewRound(@"A's For You refreshed");
         RefreshBForYou(source);
     }
 }

@@ -524,6 +524,58 @@ static id BTimeline(void) {
     return timeline;
 }
 
+// 7.3.168 (device dump of 7.3.167): X never tells B's timelines that their
+// streams changed (no "B stream updated" / "B For You updated" after B's
+// refreshes came in), so the lists kept what B's stream held at launch, the
+// copy read back from disk, and showed the same tweets again and again. After
+// every request made for B, B's stream is looked at a few times; when it
+// changed, the tab it belongs to is merged again.
+static NSString* gBWatchNote = @"-";
+static NSUInteger gBStreamGen;
+static BOOL gForYouAwaitingB;  // B's For You refresh for this round not in yet (7.3.163)
+static NSString* StreamSignature(id timeline) {
+    id objects = Getter(Getter(timeline, @"stream"), @"streamObjects");
+    if (![objects isKindOfClass:[NSArray class]]) return @"none";
+    long long first = 0, last = 0;
+    for (id object in objects) {
+        long long statusID = NumberGetter(object, @"statusID");
+        if (statusID <= 0) continue;
+        if (!first) first = statusID;
+        last = statusID;
+    }
+    return [NSString stringWithFormat:@"%lu:%lld:%lld", (unsigned long)[objects count], first, last];
+}
+
+static void WatchBStream(BOOL forYou) {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            WatchBStream(forYou);
+        });
+        return;
+    }
+    static NSUInteger serials[2];
+    NSUInteger index = forYou ? 1 : 0;
+    NSUInteger serial = ++serials[index];
+    NSString* before = StreamSignature(forYou ? gBForYouTimeline : gBTimeline);
+    __block NSString* seen = before;
+    for (NSNumber* delay in @[ @1.5, @3, @6, @10, @16 ]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (serial != serials[index]) return;  // a newer request watches now
+            NSString* now = StreamSignature(forYou ? gBForYouTimeline : gBTimeline);
+            if ([now isEqualToString:seen]) return;
+            seen = now;
+            gBStreamGen++;
+            BadgeMemoClear();
+            gBWatchNote = [NSString stringWithFormat:@"%@ changed after %.1fs (%@ -> %@)", forYou ? @"For You" : @"Following",
+                                                     delay.doubleValue, before, now];
+            UnifiedLog([NSString stringWithFormat:@"B %@ changed (seen by watching, %.1fs)", forYou ? @"For You" : @"stream",
+                                                  delay.doubleValue]);
+            if (forYou) gForYouAwaitingB = NO;
+            if (UnifiedActive()) ReapplyMerge(!forYou, forYou);
+        });
+    }
+}
+
 static void RefreshB(long long source, NSString* why) {
     id timeline = BTimeline();
     SEL refresh = NSSelectorFromString(@"refreshWithSource:completion:");
@@ -538,6 +590,7 @@ static void RefreshB(long long source, NSString* why) {
     };
     @try {
         ((void (*)(id, SEL, long long, id))objc_msgSend)(timeline, refresh, source, completion);
+        WatchBStream(NO);
     } @catch (NSException* exception) {
         UnifiedLog([NSString stringWithFormat:@"refresh B threw %@", exception.name]);
     }
@@ -587,6 +640,7 @@ static void RefreshBForYou(long long source) {
     };
     @try {
         ((void (*)(id, SEL, long long, id))objc_msgSend)(timeline, refresh, source, completion);
+        WatchBStream(YES);
     } @catch (NSException* exception) {
         UnifiedLog([NSString stringWithFormat:@"refresh B For You threw %@", exception.name]);
     }
@@ -1538,7 +1592,6 @@ static NSString* gForYouRoundWhy = @"-";
 static NSMutableDictionary<NSNumber*, NSNumber*>* gForYouSeen;  // ID -> when its round ended
 static NSMutableSet<NSNumber*>* gForYouThisRound;               // IDs on the list in this round
 static CFAbsoluteTime gForYouRoundAt;                           // when this round began (0: none yet)
-static BOOL gForYouAwaitingB;                                   // B's refresh for this round not in yet
 static NSUInteger gForYouRounds;
 
 // The saved list, read once (ID string -> CFAbsoluteTime).
@@ -1608,6 +1661,7 @@ static void LoadMoreBForYou(id controller, NSUInteger bCount) {
     gReqForYouMore++;
     @try {
         BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, more, gLastASource);
+        WatchBStream(YES);
         UnifiedLog([NSString stringWithFormat:@"B For You more started=%d (page %lu/%lu)", started, (unsigned long)gBForYouMorePages,
                                               (unsigned long)kMoreBudget]);
     } @catch (__unused NSException* exception) {
@@ -2493,7 +2547,6 @@ extern NSString* NFBUnifiedRepostDebugText(void);
 // 7.3.151: on the main thread the streams are walked once per change of B's
 // streams (gBStreamGen) or 5 seconds, not once per question: the pictures next
 // to the buttons ask for every row on screen.
-static NSUInteger gBStreamGen;
 
 static id BStatusFor(long long actedID) {
     if (actedID <= 0) return nil;
@@ -3867,6 +3920,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
                       gLastForYouMerge];
     [out appendFormat:@"following lists:\n%@", NFBUnifiedFollowSyncDebugText()];
     [out appendFormat:@"reposts as B:\n%@\n", NFBUnifiedRepostDebugText()];
+    [out appendFormat:@"B stream watch: %@\n", gBWatchNote];
     [out appendFormat:@"home view: %ld (0 mixed, 2 B only) | last switch: %@\n", (long)HomeView(), gHomeViewNote];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
@@ -4422,6 +4476,7 @@ static void LoadMoreB(id controller, long long source, NSString* why) {
     gMoreNote = @"-";
     @try {
         BOOL started = ((BOOL (*)(id, SEL, long long))objc_msgSend)(bStream, selector, source);
+        WatchBStream(NO);
         gBBottomLoads++;
         UnifiedLog([NSString stringWithFormat:@"B more (%@, source %lld) started=%d (page %lu/%lu)", why, source, started,
                                               (unsigned long)gBMorePages, (unsigned long)kMoreBudget]);

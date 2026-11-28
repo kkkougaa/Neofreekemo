@@ -808,6 +808,20 @@ static void LeaveTweet(NFBTextScope was) {
         if (!gCellLayoutClasses) gCellLayoutClasses = [NSMutableSet set];
         if (gCellLayoutClasses.count < 8) [gCellLayoutClasses addObject:NSStringFromClass((Class)self) ?: @"?"];
     }
+    // 7.3.168 (device dump of 7.3.167: the conversation's own tweet is laid out
+    // here too, as T1ConversationFocalStatusViewTableViewCell, a subclass):
+    // only T1StatusCell itself is a list row; the others keep X's sizes.
+    static Class plainCell;
+    if (!plainCell) plainCell = objc_getClass("T1StatusCell");
+    if ((Class)self != plainCell) {
+        NFBTextScope was = {tInTweet, tTextRight};
+        tInTweet = NO;
+        tTextRight = 0;
+        id layout = %orig;
+        tInTweet = was.inTweet;
+        tTextRight = was.right;
+        return layout;
+    }
     CGFloat thumb = NFBCornerThumbFor(viewModel);
     BOOL missBefore = tTextMiss;
     tTextMiss = NO;

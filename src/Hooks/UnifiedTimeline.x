@@ -1702,19 +1702,24 @@ static NSArray* MergedForYou(id controller, NSArray* sections) {
 
 // MARK: - What the Following tab shows (7.3.162)
 //
-// The user's: a long press on the home tab, while home is showing, goes round
-// "A and B mixed" -> "A only" -> "B only" -> mixed (kHomeViewKey; Following
-// tab only, For You always mixes). A only: X's own list, nothing of B's.
-// B only: none of A's tweets, B's Following stream in B's own order, and every
+// The user's: a long press on the home tab, while home is showing, goes
+// between "A and B mixed" and "B only" (kHomeViewKey; Following tab only, For
+// You always mixes). 7.3.164: the user dropped "A only" (7.3.162 went round
+// three); a saved 1 counts as mixed. B only: none of A's tweets, B's Following stream in B's own order, and every
 // row of it is B's alone (kProvBOnly, never turned into "both" by another
 // merge: kRecordViewBKey), so every tap, reply and tweet screen from it goes as
 // B (the user: "B만 보기면 전부 B").
-static NSString* const kHomeViewKey = @"kemo_unified_home_view";  // 0 mixed, 1 A only, 2 B only
+static NSString* const kHomeViewKey = @"kemo_unified_home_view";  // 0 mixed, 2 B only (1 was A only)
 static NSString* gHomeViewNote = @"-";
 
 static NSInteger HomeView(void) {
     NSInteger value = [[NSUserDefaults standardUserDefaults] integerForKey:kHomeViewKey];
-    return (value == 1 || value == 2) ? value : 0;
+    return value == 2 ? 2 : 0;
+}
+
+// For the home avatar pair (UnifiedHomeSign.x): B's picture lit, A's dimmed.
+BOOL NFBUnifiedHomeViewIsB(void) {
+    return HomeView() == 2;
 }
 
 // Whether a row of A's section carries a tweet (a status or a module of them).
@@ -1893,9 +1898,6 @@ static NSArray* SectionsForController(id controller, NSArray* sections) {
                 result = sections;
             }
         }
-    } else if (HomeView() == 1) {
-        // A only: X's own list.
-        gLastMerge = @"A only: X's own list, nothing of B's";
     } else if (HomeView() == 2) {
         // B only: built even before B's stream is there (A's tweets never show).
         (void)BTimeline();
@@ -3812,7 +3814,7 @@ NSString* NFBUnifiedTimelineDebugText(void) {
                       gLastForYouMerge];
     [out appendFormat:@"following lists:\n%@", NFBUnifiedFollowSyncDebugText()];
     [out appendFormat:@"reposts as B:\n%@\n", NFBUnifiedRepostDebugText()];
-    [out appendFormat:@"home view: %ld (0 mixed, 1 A only, 2 B only) | last switch: %@\n", (long)HomeView(), gHomeViewNote];
+    [out appendFormat:@"home view: %ld (0 mixed, 2 B only) | last switch: %@\n", (long)HomeView(), gHomeViewNote];
     [out appendFormat:@"merges:\n  %@\n", gMergeHistory.count ? [gMergeHistory componentsJoinedByString:@"\n  "] : @"(none)"];
     [out appendFormat:@"last merge: %@\nB-only ids=%lu both=%lu A-only=%lu blocked=%lu likedAsB=%lu repostedAsB=%lu\n",
                       gLastMerge, (unsigned long)gBOnlyIDs.count, (unsigned long)gBothIDs.count,
@@ -5683,7 +5685,7 @@ static BOOL gDefaultsLookQueued;
 // 7.3.158/7.3.161): a finger that comes down on the tab bar's selection pill
 // (XNavigation.TabBarView > XNavigation.TabBarPill) while the unified home
 // is on screen, and stays put for kHomeLongPress, moves the Following tab on
-// to the next of mixed / A only / B only. A tap is X's own.
+// between mixed and B only. A tap is X's own.
 
 static __weak UITouch* gHomeTouch;
 static CGPoint gHomeTouchStart;
@@ -5714,11 +5716,13 @@ static UIScrollView* HomeListOf(id controller) {
     return nil;
 }
 
+extern void NFBUnifiedHomeSignViewChanged(void);
+
 static void CycleHomeView(void) {
-    NSInteger next = (HomeView() + 1) % 3;
+    NSInteger next = HomeView() == 2 ? 0 : 2;
     [[NSUserDefaults standardUserDefaults] setInteger:next forKey:kHomeViewKey];
-    NSString* text = next == 0 ? [NSString stringWithFormat:@"홈 팔로잉: %@ + %@ 섞어서 보기", AName(), BName()]
-                               : [NSString stringWithFormat:@"홈 팔로잉: %@만 보기", next == 1 ? AName() : BName()];
+    NSString* text = next == 0 ? [NSString stringWithFormat:@"홈 팔로잉: %@ + %@ 통합으로 보기", AName(), BName()]
+                               : [NSString stringWithFormat:@"홈 팔로잉: %@만 보기", BName()];
     NSDateFormatter* formatter = [NSDateFormatter new];
     formatter.dateFormat = @"HH:mm:ss";
     gHomeViewNote = [NSString stringWithFormat:@"%@ -> %ld", [formatter stringFromDate:[NSDate date]], (long)next];
@@ -5726,6 +5730,7 @@ static void CycleHomeView(void) {
     UIImpactFeedbackGenerator* thump = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [thump impactOccurred];
     ShowNotice(text);
+    NFBUnifiedHomeSignViewChanged();
     // The Following tab's list made again from X's last sections; one not in a
     // window gets it when it is next shown.
     for (id controller in [gFollowingControllers allObjects]) {

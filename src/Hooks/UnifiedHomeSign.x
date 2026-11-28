@@ -52,6 +52,15 @@ extern BOOL NFBUnifiedDockPair(id* outA, id* outB);
 extern UIColor* NFBUnifiedBColor(void);
 
 extern void NFBUnifiedNotificationsAvatarLaidOut(UIView* container);
+extern BOOL NFBUnifiedHomeViewIsB(void);
+
+// 7.3.164: the home Following tab's "B only" view (UnifiedTimeline.x). Mixed:
+// one capsule round both pictures, both in full colour. B only: the glass is
+// a circle behind B's picture alone and X's A picture is dimmed, as on the
+// notifications switch (0.6).
+static const CGFloat kHSUnselectedAlpha = 0.6;
+static BOOL gPairShowsB = NO;     // what the capsule was last drawn for
+static BOOL gPairAnimateNext = NO;
 
 NSString* NFBUnifiedHomeSignDebugText(void);
 
@@ -272,6 +281,7 @@ static BOOL HSContainerIsHome(UIView* container, BOOL* found) {
 @end
 
 static void HSRestoreSharedBackground(UIBarButtonItem* item);
+static UIView* HSAvatarViewIn(UIView* view, NSInteger depth);
 
 // B's picture fades out, then its bar item goes.
 static void HSPairRemove(NSString* why) {
@@ -282,6 +292,9 @@ static void HSPairRemove(NSString* why) {
     UIVisualEffectView* capsule = gPairCapsule;
     // X's avatar is its own size again.
     UIView* scaled = gPairContainer;
+    UIView* aPicture = HSAvatarViewIn(scaled, 0);
+    if (aPicture && aPicture.alpha != 1.0) aPicture.alpha = 1.0;  // 7.3.164: A is never left dimmed
+    gPairShowsB = NO;
     if (scaled && !CATransform3DIsIdentity(scaled.layer.sublayerTransform)) scaled.layer.sublayerTransform = CATransform3DIdentity;
     gPairNaturalSize = 0;
     gPairItem = nil;
@@ -503,7 +516,8 @@ static void HSPlaceCapsule(void) {
     }
     CGRect a = [container convertRect:aRect toView:ancestor];
     CGRect b = [side convertRect:picture.frame toView:ancestor];
-    CGRect frame = CGRectInset(CGRectUnion(a, b), -kPairPad, -kPairPad);
+    BOOL showsB = NFBUnifiedHomeViewIsB();
+    CGRect frame = CGRectInset(showsB ? b : CGRectUnion(a, b), -kPairPad, -kPairPad);
     if (CGRectGetHeight(frame) > 80 || CGRectGetWidth(frame) > 220 || CGRectGetWidth(frame) < CGRectGetHeight(frame)) {
         // Not side by side in one bar (mid transition, or a layout this was not written for).
         gPairCapsuleNote = [NSString stringWithFormat:@"odd frame %@, left as it was", NSStringFromCGRect(frame)];
@@ -527,13 +541,37 @@ static void HSPlaceCapsule(void) {
         [ancestor insertSubview:capsule atIndex:0];
         HSLog([NSString stringWithFormat:@"capsule put in %@", NSStringFromClass([ancestor class])]);
     }
-    if (!CGRectEqualToRect(capsule.frame, frame)) capsule.frame = frame;
+    BOOL animate = gPairAnimateNext && showsB != gPairShowsB;
+    gPairAnimateNext = NO;
+    gPairShowsB = showsB;
+    UIView* aPicture = HSAvatarViewIn(container, 0);
+    CGFloat aAlpha = showsB ? kHSUnselectedAlpha : 1.0;
     CGFloat radius = CGRectGetHeight(frame) / 2;
-    if (capsule.layer.cornerRadius != radius) capsule.layer.cornerRadius = radius;
-    gPairCapsuleNote = [NSString stringWithFormat:@"%@ in %@", NSStringFromCGRect(frame), NSStringFromClass([ancestor class])];
+    void (^apply)(void) = ^{
+        if (!CGRectEqualToRect(capsule.frame, frame)) capsule.frame = frame;
+        if (capsule.layer.cornerRadius != radius) capsule.layer.cornerRadius = radius;
+        if (aPicture && aPicture.alpha != aAlpha) aPicture.alpha = aAlpha;
+        if (picture.alpha != 1.0) picture.alpha = 1.0;
+    };
+    if (animate) {
+        [UIView animateWithDuration:0.25 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:apply completion:nil];
+    } else {
+        apply();
+    }
+    gPairCapsuleNote = [NSString stringWithFormat:@"%@ in %@ (%@)", NSStringFromCGRect(frame), NSStringFromClass([ancestor class]),
+                                                  showsB ? @"B only: B lit, A dimmed" : @"mixed: both"];
 }
 
 // After the bar has put the items where they go.
+static void HSPlaceCapsuleSoon(void);
+
+// 7.3.164: the home view changed (UnifiedTimeline.x's long press).
+void NFBUnifiedHomeSignViewChanged(void) {
+    if (![NSThread isMainThread]) return;
+    gPairAnimateNext = YES;
+    HSPlaceCapsuleSoon();
+}
+
 static void HSPlaceCapsuleSoon(void) {
     if (gPairPlaceQueued || !gPairItem) return;
     gPairPlaceQueued = YES;

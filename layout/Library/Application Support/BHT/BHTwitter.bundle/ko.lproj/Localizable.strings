@@ -489,6 +489,8 @@
 "SETTING_RESTART_ALERT_MESSAGE" = "이 설정을 적용하려면 앱을 재시작해야 합니다.";
 "KEMO_VERTICAL_TAB_BAR_TITLE" = "세로 탭바 (오른쪽)";
 "KEMO_VERTICAL_TAB_BAR_DETAIL" = "하단 탭바를 화면 오른쪽에 세로로 놓고, + 버튼은 그 아래로 내립니다. 리퀴드 글래스, iOS 27.1 이상 아이폰 전용. 재시작 후 적용됩니다.";
+"KEMO_GLASS_CLEAR_TITLE" = "투명 유리";
+"KEMO_GLASS_CLEAR_DETAIL" = "앱 안의 리퀴드 글래스를 전부 투명(Clear) 유리로 바꿉니다. 끄면 일반 유리로 돌아옵니다. iOS 설정의 투명/색조 스위치와 별개로 앱 안에서만 적용됩니다.";
 "KEMO_TAB_BAR_PAGE_TITLE" = "탭바";
 "KEMO_TAB_BAR_PAGE_SUBTITLE" = "세로 탭바, 입력창, 계정 도크";
 

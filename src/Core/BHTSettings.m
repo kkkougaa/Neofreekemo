@@ -596,6 +596,12 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                 @"subtitleKey": @"KEMO_TAB_BAR_PAGE_SUBTITLE",
                 @"settings": @[
                     @{
+                        @"key": @"kemo_glass_clear",
+                        @"parentKey": @"liquid_glass",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_vertical_tab_bar",
                         @"parentKey": @"liquid_glass",
                         @"default": @NO,

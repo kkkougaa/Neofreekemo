@@ -36,6 +36,7 @@ extern void NFBUnifiedProbeKick(void);
 extern NSString* NFBWebAccountsDebugText(void);
 extern NSString* NFBLastCrashText(void);
 extern NSString* NFBCompactMediaDebugText(void);
+extern NSString* NFBGlassStyleDebugText(void);
 extern NSString* NFBVerticalTabBarDebugText(void);
 extern NSString* NFBReadabilityDebugText(void);
 extern NSArray<NSString*>* NFBRowLayoutClasses(void);
@@ -567,6 +568,7 @@ static void DumpAuthorFonts(UIView* view, int depth, NSMutableString* out, NSUIn
 
 static void DumpRowProbe(UIWindow* window, NSMutableString* out) {
     [out appendFormat:@"== COMPACT MEDIA ==%c%@ mediaWidth=%.1f%c", 10, NFBCompactMediaDebugText(), NFBLastMediaWidth(), 10];
+    [out appendFormat:@"== GLASS ==%c%@%c", 10, NFBGlassStyleDebugText(), 10];
     [out appendFormat:@"== READABILITY ==%c%@%c", 10, NFBReadabilityDebugText(), 10];
     [out appendFormat:@"== VERTICAL TAB BAR ==%c%@%c", 10, NFBVerticalTabBarDebugText(), 10];
     [out appendFormat:@"== CLICKER ==%c%@", 10, NFBClickerDebugText()];

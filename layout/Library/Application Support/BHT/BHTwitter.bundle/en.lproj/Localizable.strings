@@ -487,6 +487,8 @@
 "SETTING_RESTART_ALERT_MESSAGE" = "This setting requires a restart to take effect.";
 "KEMO_VERTICAL_TAB_BAR_TITLE" = "Vertical Tab Bar (Right)";
 "KEMO_VERTICAL_TAB_BAR_DETAIL" = "Puts the tab bar in a column on the right of the screen, with the + button at its bottom. Liquid Glass, iPhone on iOS 27.1 or later. Takes effect after a restart.";
+"KEMO_GLASS_CLEAR_TITLE" = "Clear glass";
+"KEMO_GLASS_CLEAR_DETAIL" = "Turns every Liquid Glass surface in the app into clear glass. Off: regular glass. Separate from the Clear / Tinted switch in iOS Settings; only inside the app.";
 "KEMO_TAB_BAR_PAGE_TITLE" = "Tab Bar";
 "KEMO_TAB_BAR_PAGE_SUBTITLE" = "Vertical tab bar, compose bar, account dock";
 

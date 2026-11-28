@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.161",
+      "subtitle": "NeoFreeBird version 7.3.162",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -27,6 +27,15 @@
         "https://raw.githubusercontent.com/NeoFreeBird/app/v7/resources/timeline/timeline5.png"
       ],
       "versions": [
+        {
+          "version": "7.3.162",
+          "buildVersion": "162",
+          "date": "2026-11-28T04:15:17Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.162/NeoFreeBird-Twitter-sideloaded_7.3.162_12.44.ipa",
+          "size": 273913738,
+          "minOSVersion": "15.0",
+          "localizedDescription": "홈 탭을 길게 누르면 팔로잉 탭이 A+B 섞어서 → A만 → B만 순서로 바뀌어요. B만 보기에서는 모든 반응이 B로 가요."
+        },
         {
           "version": "7.3.161",
           "buildVersion": "161",

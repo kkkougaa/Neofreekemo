@@ -23,7 +23,9 @@
 4. 빌드가 성공하면 `v7.3.x` 릴리스와 IPA가 생긴다. 실패하면 로그의 `error:` 줄을 보고 고친 뒤 다시 실행한다.
 5. `resources/AltSource.json`을 고치고 `AltSource: add 7.3.x`로 커밋, 푸시한다.
    - `subtitle`을 새 버전으로 바꾼다.
-   - `versions` 배열 맨 앞에 새 항목을 넣는다: `version`, `buildVersion`(패치 번호), `date`(릴리스 published_at), `downloadURL`, `size`(릴리스 IPA 크기), `minOSVersion: 15.0`, `localizedDescription`.
+   - `versions` 배열은 새 항목 **하나만** 남긴다(예전 버전은 지운다): `version`, `buildVersion`(패치 번호), `date`(릴리스 published_at), `downloadURL`, `size`(릴리스 IPA 크기), `minOSVersion: 15.0`, `localizedDescription`.
+   - 앱의 맨 위 칸 `version`, `versionDate`, `versionDescription`, `downloadURL`, `size`도 같은 값으로 바꾼다.
+   - 이유: 예전 버전이 쌓여 있으면 Feather가 최신이 아닌 버전(예: 7.3.99 > 7.3.165로 글자 비교)을 보여줄 수 있다. 사용자가 최신만 보이게 해 달라고 했다(2026-11-28).
 
 ## 참고
 

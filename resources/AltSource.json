@@ -14,7 +14,7 @@
       "name": "Twitter",
       "bundleIdentifier": "com.atebits.Tweetie2",
       "developerName": "actuallyaridan, orionblur, nyaathea",
-      "subtitle": "NeoFreeBird version 7.3.167",
+      "subtitle": "NeoFreeBird version 7.3.168",
       "localizedDescription": "NeoFreeBird, changed to look like the app before the rebrand.",
       "iconURL": "https://raw.githubusercontent.com/kkkougaa/Neofreekemo/refs/heads/v7/resources/sidestore_icon.png",
       "tintColor": "#1DA1F2",
@@ -28,13 +28,13 @@
       ],
       "versions": [
         {
-          "version": "7.3.167",
-          "buildVersion": "167",
-          "date": "2026-11-28T06:04:59Z",
-          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.167/NeoFreeBird-Twitter-sideloaded_7.3.167_12.44.ipa",
-          "size": 273921947,
+          "version": "7.3.168",
+          "buildVersion": "168",
+          "date": "2026-11-28T06:16:26Z",
+          "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.168/NeoFreeBird-Twitter-sideloaded_7.3.168_12.44.ipa",
+          "size": 273925868,
           "minOSVersion": "15.0",
-          "localizedDescription": "상세 트윗 화면에서는 사진·영상이 원래 크기로 나와요(작게 보기는 타임라인에서만). 추천 탭: 이미 보여준 B 추천을 앱을 다시 켜도 기억하고, 같은 트윗이 겹쳐 나오지 않게 했어요."
+          "localizedDescription": "상세 트윗 화면의 사진·영상이 원래 크기로 나와요. B 계정 트윗이 앱 시작 때 캐시 그대로 반복되던 문제를 고쳐, 새로 받아온 B 트윗이 섞여요."
         }
       ],
       "appPermissions": {
@@ -68,11 +68,11 @@
           "NSUserTrackingUsageDescription": "This helps X show you more relevant ads."
         }
       },
-      "version": "7.3.167",
-      "versionDate": "2026-11-28T06:04:59Z",
-      "versionDescription": "상세 트윗 화면에서는 사진·영상이 원래 크기로 나와요(작게 보기는 타임라인에서만). 추천 탭: 이미 보여준 B 추천을 앱을 다시 켜도 기억하고, 같은 트윗이 겹쳐 나오지 않게 했어요.",
-      "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.167/NeoFreeBird-Twitter-sideloaded_7.3.167_12.44.ipa",
-      "size": 273921947
+      "version": "7.3.168",
+      "versionDate": "2026-11-28T06:16:26Z",
+      "versionDescription": "상세 트윗 화면의 사진·영상이 원래 크기로 나와요. B 계정 트윗이 앱 시작 때 캐시 그대로 반복되던 문제를 고쳐, 새로 받아온 B 트윗이 섞여요.",
+      "downloadURL": "https://github.com/kkkougaa/Neofreekemo/releases/download/v7.3.168/NeoFreeBird-Twitter-sideloaded_7.3.168_12.44.ipa",
+      "size": 273925868
     }
   ]
 }

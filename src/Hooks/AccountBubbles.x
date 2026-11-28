@@ -2410,6 +2410,7 @@ __attribute__((unused)) static void PutGlassOverBubble(NFBAccountBubble* bubble)
 // The A/B unified timeline (UnifiedTimeline.x).
 extern BOOL NFBUnifiedDockPair(id* outA, id* outB);
 extern BOOL NFBUnifiedIsActive(void);
+extern BOOL NFBUnifiedHomeOwnsLongPress(void);
 extern void NFBUnifiedDockChose(BOOL unified, id a);
 // 7.3.151: holding the unified circle opens its settings sheet
 // (UnifiedQuickSettings.x). The serial names the press a hold timer belongs
@@ -3489,6 +3490,13 @@ static void AttachDockSwipe(UIView* bar) {
             return;
         }
         UIWindow* here = self.view.window ?: UIApplication.sharedApplication.keyWindow;
+        // 7.3.165: holding the Home tab while the unified home is up switches
+        // its view (UnifiedTimeline.x); no dock and no sheet then (the user:
+        // the two clashed).
+        if (held && TouchStartedOnTabBar(here) && NFBUnifiedHomeOwnsLongPress()) {
+            gBubbleLog = @"sheet skipped, the hold switched the unified home view";
+            return;
+        }
         // Holding the Home tab: the dock comes up instead of X's sheet.
         if (held && DockOn() && TouchStartedOnTabBar(here)) {
             if ([NFBAccountDock openInWindow:here]) {
@@ -3545,6 +3553,12 @@ static void AttachDockSwipe(UIView* bar) {
     }
     UIViewController* top = sheetTop;
     UIWindow* window = sheetWindow;
+    if (fromTabBar && NFBUnifiedHomeOwnsLongPress()) {
+        // 7.3.165: the hold switched the unified home view; the sheet goes, no dock.
+        if (top.presentingViewController) [top dismissViewControllerAnimated:NO completion:nil];
+        gBubbleLog = @"sheet closed after appearing, the hold switched the unified home view";
+        return;
+    }
     if (fromTabBar) {
         void (^openDock)(void) = ^{
             if ([NFBAccountDock openInWindow:window]) {

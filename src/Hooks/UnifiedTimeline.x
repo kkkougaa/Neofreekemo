@@ -5718,7 +5718,19 @@ static UIScrollView* HomeListOf(id controller) {
 
 extern void NFBUnifiedHomeSignViewChanged(void);
 
+static CFAbsoluteTime gHomeCycledAt;
+
+// 7.3.165: a hold on the home tab belongs to the home view switch while the
+// unified home is up (AccountBubbles.x then opens neither its dock nor X's
+// account sheet): a finger on the pill now, or a switch just made.
+BOOL NFBUnifiedHomeOwnsLongPress(void) {
+    if (![NSThread isMainThread] || !gEverActive) return NO;
+    if (gHomeCycledAt > 0 && CFAbsoluteTimeGetCurrent() - gHomeCycledAt < 2.0) return YES;
+    return gHomeTouch != nil && UnifiedActive() && UnifiedHomeOnScreen();
+}
+
 static void CycleHomeView(void) {
+    gHomeCycledAt = CFAbsoluteTimeGetCurrent();
     NSInteger next = HomeView() == 2 ? 0 : 2;
     [[NSUserDefaults standardUserDefaults] setInteger:next forKey:kHomeViewKey];
     NSString* text = next == 0 ? [NSString stringWithFormat:@"홈 팔로잉: %@ + %@ 통합으로 보기", AName(), BName()]

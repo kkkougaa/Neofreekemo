@@ -585,6 +585,8 @@
 "KEMO_UNIFIED_A_NONE" = "Account in use";
 "KEMO_UNIFIED_ALWAYS_ASK_TITLE" = "Always ask which account";
 "KEMO_UNIFIED_ALWAYS_ASK_DETAIL" = "Also asks on posts only A sees when you like, repost, reply or bookmark. Posts only B sees always go as B.";
+"KEMO_PRIVACY_MASK_TITLE" = "Hide personal info";
+"KEMO_PRIVACY_MASK_DETAIL" = "For screenshots: every tweet shows a made-up name and @handle, and profile pictures are covered. Only what is drawn changes.";
 "KEMO_UNIFIED_B_COLOR_TITLE" = "Colour of posts only B sees";
 "KEMO_UNIFIED_COLOR_ORANGE" = "Orange";
 "KEMO_UNIFIED_COLOR_BLUE" = "Blue";

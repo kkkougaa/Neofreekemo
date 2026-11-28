@@ -409,6 +409,11 @@ static NSDictionary<NSString*, NSDictionary*>* BHTSettingsPages(void) {
                         @"action": @"openEventEditor:"
                     },
                     @{
+                        @"key": @"kemo_privacy_mask",
+                        @"default": @NO,
+                        @"type": @"toggle"
+                    },
+                    @{
                         @"key": @"kemo_unified_exp",
                         @"default": @NO,
                         @"type": @"toggle"
